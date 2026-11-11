@@ -57,7 +57,7 @@ func _init() -> void:
 			check(stack.card_ids.size() == 1, "grower remains alone")
 			check(session.cards[original[1]].uses_left == 1, "seed Consume rule deliberately ignored")
 			check(session.cards[original[1]].stack_id != stack.id, "seed separated")
-			check(session.cards[original[1]].position.is_equal_approx(Vector2(3.9, 4)), "source collider plus margin displacement")
+			check(session.cards[original[1]].position.is_equal_approx(Vector2(3.9, 3.82)), "source member pose plus collider and margin displacement")
 			check(count_event("exploration_finished") == 0, "growth no explore event")
 		else:
 			check(session.cards.size() == before + 1, "research produces one recipe card")

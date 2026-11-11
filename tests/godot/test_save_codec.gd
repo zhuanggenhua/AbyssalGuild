@@ -135,6 +135,8 @@ func _init() -> void:
 	combined_subsystems()
 	ai_checkpoints()
 	combat_layout_checkpoints()
+	combat_execution_checkpoints()
+	projectile_scene_checkpoints()
 	print("Save codec checks: ", checks, "; failures: ", failures)
 	quit(0 if failures == 0 else 1)
 
@@ -348,3 +350,157 @@ func combat_layout_checkpoints() -> void:
 	check(Codec.restore(target, legacy).ok, "legacy battle without layout loads")
 	check(not target.combat.tasks[battle].has("layout"), "legacy restoration does not invent placement metadata")
 	check(not Codec.capture(target).session.combat.tasks[0].has("layout"), "legacy re-save omits geometry until adapter initializes it")
+
+func combat_execution_checkpoints() -> void:
+	var source = combat_session()
+	var hero: int = source.spawn_card("hero")
+	var mob: int = source.spawn_card("mob")
+	var battle: int = source.combat.start_combat([hero], [mob])
+	source.combat.tasks[battle].progress[hero] = 100.0
+	source.combat.tasks[battle].progress[mob] = 0.0
+	source.combat.resolve_turn(battle)
+	var travel := Codec.capture(source)
+	check(travel.session.combat.tasks[0].execution.phase == "travel", "execution travel checkpoint captured")
+	var target = combat_session()
+	target.changed.connect(func(): notifications += 1)
+	var selector := func(_request): return []
+	target.combat.start_overlap_selector = selector
+	check(Codec.restore(target, JSON.parse_string(JSON.stringify(travel, "", true, true))).ok, "in-flight travel restores")
+	check(target.combat.start_overlap_selector == selector, "runtime callback not serialized or overwritten on restore")
+	check(not travel.session.combat.has("start_overlap_selector"), "snapshot excludes callback objects")
+	source.combat.tick(0.0, 0.3)
+	target.combat.tick(0.0, 0.3)
+	check(JSON.stringify(Codec.capture(source), "", true, true) == JSON.stringify(Codec.capture(target), "", true, true), "paused travel resume consumes identical damage RNG once")
+	check(source.combat.tasks[battle].execution.phase == "return", "impact enters return phase")
+	source.cards[mob].health = 0
+	var returning := Codec.capture(source)
+	check(Codec.restore(target, returning).ok and target.cards[mob].health == 0, "pending dead target accepted only during valid return")
+	source.combat.tick(0.0, 0.3)
+	target.combat.tick(0.0, 0.3)
+	check(JSON.stringify(Codec.capture(source), "", true, true) == JSON.stringify(Codec.capture(target), "", true, true), "restored return cleanup and loot RNG agree")
+	var death_wait := Codec.capture(source)
+	check(death_wait.session.combat.tasks[0].defenders.is_empty() and death_wait.session.combat.tasks[0].execution.phase == "death_wait", "last target removal preserves death wait checkpoint")
+	check(Codec.restore(target, JSON.parse_string(JSON.stringify(death_wait, "", true, true))).ok, "empty enemy side death wait restores")
+	source.combat.tick(0.0, 1.0)
+	target.combat.tick(0.0, 1.0)
+	check(target.combat.tasks.has(battle), "paused scaled death wait does not expire")
+	source.combat.tick(0.5, 0.5)
+	target.combat.tick(0.5, 0.5)
+	check(source.combat.tasks.is_empty() and target.combat.tasks.is_empty(), "restored death wait completes battle once")
+	check(JSON.stringify(Codec.capture(source), "", true, true) == JSON.stringify(Codec.capture(target), "", true, true), "death wait resume preserves final session RNG and membership")
+	for key in ["actor", "target", "combat_type", "remaining", "phase", "attacker_position", "defender_position"]:
+		for value in [null, {}, []]:
+			var bad := travel.duplicate(true)
+			bad.session.combat.tasks[0].execution[key] = value
+			reject(target, bad, "malformed execution field " + key)
+	for mutation in [{"actor": 999}, {"target": 999}, {"target": hero}, {"target": -1}, {"combat_type": 4}, {"remaining": INF}, {"remaining": NAN}, {"remaining": -0.1}, {"remaining": 3601}, {"phase": "impact"}]:
+		var bad := travel.duplicate(true)
+		bad.session.combat.tasks[0].execution.merge(mutation, true)
+		reject(target, bad, "invalid execution participant duration or phase")
+	var bad := returning.duplicate(true)
+	bad.session.combat.tasks[0].execution.remaining = 0.31
+	reject(target, bad, "return duration cannot exceed source wait")
+	bad = death_wait.duplicate(true)
+	bad.session.combat.tasks[0].execution.remaining = 0.51
+	reject(target, bad, "death wait duration cannot exceed source wait")
+	bad = death_wait.duplicate(true)
+	bad.session.combat.tasks[0].execution.target = mob
+	reject(target, bad, "death wait cannot reference removed target")
+	bad = death_wait.duplicate(true)
+	bad.session.combat.tasks[0].erase("execution")
+	reject(target, bad, "empty side cannot be restored as legacy idle")
+	bad = travel.duplicate(true)
+	bad.session.combat.tasks[0].progress[0].card = 999
+	reject(target, bad, "execution progress must reference task participant")
+	bad = travel.duplicate(true)
+	bad.session.combat.tasks[0].execution["callback"] = "never execute serialized callbacks"
+	reject(target, bad, "execution rejects unexpected callback fields")
+	for checkpoint in [travel, returning, death_wait]:
+		bad = checkpoint.duplicate(true)
+		for card in bad.session.cards:
+			if card.id == hero: card.health = 0
+		check(Codec.restore(target, bad).ok and target.cards[hero].health == 0, "source-legal merged zero-health actor remains loadable")
+	bad = travel.duplicate(true)
+	for card in bad.session.cards:
+		if card.id == mob: card.health = 0
+	check(Codec.restore(target, bad).ok and target.cards[mob].health == 0, "source-legal merged zero-health target remains loadable")
+	bad = returning.duplicate(true)
+	var extra: Dictionary = bad.session.cards[0].duplicate(true)
+	extra.id = int(bad.session.next_id)
+	extra.health = 0
+	bad.session.next_id += 1
+	bad.session.cards.append(extra)
+	bad.session.combat.tasks[0].attackers.append(extra.id)
+	bad.session.combat.tasks[0].progress.append({"card": extra.id, "value": 0.0})
+	check(Codec.restore(target, bad).ok and target.cards[int(extra.id)].health == 0, "source-legal extra merged zero-health participant retained")
+	bad = travel.duplicate(true)
+	bad.session.combat.tasks[0].execution.remaining = 0.3001
+	reject(target, bad, "melee travel cannot exceed actual source duration")
+	var ranged := travel.duplicate(true)
+	ranged.session.combat.tasks[0].execution.combat_type = 2
+	ranged.session.combat.tasks[0].execution.remaining = 0.6
+	reject(target, ranged, "projectile travel without source component rejected")
+	target.catalog.data.scenes[0].documents.append({"script_class": "CombatManager", "fields": {"arrowProjectile": {"guid": "arrow-prefab"}}})
+	target.catalog.data.referenced_prefabs = [{"guid": "arrow-prefab", "documents": [{"script_class": "CombatProjectile", "fields": {"duration": 0.6}}]}]
+	check(Codec.restore(target, ranged).ok, "projectile travel within imported duration restores")
+	bad = ranged.duplicate(true)
+	bad.session.combat.tasks[0].execution.remaining = 0.6001
+	reject(target, bad, "projectile travel cannot exceed imported duration")
+	var legacy := travel.duplicate(true)
+	legacy.session.combat.tasks[0].erase("execution")
+	check(Codec.restore(target, legacy).ok and not target.combat.tasks[battle].has("execution"), "old idle combat snapshot remains loadable")
+	# Campaign validates inactive scenes before committing current/global state.
+	source.catalog.data.scenes[0].documents[0].fields.defaultSpawnCards = []
+	source.catalog.data.scenes.append({"name": "Island", "documents": [{"fields": {"defaultSpawnCards": [], "questGroups": []}}]})
+	var inactive := travel.duplicate(true)
+	inactive.session.scene_name = "Island"
+	inactive.session.world.scene = "Island"
+	inactive.session.ai.scene = "Island"
+	inactive.session.quests = {"CompletedQuests": [], "ActiveQuests": [], "QuestProgress": 0}
+	source.campaign.saved_scenes["Island"] = inactive
+	var campaign: Dictionary = source.campaign.capture()
+	check(source.campaign._validate_snapshot(campaign).ok, "valid inactive-scene execution passes whole campaign staging")
+	var before_campaign: String = JSON.stringify(source.campaign.capture(), "", true, true)
+	campaign.scenes.Island.session.combat.tasks[0].execution.actor = 999
+	check(not source.campaign.restore(campaign).ok, "malformed inactive-scene execution blocks entire campaign restore")
+	check(JSON.stringify(source.campaign.capture(), "", true, true) == before_campaign, "inactive-scene failure preserves live campaign global progress and slot")
+
+func projectile_scene_checkpoints() -> void:
+	var live = combat_session()
+	var data: Dictionary = live.catalog.data
+	data.scenes[0].documents[0].fields.defaultSpawnCards = []
+	data.scenes[0].documents.append({"script_class": "CombatManager", "fields": {"arrowProjectile": {"guid": "main-arrow"}}})
+	data.scenes.append({"name": "Island", "documents": [{"fields": {"defaultSpawnCards": [], "questGroups": []}}, {"script_class": "CombatManager", "fields": {"arrowProjectile": {"guid": "island-arrow"}}}]})
+	data.referenced_prefabs = [{"guid": "main-arrow", "documents": [{"script_class": "CombatProjectile", "fields": {"duration": 0.2}}]}, {"guid": "island-arrow", "documents": [{"script_class": "CombatProjectile", "fields": {"duration": 0.8}}]}]
+	var island = Session.new()
+	island.configure(live.catalog, 55, "Island")
+	var hero: int = island.spawn_card("hero")
+	var mob: int = island.spawn_card("mob")
+	var battle: int = island.combat.start_combat([hero], [mob])
+	island.combat.tasks[battle]["execution"] = {"phase": "travel", "remaining": 0.6, "actor": hero, "target": mob, "combat_type": 2, "attacker_position": Vector2.ZERO, "defender_position": Vector2.ZERO}
+	var saved := Codec.capture(island)
+	check(live.scene_name == "Main" and live.combat.projectile_duration(2) == 0.2, "live Main projectile duration differs from saved Island")
+	check(live.combat.stage_state(saved.session.combat, island.cards, "Island").ok, "explicit helper snapshot scene overrides live scene without mutation")
+	check(not live.combat.stage_state(saved.session.combat, island.cards, "Main").ok, "same remaining time invalid for shorter Main projectile")
+	check(live.scene_name == "Main", "helper scene-context staging never mutates live scene")
+	var before: String = JSON.stringify(Codec.capture(live), "", true, true)
+	check(not Codec.restore(live, saved).ok and JSON.stringify(Codec.capture(live), "", true, true) == before, "direct mismatched-scene restore fails before helper mutation")
+	check(Codec.restore(island, saved).ok, "direct restore into correctly configured Island accepts its own duration")
+	live.campaign.saved_scenes["Island"] = saved
+	var campaign: Dictionary = live.campaign.capture()
+	check(live.campaign._validate_snapshot(campaign).ok, "inactive Island checkpoint validated against Island not live Main duration")
+	var good_campaign: String = JSON.stringify(live.campaign.capture(), "", true, true)
+	var bad: Dictionary = campaign.duplicate(true)
+	bad.scenes.Island.session.combat.tasks[0].execution.remaining = 0.81
+	check(not live.campaign.restore(bad).ok and JSON.stringify(live.campaign.capture(), "", true, true) == good_campaign, "inactive scene excessive duration rejects whole campaign transactionally")
+	campaign.current_scene = "Island"
+	check(live.campaign.restore(campaign).ok and live.scene_name == "Island" and live.combat.tasks[battle].execution.remaining == 0.6, "campaign switches to Island using saved-scene duration")
+	# Converse case: current Island's longer duration must not admit Main excess.
+	var shorter: Dictionary = saved.duplicate(true)
+	shorter.session.scene_name = "Main"
+	shorter.session.world.scene = "Main"
+	shorter.session.ai.scene = "Main"
+	live.campaign.saved_scenes["Main"] = shorter
+	var invalid: Dictionary = live.campaign.capture()
+	before = JSON.stringify(live.campaign.capture(), "", true, true)
+	check(not live.campaign.restore(invalid).ok and JSON.stringify(live.campaign.capture(), "", true, true) == before, "inactive Main duration does not inherit live Island allowance")

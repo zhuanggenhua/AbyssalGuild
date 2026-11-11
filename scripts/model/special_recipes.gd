@@ -62,6 +62,9 @@ static func _grow(session, stack, recipe: Dictionary) -> void:
 			grower = id
 		if seed < 0 and guid == output:
 			seed = id
+	# Source transforms have not instantly followed any grower-consumption reflow.
+	# Snapshot before removing a grower changes the seed's membership index.
+	var seed_position: Vector2 = session.card_target_position(seed) if seed >= 0 else Vector2.ZERO
 	if grower >= 0:
 		for ingredient in recipe.get("requiredIngredients", []):
 			if session.catalog.ref_guid(ingredient.card) == session.cards[grower].definition_guid:
@@ -72,7 +75,7 @@ static func _grow(session, stack, recipe: Dictionary) -> void:
 	if index > 0:
 		var separate = StackModel.new(session._next_id)
 		session._next_id += 1
-		separate.position = session.cards[seed].position + Vector2(_card_width(session.catalog, output, session.scene_name), 0)
+		separate.position = seed_position + Vector2(_card_width(session.catalog, output, session.scene_name), 0)
 		separate.card_ids = stack.card_ids.slice(index)
 		stack.card_ids.resize(index)
 		session.stacks[separate.id] = separate

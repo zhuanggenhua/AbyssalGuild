@@ -25,7 +25,7 @@ func _init() -> void:
 	}
 	for guid in fixture:
 		definitions.append({"guid": guid, "script_class": "CardDefinition", "fields": fixture[guid]})
-	catalog.configure({"cards": definitions})
+	catalog.configure({"cards": definitions, "scenes": [{"name": "Main", "documents": [{"script_class": "TradeManager", "fields": {"currencyCard": {"guid": "coin"}}}, {"script_class": "CombatManager", "fields": {"arrowProjectile": {"guid": "arrow"}}}]}], "referenced_prefabs": [{"guid": "arrow", "documents": [{"script_class": "CombatProjectile", "fields": {"duration": 0.5}}]}]})
 	var session = Session.new()
 	session.configure(catalog, 123)
 	var equipment = Equipment.new()
@@ -75,7 +75,7 @@ func _init() -> void:
 	check(task.progress[hero] == 550.0 and task.timer == 0.5, "raw attack speed accumulation, no premature turn")
 	combat.dragged[hero] = true
 	combat.tick(0.5)
-	check(task.progress[mob] == 0.0 and task.progress[hero] == 600.0, "dragged actor skipped, selected actor reset")
+	check(task.execution.actor == mob and task.progress[mob] == 100.0 and task.progress[hero] == 600.0, "dragged actor skipped; reset waits for return")
 	check(not combat.flee(mob), "defender cannot flee")
 	check(combat.flee(hero) and combat.tasks.is_empty(), "player attacker can flee and end fight")
 	check(session.stacks.has(session.cards[hero].stack_id) and session.stacks.has(session.cards[mob].stack_id), "flee and survivor return to board")
@@ -99,6 +99,9 @@ func _init() -> void:
 			break
 		combat.tasks[task_id].progress[hero] = 10000.0
 		combat.resolve_turn(task_id)
+		combat.tick(0.0, 0.6)
+		combat.tick(0.0, 0.3)
+		combat.tick(0.5, 0.5)
 	check(not session.cards.has(victim) and combat.tasks.is_empty(), "lethal damage kills and ends combat")
 	check(session.stacks.has(session.cards[hero].stack_id), "winner returns to board")
 	var mob2: int = session.spawn_card("mob")
@@ -129,6 +132,7 @@ func _init() -> void:
 	quit(1 if failures else 0)
 
 func _test_session(catalog) -> void:
+	catalog.data.scenes = [] # This separate trading fixture uses legacy name lookup.
 	catalog.definitions["coin"] = {"guid": "coin", "fields": {"displayName": "Coin", "category": 7}}
 	catalog.data.cards.append(catalog.definitions.coin)
 	catalog.definitions["food"] = {"guid": "food", "fields": {"category": 3, "nutrition": 2}}

@@ -1,0 +1,11 @@
+# Expanded equipment board interaction
+
+The board binds EquipmentDisplayController after normal card view positioning. Its metadata comes from the active source prefab's equipment panel, not invented attach points. Without that private metadata the existing inventory inspection and Unequip convenience button remain usable; expanded source positioning is unavailable.
+
+An equipped or replaced item opens an existing panel. Loading a session starts panels closed. A panel press does not start a wearer drag; a matching release toggles it. Source panel clicks accept both left and right buttons. Left presses elsewhere close panels, except any equipment card (including loose equipment or another wearer's gear). GUI-consumed left presses also count as outside clicks. Feeding, selling, ready and game-over close/disable panels; playing restores their toggle. There is no additional wearer-combat lock.
+
+Pressing visible equipped gear captures its displayed world position, unequips its slot and starts an ordinary drag. The new stack is locked before placement resolution so it does not jump to the wearer's root or separate before dragging begins. Combat participants still use the model's actor drag guard; an owned equipment card is not itself a combat actor. The existing Unequip button likewise does not invent a wearer-combat restriction.
+
+Controller orbit advances once per frame using scaled gameplay time and stops for manual/menu pause. The controller owns its independent presentation RNG; model RNG, damage timing and saves are untouched. It retains board-owned views through class changes. The controller's procedural noise approximation and generated fallback visual limitations are separate from source animation parity; GPU/manual acceptance is still outstanding.
+
+Verification: `test_equipment_board.gd` uses actual imported gameplay/panel metadata with injected ray hit results, temporary save/options paths and muted audio. It tests equip/open, panel press/release/right click, outside exceptions, cycle locks, combat-owner unequip dragging, preserved world pose, pause clocks and title reset. Actual GPU hit ordering is not claimed by injected pointer tests. Controller geometry/collider tests remain in `test_equipment_display.gd`.

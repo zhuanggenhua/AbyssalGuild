@@ -55,11 +55,10 @@ would shift later indices and collapse participant positions.
 
 ## Remaining integrations and deliberate root consumers
 
-Combat batch capture/initial geometry, death loot, growth seed splitting, and
-board per-card interaction queries are follow-up integration points. Rendering
-and nearby-stack queries already add index offsets themselves: replace the entire
-pose calculation if adopting the accessor, never add the index twice. Generic
-combat detach remains unchanged until batch capture is wired safely.
+Follow-up integration is now complete for combat batch capture, death loot,
+growth seed splitting and board individual queries; see `combat-timeline.md`,
+`individual-pose-spawns.md` and `combat-feedback-ui.md`. Rendering and nearby-stack
+queries must use the complete derived pose, never add the index offset twice.
 
 Do NOT replace intentional stack-root positions: original pack drawing uses
 `Stack.TargetPosition + up*0.1`; normal/exploration/research/growth result spawning

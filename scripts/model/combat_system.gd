@@ -1,5 +1,5 @@
 extends RefCounted
-## Logical combat turns. Presentation delays/rect-overlap detection belong to the view.
+## Source-audited two-clock combat timeline. Rendering and overlap geometry are adapters.
 const Equipment = preload("res://scripts/model/equipment_system.gd")
 var _session: WeakRef
 var equipment
@@ -104,17 +104,18 @@ func start_combat(attackers: Array, defenders: Array, player_is_attacker: bool =
 ## recursively merge again, and pre-start merging must not draw progress twice.
 func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool) -> int:
 	var session = _session.get_ref()
+	var positions: Dictionary = session.capture_card_targets(attackers + defenders)
 	var task_id: int = _next_id
 	_next_id += 1
 	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}}
 	for id in attackers + defenders:
-		_enter(task_id, id)
+		_enter(task_id, id, positions.get(id))
 	session.event_occurred.emit("combat_started", {"combat_id": task_id})
 	return task_id
 
-func _enter(task_id: int, card_id: int) -> void:
+func _enter(task_id: int, card_id: int, position: Variant = null) -> void:
 	var session = _session.get_ref()
-	Equipment.detach(session, card_id)
+	Equipment.detach(session, card_id, position)
 	membership[card_id] = task_id
 	tasks[task_id].progress[card_id] = session.rng.randf_range(0.0, 0.5)
 
@@ -123,6 +124,7 @@ func add_combatants(task_id: int, card_ids: Array) -> bool:
 		return false
 	var session = _session.get_ref()
 	var added: bool = false
+	var positions: Dictionary = session.capture_card_targets(card_ids)
 	for id in card_ids:
 		if not Equipment.valid_integer(id, 1) or not session.cards.has(id) or membership.has(id):
 			continue
@@ -131,7 +133,7 @@ func add_combatants(task_id: int, card_ids: Array) -> bool:
 			continue
 		var side: String = "attackers" if ((faction == 1) == tasks[task_id].player_is_attacker) else "defenders"
 		tasks[task_id][side].append(id)
-		_enter(task_id, id)
+		_enter(task_id, id, positions.get(id))
 		added = true
 	if added and resize_overlap_selector.is_valid():
 		_selecting_geometry = true
@@ -143,32 +145,66 @@ func add_combatants(task_id: int, card_ids: Array) -> bool:
 			merge_combats(selected.ids + [task_id], source.attackers, source.defenders)
 	return added
 
-func tick(delta: float) -> void:
-	if delta <= 0:
+## Advance one rendered frame. Real clock drives travel/return even when paused.
+## A phase boundary resumes at most once/frame, as with source yielded coroutines.
+func tick(delta: float, real_delta: float = -1.0) -> void:
+	if real_delta < 0:
+		real_delta = delta
+	if delta < 0 or real_delta < 0 or (delta == 0 and real_delta == 0):
 		return
 	var session = _session.get_ref()
-	for task_id in tasks.keys():
+	var order: Array = tasks.keys()
+	order.reverse() # CombatManager.Update visits newest registered task first.
+	for task_id in order:
 		if not tasks.has(task_id):
 			continue
 		var task: Dictionary = tasks[task_id]
 		for id in task.attackers + task.defenders:
 			if not session.cards.has(id):
 				remove_combatant(id, false)
-			elif session.cards[id].health > 0:
+			elif session.cards[id].health > 0: # CardCombatant.AddActionProgress guard.
 				task.progress[id] += equipment.stats(id).attackSpeed * delta
 		if not tasks.has(task_id):
 			continue
-		task.timer -= delta
-		# Source resolves at most one turn per Update, not one attack per fighter.
-		if task.timer <= 0:
-			task.timer += 1.0
-			resolve_turn(task_id)
+		if task.has("execution"):
+			var execution: Dictionary = task.execution
+			execution.remaining -= delta if execution.phase == "death_wait" else real_delta
+			if execution.remaining <= 0:
+				match execution.phase:
+					"travel": _impact(task_id)
+					"return": _after_return(task_id)
+					"death_wait": _complete_execution(task_id)
+		else:
+			task.timer -= delta
+			if task.timer <= 0:
+				task.timer += 1.0
+				resolve_turn(task_id)
+
+func projectile_duration(combat_type: int, scene_name: String = "") -> float:
+	var session = _session.get_ref()
+	var selected_scene: String = session.scene_name if scene_name.is_empty() else scene_name
+	var reference: String = ""
+	for scene in session.catalog.data.get("scenes", []):
+		if scene.get("name", "") != selected_scene:
+			continue
+		for document in scene.get("documents", []):
+			if document.get("script_class", "") == "CombatManager":
+				reference = session.catalog.ref_guid(document.get("fields", {}).get("arrowProjectile" if combat_type == 2 else "magicProjectile", {}))
+	for prefab in session.catalog.data.get("referenced_prefabs", []):
+		if str(prefab.get("guid", "")) == reference:
+			for document in prefab.get("documents", []):
+				if document.get("script_class", "") == "CombatProjectile":
+					return maxf(0, float(document.get("fields", {}).get("duration", 0.6)))
+	return -1.0 # Missing source component is not the C# field-default case.
 
 func resolve_turn(task_id: int) -> void:
-	if not tasks.has(task_id):
+	if not tasks.has(task_id) or tasks[task_id].has("execution"):
 		return
 	var session = _session.get_ref()
 	var task: Dictionary = tasks[task_id]
+	if task.attackers.is_empty() or task.defenders.is_empty():
+		_finish(task_id)
+		return
 	var actor: int = -1
 	var best: float = -INF
 	for id in task.attackers + task.defenders:
@@ -179,15 +215,78 @@ func resolve_turn(task_id: int) -> void:
 		return
 	var targets: Array = task.defenders if actor in task.attackers else task.attackers
 	var target: int = targets[session.rng.randi_range(0, targets.size() - 1)]
-	var result: Dictionary = resolve_attack(actor, target)
-	session.cards[target].health = maxi(0, session.cards[target].health - result.damage)
-	session.event_occurred.emit("combat_hit", {"attacker_id": actor, "defender_id": target, "result": result})
-	task.progress[actor] = 0.0
-	if session.cards[target].health <= 0:
-		# kill_card owns kill event, equipment drop, loot and external combat removal.
-		session.kill_card(target)
-		remove_combatant(target, false)
+	var combat_type: int = int(session.catalog.fields(session.cards[actor].definition_guid).get("combatType", 0))
+	var duration: float = 0.3 if combat_type not in [2, 3] else projectile_duration(combat_type)
+	if duration < 0:
+		# Unity would throw when instantiating its missing prefab. Fail closed,
+		# publish a blocker and leave idle rather than invent projectile timing.
+		session.event_occurred.emit("combat_attack_blocked", {"combat_id": task_id, "attacker_id": actor, "reason": "Missing scene projectile component"})
+		return
+	task["execution"] = {"phase": "travel", "remaining": duration, "actor": actor, "target": target, "combat_type": combat_type, "attacker_position": session.cards[actor].position, "defender_position": session.cards[target].position}
+	session.event_occurred.emit("combat_attack_started", {"combat_id": task_id, "attacker_id": actor, "defender_id": target, "combat_type": combat_type, "duration": duration, "attacker_position": session.cards[actor].position, "defender_position": session.cards[target].position})
+
+func _impact(task_id: int) -> void:
+	if not tasks.has(task_id):
+		return
+	var session = _session.get_ref()
+	var task: Dictionary = tasks[task_id]
+	var execution: Dictionary = task.execution
+	if not session.cards.has(execution.actor) or not session.cards.has(execution.target):
+		_complete_execution(task_id)
+		return
+	var result: Dictionary = resolve_attack(execution.actor, execution.target)
+	session.cards[execution.target].health = maxi(0, session.cards[execution.target].health - result.damage)
+	execution.phase = "return"
+	execution.remaining = 0.3
+	session.event_occurred.emit("combat_hit", {"combat_id": task_id, "attacker_id": execution.actor, "defender_id": execution.target, "combat_type": execution.combat_type, "result": result})
+	if tasks.has(task_id) and task.has("execution"):
+		session.event_occurred.emit("combat_return_started", {"combat_id": task_id, "attacker_id": execution.actor, "defender_id": execution.target, "combat_type": execution.combat_type, "duration": 0.3})
 	session.changed.emit()
+
+func _after_return(task_id: int) -> void:
+	var session = _session.get_ref()
+	var task: Dictionary = tasks[task_id]
+	var target: int = task.execution.target
+	if session.cards.has(target) and session.cards[target].health <= 0:
+		# Remove first, without generic removal's immediate EndCombat. Source waits
+		# a scaled half-second after Kill even when the target was the last enemy.
+		task.attackers.erase(target)
+		task.defenders.erase(target)
+		task.progress.erase(target)
+		membership.erase(target)
+		dragged.erase(target)
+		task.execution.phase = "death_wait"
+		task.execution.remaining = 0.5
+		task.execution.target = -1
+		session.kill_card(target)
+	else:
+		_complete_execution(task_id)
+
+func _complete_execution(task_id: int) -> void:
+	if not tasks.has(task_id):
+		return
+	var task: Dictionary = tasks[task_id]
+	if task.has("execution"):
+		var actor: int = task.execution.actor
+		if task.progress.has(actor):
+			task.progress[actor] = 0.0
+		task.erase("execution")
+	if task.attackers.is_empty() or task.defenders.is_empty():
+		_finish(task_id)
+
+## Source CardController blocks starting a drag while IsAttacking is true.
+## The flag clears before the scaled post-death wait, not when the task ends.
+func is_attacking(card_id: int) -> bool:
+	if not membership.has(card_id):
+		return false
+	var task: Dictionary = tasks[membership[card_id]]
+	return task.has("execution") and task.execution.actor == card_id and task.execution.phase in ["travel", "return"]
+
+func can_drag_combatant(card_id: int) -> bool:
+	if not membership.has(card_id):
+		return false
+	var task: Dictionary = tasks[membership[card_id]]
+	return task.player_is_attacker and card_id in task.attackers and not is_attacking(card_id)
 
 func flee(card_id: int) -> bool:
 	if not membership.has(card_id):
@@ -206,6 +305,8 @@ func remove_combatant(card_id: int, return_to_board: bool = true) -> void:
 	task.attackers.erase(card_id)
 	task.defenders.erase(card_id)
 	task.progress.erase(card_id)
+	if task.has("execution") and card_id in [task.execution.actor, task.execution.target]:
+		task.erase("execution") # Safety: cancel dangling attack; never reroll a replacement.
 	membership.erase(card_id)
 	dragged.erase(card_id)
 	if return_to_board:
@@ -272,6 +373,15 @@ func save_state() -> Dictionary:
 		for card_id in task.attackers + task.defenders:
 			progress.append({"card": card_id, "value": task.progress[card_id]})
 		var record := {"id": id, "attackers": task.attackers.duplicate(), "defenders": task.defenders.duplicate(), "player_is_attacker": task.player_is_attacker, "timer": task.timer, "progress": progress}
+		if task.has("execution"):
+			if task.execution is Dictionary:
+				var execution: Dictionary = task.execution.duplicate(true)
+				for key in ["attacker_position", "defender_position"]:
+					var value = execution.get(key)
+					execution[key] = [value.x, value.y] if value is Vector2 else value
+				record["execution"] = execution
+			else:
+				record["execution"] = task.execution # Preserve invalid state for validator.
 		if task.has("layout"):
 			# Derived configuration/positions belong to the current scene adapter.
 			# Preserve invalid live metadata for validation, never silently discard it.
@@ -286,7 +396,7 @@ func save_state() -> Dictionary:
 		records.append(record)
 	return {"tasks": records, "next_id": _next_id}
 
-func stage_state(raw: Variant, cards: Dictionary) -> Dictionary:
+func stage_state(raw: Variant, cards: Dictionary, scene_name: String = "") -> Dictionary:
 	var invalid := {"ok": false, "error": "Invalid combat snapshot"}
 	if not raw is Dictionary or not raw.get("tasks", null) is Array:
 		return invalid
@@ -303,7 +413,7 @@ func stage_state(raw: Variant, cards: Dictionary) -> Dictionary:
 			return invalid
 		var id: int = int(record.get("id", -1))
 		var timer: float = float(record.get("timer", INF))
-		if id < 1 or id >= result.next_id or result.tasks.has(id) or not is_finite(timer) or record.attackers.is_empty() or record.defenders.is_empty():
+		if id < 1 or id >= result.next_id or result.tasks.has(id) or not is_finite(timer) or ((record.attackers.is_empty() or record.defenders.is_empty()) and (not record.get("execution") is Dictionary or record.execution.get("phase") != "death_wait")):
 			return invalid
 		var task := {"attackers": [], "defenders": [], "player_is_attacker": record.player_is_attacker, "timer": timer, "progress": {}}
 		if record.has("layout"):
@@ -346,6 +456,39 @@ func stage_state(raw: Variant, cards: Dictionary) -> Dictionary:
 			task.progress[card_id] = value
 		if task.progress.size() != task.attackers.size() + task.defenders.size():
 			return invalid
+		if record.has("execution"):
+			var raw_execution = record.execution
+			if not raw_execution is Dictionary or raw_execution.size() != 7:
+				return invalid
+			if raw_execution.get("phase") not in ["travel", "return", "death_wait"] or not Equipment.valid_number(raw_execution.get("remaining")) or float(raw_execution.remaining) < 0 or float(raw_execution.remaining) > 3600:
+				return invalid
+			if not Equipment.valid_integer(raw_execution.get("actor"), 1) or not Equipment.valid_integer(raw_execution.get("target"), -1) or not Equipment.valid_integer(raw_execution.get("combat_type"), 0) or int(raw_execution.combat_type) > 3:
+				return invalid
+			var execution: Dictionary = raw_execution.duplicate(true)
+			execution.actor = int(execution.actor)
+			execution.target = int(execution.target)
+			execution.combat_type = int(execution.combat_type)
+			if execution.actor not in task.attackers + task.defenders:
+				return invalid
+			if execution.phase == "death_wait":
+				if execution.target != -1 or float(execution.remaining) > 0.5:
+					return invalid
+			else:
+				if execution.target not in task.attackers + task.defenders or ((execution.actor in task.attackers) == (execution.target in task.attackers)) or (execution.phase == "return" and float(execution.remaining) > 0.3):
+					return invalid
+			if execution.phase == "travel":
+				var duration: float = 0.3 if execution.combat_type not in [2, 3] else projectile_duration(execution.combat_type, scene_name)
+				if duration < 0 or float(execution.remaining) > duration:
+					return invalid
+			for key in ["attacker_position", "defender_position"]:
+				var axes = execution.get(key)
+				if not axes is Array or axes.size() != 2:
+					return invalid
+				for axis in axes:
+					if not Equipment.valid_number(axis) or absf(float(axis)) > 1e20:
+						return invalid
+				execution[key] = Vector2(float(axes[0]), float(axes[1]))
+			task["execution"] = execution
 		result.tasks[id] = task
 	return result
 

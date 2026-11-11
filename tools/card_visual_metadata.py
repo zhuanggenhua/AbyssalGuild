@@ -2,6 +2,7 @@
 from __future__ import annotations
 import copy
 from visual_scene_metadata import transform_chain
+from equipment_interaction_metadata import interaction_metadata
 
 
 def annotations(documents, owner):
@@ -55,5 +56,6 @@ def annotations(documents, owner):
         if renderer and mesh and pose:
             panel = {'mesh': mesh, 'materials': renderer.get('m_Materials', []),
                      'transform_chain': pose, 'size': collider.get('m_Size', {}),
-                     'center': collider.get('m_Center', {})}
+                     'center': collider.get('m_Center', {}),
+                     'interaction': interaction_metadata(target['fields'])}
     return {'labels': labels, 'equipment_panel': panel}

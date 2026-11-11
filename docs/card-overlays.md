@@ -60,10 +60,11 @@ a functional fallback. No source footprint is guessed if dimensions or pose are
 missing. Neither the source nor generated compact panel adds an input collider
 in this slice, so it does not intercept card/board clicks.
 
-Still separate: clicking to expand/collapse attached equipment, outside-click
-closing, equipment card parenting/attachment points, hover text, orbit animation,
-and day/night click gating. Existing equip/unequip gameplay and inspector remain
-available. This stage makes no claim that those interactions have been ported.
+Expanded equipment interaction is now implemented separately in
+`equipment-display.md` and `equipment-board-ui.md`: source toggle/day/outside-click
+rules, slot poses and unequip-drag are covered. The standalone overlay remains
+responsible only for compact occupancy and live labels. Cosmetic Perlin motion
+and typography still do not claim exact Unity rendering.
 
 ## Verification
 

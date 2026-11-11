@@ -151,7 +151,7 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 		if data.has(key):
 			if helper == null or not helper.has_method("stage_state"):
 				return _fail("Unsupported saved subsystem: " + key)
-			var staged: Dictionary = helper.stage_state(data[key], cards)
+			var staged: Dictionary = helper.stage_state(data[key], cards, str(data.get("scene_name", "Main"))) if key == "combat" else helper.stage_state(data[key], cards)
 			if not staged.get("ok", false):
 				return _fail(key + ": " + str(staged.get("error", "Invalid state")))
 			for id in staged.unstacked:

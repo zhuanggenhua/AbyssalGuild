@@ -66,8 +66,9 @@ pre-existing manual pause. Menu opening cancels an active card drag safely.
 Feeding, selling, ready and game-over are ending-cycle phases: Escape cannot toggle
 the pause menu or open options during them. Their gameplay locks are not bypassed.
 Title options do not start or pause a game. Save & return to title remains subject
-to slot-save failure handling. Source animation/unscaled combat phase timing is
-separate integration work and is not established by this panel's headless tests.
+to slot-save failure handling. In-flight combat travel/return advances on the real
+clock while the menu freezes scaled gameplay. The separate combat feedback UI
+suite verifies that bridge; full source animation remains unimplemented.
 
 ## Verification
 

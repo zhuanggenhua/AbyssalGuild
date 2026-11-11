@@ -1,4 +1,7 @@
 extends Node3D
+const EquipmentDisplay = preload("res://scripts/ui/equipment_display_controller.gd")
+const ImpactFeedback = preload("res://scripts/model/impact_feedback.gd")
+const ImpactView = preload("res://scripts/ui/impact_view.gd")
 const CombatMergeGeometry = preload("res://scripts/model/combat_merge_geometry.gd")
 const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
@@ -23,6 +26,9 @@ var layout_key: String = ""
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
 var combat_rectangles: Dictionary = {}
+var equipment_display = EquipmentDisplay.new()
+var pressed_panel: int = -1
+var right_pressed_panel: int = -1
 var feedback = AudioFeedback.new()
 var slot_root: String = "user://slots"
 var legacy_paths: Array[String] = ["user://session.json", "user://campaign.json"]
@@ -313,6 +319,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	equipment_display.reset()
 	pause_overlay.hide()
 	for zone in trade_views.values(): zone.queue_free()
 	trade_views.clear()
@@ -357,9 +364,13 @@ func _process(delta: float) -> void:
 	if not running:
 		return
 	if _ui_pause_active():
+		# Travel/return use real time even under an external menu pause.
+		session.combat.tick(0.0, delta)
 		_sync_views()
 		return
+	var equipment_delta: float = delta * session.speed if session.phase == "playing" and not session.paused else 0.0
 	session.tick(delta)
+	equipment_display.advance(equipment_delta)
 	_sync_views()
 	refresh_clock += delta
 	if refresh_clock >= 0.2:
@@ -424,13 +435,58 @@ func _sync_views() -> void:
 				offset = drag_delta
 			views[id].position = Vector3(stack.position.x + offset.x, 0.06 + index * _stack_step().y, -(stack.position.y + offset.y + index * _stack_step().z))
 			views[id].highlight(id == selected)
+	_sync_equipment_display()
 
-func _pick(screen: Vector2) -> int:
+func _pick_target(screen: Vector2) -> Dictionary:
 	var origin := camera.project_ray_origin(screen)
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + camera.project_ray_normal(screen) * 100)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if hit.is_empty(): return -1
-	return int(hit.collider.get_meta("card_id", -1))
+	if hit.is_empty(): return {"card_id": -1, "panel_owner": -1}
+	return {"card_id": int(hit.collider.get_meta("card_id", -1)), "panel_owner": int(hit.collider.get_meta("equipment_panel_owner", -1))}
+
+func _pick(screen: Vector2) -> int:
+	return int(_pick_target(screen).card_id)
+
+func _sync_equipment_display() -> void:
+	var metadata: Dictionary = {}
+	for id in views:
+		if not session.cards.has(id): continue
+		var fields: Dictionary = catalog.fields(session.cards[id].definition_guid)
+		var appearance: Dictionary = visual_assets.appearance(int(fields.get("category", 0)), false, fields, session.scene_name)
+		var panel: Dictionary = appearance.get("prefab", {}).get("equipment_panel", {})
+		if not panel.is_empty(): metadata[id] = panel
+	equipment_display.sync(session.equipment.equipped, views, metadata, session.phase == "playing")
+
+# Pointer routing is separate from ray casting for deterministic adapter tests.
+func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
+	var id: int = int(hit.get("card_id", -1))
+	var panel: int = int(hit.get("panel_owner", -1))
+	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5
+	equipment_display.pointer_down(panel, is_gear)
+	selected = id
+	if panel >= 0:
+		pressed_panel = panel if _allows_card_actions() else -1
+		dragging = -1
+		return
+	pressed_panel = -1
+	if is_gear and session.equipment.owners.has(id) and _allows_card_actions():
+		var wearer: int = session.equipment.owners[id]
+		var old_position: Vector3 = views[id].global_position
+		for slot in session.equipment.equipped.get(wearer, {}):
+			if session.equipment.equipped[wearer][slot] == id:
+				session.equipment.unequip(wearer, slot)
+				_set_board_card_position(id, Vector2(old_position.x, -old_position.z))
+				break
+		dragging = id # Lock the just-detached stack before placement can move its visible pose.
+		_sync_views()
+	dragging = id if _can_drag_card(id) else -1
+	if dragging >= 0:
+		session.combat.dragged[dragging] = true
+		feedback.play_event("CardPick")
+	press_position = screen
+	drag_origin = _board_point(screen)
+	drag_delta = Vector2.ZERO
+	drag_moved = false
 
 func _board_point(screen: Vector2) -> Vector2:
 	var point = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(screen), camera.project_ray_normal(screen))
@@ -449,20 +505,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			_zoom_camera(1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0)
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
 			panning = event.pressed
-		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			selected = _pick(event.position)
-			_refresh()
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			var right_hit: Dictionary = _pick_target(event.position)
+			if event.pressed:
+				selected = int(right_hit.card_id)
+				right_pressed_panel = int(right_hit.panel_owner)
+				_refresh()
+			else:
+				if _allows_card_actions() and right_pressed_panel >= 0 and right_pressed_panel == int(right_hit.panel_owner): equipment_display.click_panel(right_pressed_panel)
+				right_pressed_panel = -1
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				selected = _pick(event.position)
-				dragging = selected if _can_drag_card(selected) else -1
-				if dragging >= 0:
-					session.combat.dragged[dragging] = true
-					feedback.play_event("CardPick")
-				press_position = event.position
-				drag_origin = _board_point(event.position)
-				drag_delta = Vector2.ZERO
-				drag_moved = false
+				_begin_card_press(_pick_target(event.position), event.position)
 			else:
 				_finish_drag(event.position)
 	if event is InputEventMouseMotion and panning:
@@ -474,6 +528,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and not event.pressed and get_viewport().gui_get_hovered_control() != null:
+		pressed_panel = -1
+		right_pressed_panel = -1
+	if running and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var hovered := get_viewport().gui_get_hovered_control()
+		if hovered != null and hovered != hud: equipment_display.pointer_down()
 	if running and dragging >= 0 and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		var hovered := get_viewport().gui_get_hovered_control()
 		if hovered != null and hovered != hud:
@@ -484,6 +544,10 @@ func _input(event: InputEvent) -> void:
 			_finish_drag(event.position)
 
 func _finish_drag(screen: Vector2) -> void:
+	if pressed_panel >= 0:
+		if _allows_card_actions() and int(_pick_target(screen).panel_owner) == pressed_panel: equipment_display.click_panel(pressed_panel)
+		pressed_panel = -1
+		return
 	var id: int = dragging
 	session.combat.dragged.clear()
 	dragging = -1
@@ -506,7 +570,7 @@ func _finish_drag(screen: Vector2) -> void:
 		return
 	if drag_moved:
 		var stack = session.stacks[session.cards[id].stack_id]
-		var destination: Vector2 = stack.position + drag_delta
+		var destination: Vector2 = session.card_target_position(id) + drag_delta
 		var trade: Dictionary = _try_trade_drop(id, destination)
 		if trade.terminal:
 			drag_delta = Vector2.ZERO
@@ -816,6 +880,9 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	equipment_display.reset()
+	pressed_panel = -1
+	right_pressed_panel = -1
 	pause_overlay.hide()
 	running = false
 	dragging = -1
@@ -843,7 +910,7 @@ func _notification(what: int) -> void:
 		get_tree().quit()
 
 func _unequip_selected() -> void:
-	if not _allows_card_actions() or not session.cards.has(selected) or session.combat.membership.has(selected): return
+	if not _allows_card_actions() or not session.cards.has(selected): return
 	session.equipment.unequip_all(selected)
 	_refresh()
 
@@ -857,7 +924,7 @@ func _engage_selected() -> void:
 	for card in session.cards.values():
 		var fields: Dictionary = catalog.fields(card.definition_guid)
 		if int(fields.get("faction", 0)) != 1 or int(fields.get("category", 0)) not in [2, 9] or session.combat.membership.has(card.id): continue
-		var distance: float = card.position.distance_squared_to(session.cards[selected].position)
+		var distance: float = session.card_target_position(card.id).distance_squared_to(session.card_target_position(selected))
 		if distance < nearest:
 			nearest = distance
 			fighter = card.id
@@ -878,11 +945,10 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 	if kind == "pack_purchased": feedback.play_event("CashRegister")
 	elif kind == "cards_sold": feedback.play_event("Coins")
 	elif kind == "crafted": feedback.play_event("Pop")
+	elif kind == "combat_attack_started":
+		feedback.play_event(ImpactFeedback.attack_sound(int(payload.combat_type)))
 	elif kind == "combat_hit":
-		var combat_type: int = int(catalog.fields(session.cards[int(payload.attacker_id)].definition_guid).get("combatType", 0))
-		var style: String = ["Melee", "Melee", "Ranged", "Magic"][clampi(combat_type, 0, 3)]
-		feedback.play_event("Attack" + style)
-		feedback.play_event("Miss" if payload.result.type == "miss" else ("Critical" if payload.result.type == "critical" else "Hit" + style))
+		_present_impact(payload)
 	elif kind == "encounter":
 		notice.text = "Event: " + str(payload.get("message", ""))
 
@@ -890,7 +956,7 @@ func _withdraw_selected() -> void:
 	if not _allows_card_actions() or not session.world.can_click_chest(selected):
 		notice.text = "Select an unstacked chest to withdraw a coin."
 		return
-	var position: Vector2 = session.cards[selected].position + Vector2(_card_footprint(selected).x, 0)
+	var position: Vector2 = session.card_target_position(selected) + Vector2(_card_footprint(selected).x, 0)
 	# Source EnforcePlacementRules(spawnPos, null) uses no card footprint.
 	position = BoardLayout.enforce_placement(position, BoardLayout.stack_state(-1, position, Vector2.ZERO, 1), session.board_bounds, session.board_top_margin)
 	notice.text = "Withdrew a coin." if session.world.withdraw_coin(selected, true, position) else "Chest is empty."
@@ -1065,7 +1131,7 @@ func _fighter_records(ids: Array) -> Array:
 	for id in ids:
 		if not session.cards.has(id): continue
 		var card = session.cards[id]
-		result.append({"id": id, "position": card.position, "size": _card_footprint(id), "faction": int(catalog.fields(card.definition_guid).get("faction", 0))})
+		result.append({"id": id, "position": session.card_target_position(id), "size": _card_footprint(id), "faction": int(catalog.fields(card.definition_guid).get("faction", 0))})
 	return result
 
 func _set_board_card_position(id: int, point: Vector2) -> void:
@@ -1139,8 +1205,7 @@ func _can_drag_card(id: int) -> bool:
 	if not _allows_card_actions(): return false
 	if not session.cards.has(id): return false
 	if not session.combat.membership.has(id): return true
-	var task: Dictionary = session.combat.tasks[session.combat.membership[id]]
-	return task.player_is_attacker and id in task.attackers
+	return session.combat.can_drag_combatant(id)
 
 func _combatants(ids: Array) -> Array:
 	var result: Array = []
@@ -1163,7 +1228,12 @@ func _try_combat_drop(id: int, destination: Vector2, equipment_target: int) -> b
 	_sync_combat_layouts()
 	var task_id: int = CombatLayout.task_at_position(combat_layouts, destination)
 	if task_id >= 0:
-		return session.combat.add_combatants(task_id, ids)
+		var original_join: Vector2 = source.position
+		_set_board_card_position(id, original_join + destination - session.card_target_position(id))
+		var joined: bool = session.combat.add_combatants(task_id, ids)
+		if session.stacks.has(source.id) and not session.stacks[source.id].card_ids.is_empty():
+			_set_board_card_position(session.stacks[source.id].card_ids[0], original_join)
+		return joined
 	var target: int = _raw_nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
 	if target < 0: return false
 	var target_stack = session.stacks[target]
@@ -1171,8 +1241,16 @@ func _try_combat_drop(id: int, destination: Vector2, equipment_target: int) -> b
 	if other_faction not in [1, 2] or other_faction == faction: return false
 	var defenders: Array = _combatants(target_stack.card_ids)
 	if defenders.is_empty(): return false
-	for member in ids: session.cards[member].position = destination
-	return session.combat.start_combat(ids, defenders, faction == 1) >= 0
+	# Translate the source root while the model captures all derived member poses.
+	# Restore any preceding tail survivors, including the full stack on rejection.
+	var original: Vector2 = source.position
+	var offset: Vector2 = destination - session.card_target_position(id)
+	_set_board_card_position(id, original + offset)
+	var started: int = session.combat.start_combat(ids, defenders, faction == 1)
+	if session.stacks.has(source.id):
+		var remaining = session.stacks[source.id]
+		if not remaining.card_ids.is_empty(): _set_board_card_position(remaining.card_ids[0], original)
+	return started >= 0
 
 func _raw_nearby_stack(id: int, point: Vector3, radius: float) -> int:
 	var candidates: Array = []
@@ -1196,9 +1274,7 @@ func _try_equip_drop(id: int, destination: Vector2) -> bool:
 	var distance: float = INF
 	for card in session.cards.values():
 		if card.stack_id == session.cards[id].stack_id or int(catalog.fields(card.definition_guid).get("category", 0)) != 2: continue
-		var center := Vector3(card.position.x, 0, card.position.y)
-		var stack = session.stacks.get(card.stack_id)
-		if stack != null: center += _stack_step() * stack.card_ids.find(card.id)
+		var center: Vector3 = session.card_target_position_3d(card.id)
 		var raw: Vector3 = _card_collider_size(card.id)
 		if BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - raw * 0.5, raw)) and center.distance_squared_to(point) < distance:
 			best = card.id
@@ -1322,3 +1398,15 @@ func _handle_escape() -> void:
 		options_panel.request_close()
 	elif running:
 		_toggle_pause_menu()
+
+func _present_impact(payload: Dictionary) -> void:
+	var descriptor: Dictionary = ImpactFeedback.describe(int(payload.get("combat_type", 0)), payload.get("result", {}), ImpactFeedback.hit_ui_fields(catalog.data, session.scene_name))
+	if descriptor.is_empty(): return
+	for sound in descriptor.sounds: feedback.play_event(sound)
+	var defender: int = int(payload.get("defender_id", -1))
+	if not session.cards.has(defender): return
+	# Snapshot before the model can delete a lethal target. No gameplay awaits/RNG.
+	var target: Vector2 = session.card_target_position(defender)
+	var popup = ImpactView.new()
+	add_child(popup)
+	popup.configure(descriptor, Vector3(target.x, 0.12, -target.y), str(payload.result.get("type", "")))

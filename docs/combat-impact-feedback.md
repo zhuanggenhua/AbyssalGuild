@@ -26,9 +26,9 @@ damage including zero. Effectiveness icons follow advantage independently. All
 sprite references come from the privately imported scene-referenced prefab, not
 hard-coded GUIDs or public asset copies.
 
-A board adapter can use this descriptor at its existing `combat_hit` handler.
-Capture defender position/transform immediately: the current model may remove a
-lethally hit card before the next frame. Place popups under a transient effects
+The board adapter now uses this descriptor at its `combat_hit` handler.
+Capture defender position/transform immediately: a card may be removed by
+cleanup or another synchronous event. Place popups under a transient effects
 root, independent of the card's lifetime. Flash only surviving valid views, cancel
 previous hurt tweens, and restore visual state on interruption. Apply card rotation
 only to visual children, never collider/gameplay positions. `flash_amount` already
@@ -72,32 +72,20 @@ Paths below are relative to `Assets/StackCraft/Scripts`.
   unscaled time. Source uses PlayOneShot on pooled sources; current Godot adapter
   stops/replaces its selected player, another possible audio-overlap distinction.
 
-## Later gameplay timing work, explicitly excluded
+## Implemented timing and remaining presentation
 
-Current CombatSystem resolves target selection, hit RNG, health update, hit event,
-actor reset and lethal cleanup synchronously in one turn. It has no ExecutingTurn
-phase. Current board plays attack/impact sounds together and has no projectile,
-per-card health display, flash, punch, camera shake, hit popup or puff effect.
-Health can be read in the selection inspector.
+The coordinated model timeline is now implemented in `combat-timeline.md`:
+travel, impact-only RNG, return and scaled death cleanup are separate phases;
+progress, reverse task order, paused real-time travel, cancellation and in-flight
+save/restore are tested. `combat-feedback-ui.md` documents the live hookup.
+Attack audio occurs at start and hit plus Critical occur at impact. Generated
+one-second damage popups survive card deletion, and source stat labels show health.
 
-Adding travel/return delays is NOT safely cosmetic if presented as source parity.
-`CombatTask.cs:69–87` accumulates living fighters' action progress during both Idle
-and ExecutingTurn, but decrements the one-second turn timer only while Idle.
-Delayed actor reset discards progress gained during execution. Other fighters keep
-that progress, changing future turn order. Hit RNG occurs after travel; loot RNG
-occurs after return. Their ordering relative to other simulation systems changes.
-Attack/return effects continue while paused (unscaled), whereas the post-death
-0.5-second wait stops with scaled time. Immediate model death currently prevents
-showing an alive zero-health victim during the return phase.
-
-A separate coordinated timing slice should introduce explicit phases with both
-scaled and unscaled deltas, immutable attack/target context, impact-only rolls,
-return/death cleanup events, and cancellation on external kill/merge/scene change.
-It also needs a policy for mid-turn save/restore and tests for pause during every
-phase, speed changes, exact RNG sequence, simultaneous fights, external removal,
-merge cancellation, actor reset timing, and dead defenders not accumulating.
-Do not hide these changes inside UI awaits/tweens or defer model actions from
-`combat_hit` listeners. This feedback-only slice leaves existing timing unchanged.
+Original jumps/projectiles, HitUI image/layout, hurt flash/punch, camera shake and
+puff rendering are still separate work. These descriptors contain audited explicit
+source parameters, not completed GPU animation or DOTween-curve equivalence.
+Never introduce gameplay waits from UI tweens or hit listeners; the model owns
+its two clocks and saveable phase transitions.
 
 ## Verification
 

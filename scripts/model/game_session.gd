@@ -193,6 +193,8 @@ func kill_card(id: int) -> bool:
 	if not cards.has(id):
 		return false
 	var card = cards[id]
+	# Preserve the individual pose before cleanup/notifications can change membership.
+	var death_position := card_target_position(id)
 	var fields: Dictionary = catalog.fields(card.definition_guid)
 	# Source notifies before loot, equipment cleanup and removal.
 	event_occurred.emit("card_killed", {"card_id": id, "definition_guid": card.definition_guid})
@@ -201,7 +203,7 @@ func kill_card(id: int) -> bool:
 	fields = catalog.fields(card.definition_guid)
 	var category: int = int(fields.get("category", 0))
 	if category == 2 or category == 9:
-		spawn_card(_roll_loot(fields.get("loot", [])), card.position)
+		spawn_card(_roll_loot(fields.get("loot", [])), death_position)
 	var stack = stacks.get(card.stack_id)
 	_remove_card(id)
 	if stack != null:
@@ -336,7 +338,7 @@ func move_to_stack(card_id: int, target_id: int, original_crafting_stack_id: int
 	var last_id: int = target.card_ids.back()
 	if world._is_chest(last_id) and not world.currency_guid.is_empty() and cards[moving.front()].base_definition_guid == world.currency_guid:
 		if moving.size() != source.card_ids.size():
-			var detached_id: int = split_stack(card_id, cards[card_id].position)
+			var detached_id: int = split_stack(card_id, card_target_position(card_id))
 			source = stacks[detached_id]
 		world.deposit_stack(last_id, source.id)
 		_check_recipe(target)
@@ -431,12 +433,16 @@ func _check_recipe(stack) -> void:
 	_discover_recipe(str(chosen.fields.id))
 
 func tick(delta: float) -> void:
-	if paused or phase != "playing" or delta <= 0:
+	if delta <= 0:
+		return
+	# Source real-time combat travel/return continues while scaled gameplay pauses.
+	if paused or phase != "playing":
+		combat.tick(0.0, delta)
 		return
 	var tick_scene: String = scene_name
 	var step: float = delta * speed
 	ai.tick(step)
-	combat.tick(step)
+	combat.tick(step, delta)
 	for stack in stacks.values().duplicate():
 		if not stacks.has(stack.id) or stacks[stack.id] != stack:
 			continue
