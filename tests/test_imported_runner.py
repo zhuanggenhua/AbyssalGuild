@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_vendor_unlock_board": "Vendor unlock board checks: 1 passed / 1 total",
+    "test_navigation_ui": "Navigation UI checks: 1 passed / 1 total",
     "test_held_stack_board": "Held stack board checks: 1 passed / 1 total",
     "test_cycle_action_visibility": "Cycle action visibility: 1 passed / 1 total",
     "test_imported_resources": "Private imported resources: PASS (1 PNG, 1 WAV, 1 FBX)",

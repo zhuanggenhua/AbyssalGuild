@@ -11,10 +11,12 @@ const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
+const NavigationInput = preload("res://scripts/ui/navigation_input.gd")
 const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
 const OptionsAdapter = preload("res://scripts/ui/options_adapter.gd")
 const TradeLayout = preload("res://scripts/model/trade_layout.gd")
 const TradeZoneView = preload("res://scripts/ui/trade_zone_view.gd")
+const VendorUnlockPresenter = preload("res://scripts/ui/vendor_unlock_presenter.gd")
 const SaveSlots = preload("res://scripts/model/save_slots.gd")
 const SaveCodec = preload("res://scripts/model/save_codec.gd")
 const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
@@ -50,6 +52,7 @@ var pause_overlay: Control
 var trade_zones: Array = []
 var trade_views: Dictionary = {}
 var trade_activated: Dictionary = {}
+var vendor_unlock = VendorUnlockPresenter.new()
 var ledger_visible_ids: Dictionary = {}
 var ledger_key: String = ""
 var collection_refresh_pending: bool = false
@@ -67,6 +70,10 @@ var legacy_picker: OptionButton
 var legacy_button: Button
 var game_over_dialog: ConfirmationDialog
 var quit_dialog: ConfirmationDialog
+var title_quit_button: Button
+var quit_callback: Callable = Callable()
+var pending_quit: String = ""
+var quit_dispatched: bool = false
 var friendly_choice: CheckBox
 var session = Session.new()
 var camera: Camera3D
@@ -103,10 +110,14 @@ var refresh_clock: float = 0.0
 var active_tab: String = "quests"
 
 func _ready() -> void:
+	NavigationInput.ensure_cancel_bindings()
 	puff_rng.randomize()
 	add_child(feedback)
+	add_child(vendor_unlock)
 	_build_world()
 	_build_ui()
+	for dialog in [archive_dialog, game_over_dialog, quit_dialog, options_panel.reset_dialog]:
+		NavigationInput.enable_modal_cancel(dialog)
 	data_error = catalog.load_file()
 	visual_assets.load_manifest()
 	feedback.configure(catalog, visual_assets)
@@ -329,9 +340,11 @@ func _build_ui() -> void:
 	quit_dialog = ConfirmationDialog.new()
 	quit_dialog.title = "Quit during day-end?"
 	quit_dialog.dialog_text = "Day-end progress is not autosaved on quit. Your last checkpoint stays intact. Quit now?"
-	quit_dialog.confirmed.connect(func(): get_tree().quit())
+	quit_dialog.confirmed.connect(_confirm_quit)
+	quit_dialog.canceled.connect(_cancel_quit)
 	add_child(quit_dialog)
 	_button("Options", title, _open_options)
+	title_quit_button = _button("Quit Game", title, _request_title_quit)
 	_build_pause_options(layer)
 
 func _build_shop() -> void:
@@ -367,6 +380,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	vendor_unlock.cancel()
 	_cancel_archive_slots()
 	archive_dialog.hide()
 	_clear_puffs()
@@ -422,18 +436,24 @@ func _enter_game() -> void:
 	title_panel.hide()
 	hud.show()
 	_refresh()
+	vendor_unlock.bind(self)
 	var focus: Dictionary = session.cycle.focus_state()
 	if not focus.is_empty(): _focus_camera_position(focus.target_position, float(focus.duration))
 
 func _process(delta: float) -> void:
 	if not running:
 		return
-	var scaled_delta: float = delta * session.speed if session.phase == "playing" and not session.paused and not _ui_pause_active() else 0.0
+	# Sample ownership before advancing real-time reveals. An expiring reveal
+	# cannot retroactively release the scaled time of this frame.
+	var external_pause: bool = _ui_pause_active() or vendor_unlock.is_active()
+	var scaled_delta: float = delta * session.speed if session.phase == "playing" and not session.paused and not external_pause else 0.0
 	_advance_puffs(delta, scaled_delta)
 	_update_camera_motion(delta)
+	vendor_unlock.advance(delta)
 	combat_presentation.advance(delta)
-	if _ui_pause_active():
-		# Travel/return use real time even under an external menu pause.
+	if external_pause:
+		# Combat travel/return and cycle waits remain real-time under external
+		# menu/reveal pauses. Their scaled death waits and action clocks stop.
 		session.combat.tick(0.0, delta)
 		session.cycle.advance(delta)
 		_sync_views()
@@ -544,7 +564,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	equipment_display.pointer_down(panel, is_gear)
 	selected = id
 	if panel >= 0:
-		pressed_panel = panel if _allows_card_actions() else -1
+		pressed_panel = panel if _allows_equipment_panel_input() else -1
 		dragging = -1
 		return
 	pressed_panel = -1
@@ -578,8 +598,9 @@ func _board_point(screen: Vector2) -> Vector2:
 	return Vector2(point.x, -point.z)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+	if NavigationInput.is_cancel_press(event):
 		_handle_escape()
+		get_viewport().set_input_as_handled()
 		return
 	if not running or _ui_pause_active(): return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
@@ -596,7 +617,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				right_pressed_panel = int(right_hit.panel_owner)
 				_refresh()
 			else:
-				if _allows_card_actions() and right_pressed_panel >= 0 and right_pressed_panel == int(right_hit.panel_owner): equipment_display.click_panel(right_pressed_panel)
+				if _allows_equipment_panel_input() and right_pressed_panel >= 0 and right_pressed_panel == int(right_hit.panel_owner): equipment_display.click_panel(right_pressed_panel)
 				right_pressed_panel = -1
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
@@ -643,7 +664,7 @@ func _update_drag_position(screen: Vector2) -> void:
 
 func _finish_drag(screen: Vector2) -> void:
 	if pressed_panel >= 0:
-		if _allows_card_actions() and int(_pick_target(screen).panel_owner) == pressed_panel: equipment_display.click_panel(pressed_panel)
+		if _allows_equipment_panel_input() and int(_pick_target(screen).panel_owner) == pressed_panel: equipment_display.click_panel(pressed_panel)
 		pressed_panel = -1
 		return
 	var id: int = dragging
@@ -865,6 +886,10 @@ func _sell_selected_stack() -> void:
 	_refresh()
 
 func _allows_card_actions() -> bool:
+	return running and not _ui_pause_active() and not vendor_unlock.is_active() and session.phase in ["playing", "selling"]
+
+func _allows_equipment_panel_input() -> bool:
+	# Source EquipmentPanel visibility does not consult InputManager locks.
 	return running and not _ui_pause_active() and session.phase in ["playing", "selling"]
 
 func _active_slot_path() -> String:
@@ -1013,6 +1038,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	vendor_unlock.cancel()
 	_cancel_archive_slots()
 	archive_dialog.hide()
 	_clear_puffs()
@@ -1044,13 +1070,48 @@ func _prepare_quit() -> bool:
 	return result.ok
 
 func _notification(what: int) -> void:
-	if what != NOTIFICATION_WM_CLOSE_REQUEST: return
+	if what != NOTIFICATION_WM_CLOSE_REQUEST or quit_dispatched or _navigation_modal_active(): return
 	if options_panel != null and options_panel.visible and options_panel.dirty:
 		options_panel.request_close()
 		if options_panel.visible: return
 	if running and session.phase != "playing":
+		pending_quit = "day_end"
+		quit_dialog.title = "Quit during day-end?"
+		quit_dialog.dialog_text = "Day-end progress is not autosaved on quit. Your last checkpoint stays intact. Quit now?"
 		quit_dialog.popup_centered()
 	elif _prepare_quit():
+		_execute_quit()
+
+func _navigation_modal_active() -> bool:
+	for dialog in [archive_dialog, game_over_dialog, quit_dialog]:
+		if dialog != null and dialog.visible: return true
+	return options_panel != null and options_panel.reset_dialog != null and options_panel.reset_dialog.visible
+
+func _request_title_quit() -> void:
+	if running or quit_dispatched or options_panel.visible or _navigation_modal_active(): return
+	pending_quit = "title"
+	quit_dialog.title = "Quit Game"
+	quit_dialog.dialog_text = "Are you sure you want to quit the game?"
+	quit_dialog.popup_centered()
+
+func _cancel_quit() -> void:
+	pending_quit = ""
+
+func _confirm_quit() -> void:
+	var requested: String = pending_quit
+	pending_quit = "" # Consume a confirmation once, including a stale request.
+	quit_dialog.hide()
+	if requested == "title" and not running and not options_panel.visible:
+		_execute_quit()
+	elif requested == "day_end" and running and session.phase != "playing":
+		_execute_quit()
+
+func _execute_quit() -> void:
+	if quit_dispatched: return
+	quit_dispatched = true
+	if quit_callback.is_valid():
+		quit_callback.call()
+	else:
 		get_tree().quit()
 
 func _unequip_selected() -> void:
@@ -1059,7 +1120,7 @@ func _unequip_selected() -> void:
 	_refresh()
 
 func _engage_selected() -> void:
-	if session.phase != "playing" or not session.cards.has(selected) or session.combat.membership.has(selected): return
+	if not _allows_card_actions() or session.phase != "playing" or not session.cards.has(selected) or session.combat.membership.has(selected): return
 	if int(catalog.fields(session.cards[selected].definition_guid).get("faction", 0)) != 2:
 		notice.text = "Select an enemy; the nearest available friendly will engage."
 		return
@@ -1207,7 +1268,7 @@ func _combat_geometry() -> Array:
 
 # Model coordinates retain Unity XZ. Only the view reflects source +Z to Godot -Z.
 func _camera_input_enabled() -> bool:
-	return running and session.phase in ["playing", "selling"] and not _ui_pause_active()
+	return running and session.phase in ["playing", "selling"] and not _ui_pause_active() and not vendor_unlock.is_active()
 
 func _clamp_camera() -> void:
 	if session.board_bounds is Rect2: camera_motion.set_bounds(session.board_bounds)
@@ -1489,6 +1550,7 @@ func _sync_trade_zones() -> void:
 		if not present.has(index):
 			trade_views[index].queue_free()
 			trade_views.erase(index)
+	vendor_unlock.update_zones(trade_zones)
 	if not result.errors.is_empty(): notice.text = "Trade geometry unavailable: " + "; ".join(result.errors)
 
 func _try_trade_drop(card_id: int, destination: Vector2, carried_press: bool = false) -> Dictionary:
@@ -1564,6 +1626,7 @@ func _open_options() -> void:
 	if running: _refresh()
 
 func _handle_escape() -> void:
+	if _navigation_modal_active(): return
 	# Source PauseMenu never changes external pause during IsEndingCycle.
 	if running and session.phase != "playing": return
 	if options_panel.visible:

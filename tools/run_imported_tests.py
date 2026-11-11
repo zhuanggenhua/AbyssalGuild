@@ -40,6 +40,8 @@ SUITES = (
     ("test_camera_board", r"Camera board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_board_integration", r"Board integration checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_trade_collection_ui", r"Trade/collection UI checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_vendor_unlock_board", r"Vendor unlock board checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_navigation_ui", r"Navigation UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_options_ui", r"Options UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_equipment_board", r"Equipment board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_slot_management_ui", r"Slot management UI checks: [1-9]\d* passed / [1-9]\d* total"),

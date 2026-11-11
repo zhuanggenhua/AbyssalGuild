@@ -118,10 +118,17 @@ source built-in shader and exact Unity random/renderer behavior remain unresolve
 A static/source-backed Godot audit identified remaining functionality beyond
 rendering acceptance. These are not covered by the completed-slice claims above:
 
-- Source vendor unlocks queue a gameplay pause/input lock, notice, focus and
-  highlight sequence; current activation is immediate without that sequence.
-- Explicit title quit confirmation, gamepad cancel, drag-target highlighting,
-  hover information and per-stack craft progress affordances need further work.
+- Whole-price convenience purchases can currently consume coins belonging to an
+  active crafting stack without invalidating that recipe; the source-backed fix
+  must validate affected stacks and retain valid excess-ingredient progress.
+- Travel must propagate discoveries produced by held-state checkpoint
+  normalization from the staged departure into the destination immediately;
+  currently some knowledge only appears after Save/Continue.
+- Crafting must advance in reverse task activation order, not registered-stack
+  order; this deterministic source ordering affects quest credit, new tasks and
+  RNG continuation and still needs explicit persisted task-order state.
+- Live drag-target highlighting, hover information and per-stack craft progress
+  affordances still need their prepared helper/view integration.
 
 These findings use locked original paths and isolated Godot probes, not Unity
 execution. Subsequent fixes must include interruption and repeated-input checks.
@@ -142,7 +149,10 @@ settles a cloned held state as an ordinary non-reattached release, without live
 RNG/state/signals changing. Source successful-click orphan pauses receive an
 explicit safe cleanup; see [held lifecycle](held-stack-lifecycle.md).
 
-Vendor reveal timeline/presenter, source card information/progress/target views
-and keyboard/gamepad cancel adapters now have independent helper coverage. Their
-live board wiring remains a separate unfinished slice, so these helpers do not
-yet establish that the corresponding gameplay UI features are available.
+Vendor unlocks now queue live notices, highlights, camera focus and independently
+owned input/scaled-time pauses. Carried releases, menu/pace/equipment exceptions,
+real combat/cycle motion and silent restoration are tested. Explicit title Quit
+confirmation and Escape/gamepad-East menu/modal cancellation are also connected,
+including real headless Viewport event routing. Physical controller/window
+acceptance remains unverified. Source card information/progress/target helpers
+remain prepared but their live board wiring is still a separate unfinished slice.
