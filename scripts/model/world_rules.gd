@@ -139,7 +139,7 @@ func finish_day(day: int, friendly: bool = false, bounds: Variant = null, top_ma
 			position = Vector2(session.rng.randf_range(bounds.position.x + spawn_edge_padding, bounds.end.x - spawn_edge_padding), session.rng.randf_range(bounds.position.y + spawn_edge_padding, bounds.end.y - spawn_edge_padding))
 			position.y = minf(position.y, bounds.end.y - top_margin - 1.0)
 		# Every event card gets its own stack (source RefuseAll).
-		spawned.append(session.spawn_card(session.catalog.ref_guid(fields.get("cardToSpawn", {})), position))
+		spawned.append(session.spawn_card(session.catalog.ref_guid(fields.get("cardToSpawn", {})), position, -1, {"refuse_attach": true}))
 	var result := {"encounter_guid": guid, "id": str(fields.get("id", "")), "message": str(fields.get("notificationMessage", "")), "spawned": spawned}
 	session.event_occurred.emit("encounter", result)
 	return result
@@ -185,7 +185,7 @@ func withdraw_coin(chest_id: int, spawn_on_board: bool = false, spawn_position: 
 		return false
 	session.cards[chest_id].stored_coins -= 1
 	if spawn_on_board:
-		session.spawn_card(currency_guid, spawn_position)
+		session.spawn_card(currency_guid, spawn_position, -1, {"ignored_stack_id": session.cards[chest_id].stack_id})
 	session._notify_stats_changed()
 	session.changed.emit()
 	return true

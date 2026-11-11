@@ -1,4 +1,5 @@
 extends Node3D
+const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
@@ -14,6 +15,8 @@ var original_board: Node3D
 var geometry_key: String = ""
 var layout_key: String = ""
 var layout_locks: Dictionary = {}
+var combat_layouts: Dictionary = {}
+var combat_rectangles: Dictionary = {}
 var feedback = AudioFeedback.new()
 var friendly_choice: CheckBox
 var session = Session.new()
@@ -239,6 +242,9 @@ func start_new() -> void:
 	_enter_game()
 
 func _enter_game() -> void:
+	for rectangle in combat_rectangles.values(): rectangle.queue_free()
+	combat_rectangles.clear()
+	combat_layouts.clear()
 	if not session.event_occurred.is_connected(_on_session_event):
 		session.event_occurred.connect(_on_session_event)
 	vendor_guids = SceneConfig.offered_packs(catalog, session.scene_name)
@@ -251,7 +257,9 @@ func _enter_game() -> void:
 	_update_board_geometry()
 	session.ai.point_validator = _ai_point_valid
 	session.ai.combat_geometry = _combat_geometry
-	session.ai.produce_spawner = _spawn_with_layout
+	session.ai.produce_spawner = Callable()
+	session.spawn_target_selector = _select_spawn_target
+	session.spawn_layout_resolver = _resolve_layout
 	layout_locks.clear()
 	layout_key = ""
 	for view in views.values(): view.queue_free()
@@ -284,6 +292,7 @@ func _name(guid: String) -> String:
 	return str(fields.get("displayName", fields.get("id", guid)))
 
 func _sync_views() -> void:
+	_sync_combat_layouts()
 	_ensure_layout()
 	for id in views.keys():
 		if not session.cards.has(id):
@@ -307,7 +316,8 @@ func _sync_views() -> void:
 		views[id].caption.text = _name(session.cards[id].definition_guid)
 		views[id].highlight(id == selected)
 		if session.combat.membership.has(id):
-			views[id].position = Vector3(session.cards[id].position.x, 0.12, -session.cards[id].position.y)
+			var combat_position: Vector2 = session.cards[id].position + (drag_delta if dragging == id else Vector2.ZERO)
+			views[id].position = Vector3(combat_position.x, 0.12, -combat_position.y)
 	for stack in session.stacks.values():
 		for index in range(stack.card_ids.size()):
 			var id: int = stack.card_ids[index]
@@ -351,7 +361,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				selected = _pick(event.position)
-				dragging = selected if not session.combat.membership.has(selected) else -1
+				dragging = selected if _can_drag_card(selected) else -1
 				if dragging >= 0:
 					session.combat.dragged[dragging] = true
 					feedback.play_event("CardPick")
@@ -385,10 +395,27 @@ func _finish_drag(screen: Vector2) -> void:
 	dragging = -1
 	if not session.cards.has(id): return
 	feedback.play_event("CardDrop")
+	if session.combat.membership.has(id):
+		_sync_combat_layouts()
+		var task_id: int = session.combat.membership[id]
+		var task: Dictionary = session.combat.tasks[task_id]
+		var result: Dictionary = CombatLayout.drop_result(id, session.cards[id].position + drag_delta, combat_layouts.get(task_id, {}), task.player_is_attacker, _card_footprint(id), session.board_bounds, session.board_top_margin)
+		if result.flee:
+			session.cards[id].position = result.position
+			if session.combat.flee(id):
+				_set_board_card_position(id, result.position)
+				notice.text = "Fled combat."
+		drag_delta = Vector2.ZERO
+		_refresh()
+		return
 	if drag_moved:
 		var stack = session.stacks[session.cards[id].stack_id]
 		var destination: Vector2 = stack.position + drag_delta
 		var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true)
+		if _try_equip_drop(id, destination) or _try_combat_drop(id, destination, target):
+			drag_delta = Vector2.ZERO
+			_refresh()
+			return
 		if target >= 0:
 			var target_card: int = session.stacks[target].card_ids.back()
 			if int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5 and int(catalog.fields(session.cards[target_card].definition_guid).get("category", 0)) == 2:
@@ -409,10 +436,7 @@ func _finish_drag(screen: Vector2) -> void:
 		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
 			var pack_stack: int = session.cards[id].stack_id
 			layout_locks[pack_stack] = true
-			var spawned: int = session.open_pack(id)
-			if spawned >= 0:
-				_attach_spawned(spawned, -1, 0.1)
-			_resolve_layout()
+			session.open_pack(id)
 			layout_locks.erase(pack_stack)
 
 	drag_delta = Vector2.ZERO
@@ -482,9 +506,6 @@ func _buy(guid: String) -> void:
 	if session.phase != "playing" or not vendor_guids.has(guid): return
 	var id: int = session.buy_pack(guid)
 	notice.text = "Purchased " + _name(guid) if id >= 0 else "Pack unavailable: check currency and completed quests."
-	if id >= 0:
-		_attach_spawned(id)
-		_resolve_layout()
 	_refresh()
 
 func _sell_selected() -> void:
@@ -527,6 +548,7 @@ func _return_title() -> void:
 	title_panel.show()
 	continue_button.disabled = not _has_save()
 	for view in views.values(): view.hide()
+	for rectangle in combat_rectangles.values(): rectangle.hide()
 
 func _unequip_selected() -> void:
 	if session.phase != "playing" or not session.cards.has(selected) or session.combat.membership.has(selected): return
@@ -555,6 +577,7 @@ func _engage_selected() -> void:
 	_refresh()
 
 func _on_session_event(kind: String, payload: Dictionary) -> void:
+	if kind == "combat_ended": _release_combat_layout(int(payload.combat_id))
 	if kind == "scene_changed":
 		_enter_game()
 		notice.text = "Arrived at " + session.scene_name
@@ -575,7 +598,9 @@ func _withdraw_selected() -> void:
 	if session.phase != "playing" or not session.world.can_click_chest(selected):
 		notice.text = "Select an unstacked chest to withdraw a coin."
 		return
-	var position: Vector2 = _clamp_stack_position(selected, session.cards[selected].position + Vector2(1.7, 0))
+	var position: Vector2 = session.cards[selected].position + Vector2(_card_footprint(selected).x, 0)
+	# Source EnforcePlacementRules(spawnPos, null) uses no card footprint.
+	position = BoardLayout.enforce_placement(position, BoardLayout.stack_state(-1, position, Vector2.ZERO, 1), session.board_bounds, session.board_top_margin)
 	notice.text = "Withdrew a coin." if session.world.withdraw_coin(selected, true, position) else "Chest is empty."
 	_refresh()
 
@@ -658,18 +683,11 @@ func _ai_point_valid(point: Vector2, stack_id: int) -> bool:
 	return session.ai.point_in_board(point, session.board_bounds, _card_footprint(session.stacks[stack_id].card_ids[0]), session.board_top_margin)
 
 func _combat_geometry() -> Array:
+	_sync_combat_layouts()
 	var result: Array = []
-	for id in session.combat.tasks:
-		var task: Dictionary = session.combat.tasks[id]
-		var position := Vector2.ZERO
-		var count: int = 0
-		var has_player: bool = false
-		for card_id in task.attackers + task.defenders:
-			if not session.cards.has(card_id): continue
-			position += session.cards[card_id].position
-			count += 1
-			has_player = has_player or int(catalog.fields(session.cards[card_id].definition_guid).get("faction", 0)) == 1
-		if count > 0: result.append({"id": id, "ongoing": true, "has_player": has_player, "position": position / count})
+	for id in combat_layouts:
+		var state: Dictionary = combat_layouts[id]
+		result.append({"id": id, "ongoing": true, "has_player": state.has_player, "position": state.center})
 	return result
 
 # Model coordinates retain Unity XZ. Only the view reflects source +Z to Godot -Z.
@@ -702,6 +720,7 @@ func _layout_states() -> Array:
 func _layout_signature() -> String:
 	var entries: Array = []
 	for stack in session.stacks.values(): entries.append([stack.id, stack.position, stack.card_ids])
+	for id in combat_layouts: entries.append([id, combat_layouts[id].bounds])
 	return str(entries)
 
 func _apply_layout(result: Dictionary) -> void:
@@ -714,8 +733,10 @@ func _apply_layout(result: Dictionary) -> void:
 
 func _resolve_layout() -> void:
 	if not session.board_bounds is Rect2: return
-	# Combat rectangles are not fabricated from point-only combat presentation.
-	_apply_layout(BoardLayout.resolve_overlaps(_layout_states(), [], session.board_bounds, session.board_top_margin, int(catalog.settings("CardSettings").get("maxIterations", 8))))
+	_sync_combat_layouts()
+	var rectangles: Array = []
+	for state in combat_layouts.values(): rectangles.append(state.bounds)
+	_apply_layout(BoardLayout.resolve_overlaps(_layout_states(), rectangles, session.board_bounds, session.board_top_margin, int(catalog.settings("CardSettings").get("maxIterations", 8))))
 
 func _ensure_layout() -> void:
 	if session.catalog != null and _layout_signature() != layout_key:
@@ -742,15 +763,158 @@ func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -
 			candidates.append({"id": stack.id, "eligible": eligible, "card_positions": positions})
 	return BoardLayout.choose_attach_candidate(point, candidates, session.cards[card_id].stack_id, ignored)
 
-func _attach_spawned(card_id: int, ignored: int = -1, height: float = 0.0) -> void:
-	if not session.cards.has(card_id): return
+func _select_spawn_target(card_id: int, ignored: int = -1) -> int:
+	if not session.cards.has(card_id): return -1
 	var position: Vector2 = session.cards[card_id].position
-	var target: int = _nearby_stack(card_id, Vector3(position.x, height, position.y), float(catalog.settings("CardSettings").get("spawnAttachRadius", 1)), ignored)
-	if target >= 0: session.move_to_stack(card_id, target)
+	return _nearby_stack(card_id, Vector3(position.x, session.spawn_query_height, position.y), float(catalog.settings("CardSettings").get("spawnAttachRadius", 1)), ignored)
 
-func _spawn_with_layout(guid: String, position: Vector2, ignored: int = -1) -> int:
-	var id: int = session.spawn_card(guid, position)
-	if id >= 0:
-		_attach_spawned(id, ignored)
-		_resolve_layout()
-	return id
+func _fighter_records(ids: Array) -> Array:
+	var result: Array = []
+	for id in ids:
+		if not session.cards.has(id): continue
+		var card = session.cards[id]
+		result.append({"id": id, "position": card.position, "size": _card_footprint(id), "faction": int(catalog.fields(card.definition_guid).get("faction", 0))})
+	return result
+
+func _set_board_card_position(id: int, point: Vector2) -> void:
+	if not session.cards.has(id): return
+	session.cards[id].position = point
+	var stack = session.stacks.get(session.cards[id].stack_id)
+	if stack != null:
+		stack.position = point
+		for member in stack.card_ids: session.cards[member].position = point
+
+func _release_combat_layout(id: int) -> void:
+	if combat_layouts.has(id):
+		var state: Dictionary = combat_layouts[id]
+		var units: Array = _fighter_records(state.attackers + state.defenders)
+		var positions: Dictionary = CombatLayout.survivor_positions(units, session.board_bounds, session.board_top_margin)
+		for card_id in positions:
+			if not session.combat.membership.has(card_id): _set_board_card_position(card_id, positions[card_id])
+	combat_layouts.erase(id)
+	if combat_rectangles.has(id):
+		combat_rectangles[id].queue_free()
+		combat_rectangles.erase(id)
+
+func _sync_combat_layouts() -> void:
+	for id in combat_layouts.keys():
+		if not session.combat.tasks.has(id): _release_combat_layout(id)
+	if session.combat.tasks.is_empty(): return
+	var config: Dictionary = CombatLayout.imported_config(catalog.data, session.scene_name)
+	if not config.get("ok", false):
+		notice.text = "Combat layout unavailable: " + str(config.get("error", "Unknown source configuration"))
+		return
+	for id in session.combat.tasks:
+		var task: Dictionary = session.combat.tasks[id]
+		var attackers: Array = _fighter_records(task.attackers)
+		var defenders: Array = _fighter_records(task.defenders)
+		var previous: Dictionary = task.get("layout", {})
+		if not previous.is_empty(): previous["config"] = config
+		var state: Dictionary = CombatLayout.initialize(attackers, defenders, config, session.board_bounds, session.board_top_margin) if previous.is_empty() else CombatLayout.update_layout(previous, attackers, defenders)
+		if state.is_empty(): continue
+		task["layout"] = state
+		combat_layouts[id] = state
+		for card_id in state.positions: session.cards[card_id].position = state.positions[card_id]
+		_draw_combat_rectangle(id, state)
+
+func _draw_combat_rectangle(id: int, state: Dictionary) -> void:
+	if not combat_rectangles.has(id):
+		var rectangle := MeshInstance3D.new()
+		var material := StandardMaterial3D.new()
+		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		material.albedo_color = Color(0.9, 0.24, 0.16, 0.2)
+		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		material.cull_mode = BaseMaterial3D.CULL_DISABLED
+		rectangle.material_override = material
+		add_child(rectangle)
+		combat_rectangles[id] = rectangle
+	var rectangle: MeshInstance3D = combat_rectangles[id]
+	if rectangle.get_meta("size", Vector2.ZERO) == state.size: return
+	rectangle.set_meta("size", state.size)
+	var vertices := PackedVector3Array()
+	var minimum: Vector2 = -state.config.pivot * state.size
+	for local in [minimum, minimum + Vector2(state.size.x, 0), minimum + state.size, minimum, minimum + state.size, minimum + Vector2(0, state.size.y)]:
+		var point: Vector2 = state.center + state.config.axis_x * local.x + state.config.axis_y * local.y
+		vertices.append(Vector3(point.x, 0.015, -point.y))
+	var arrays: Array = []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	rectangle.mesh = mesh
+
+func _can_drag_card(id: int) -> bool:
+	if not session.cards.has(id): return false
+	if not session.combat.membership.has(id): return true
+	var task: Dictionary = session.combat.tasks[session.combat.membership[id]]
+	return task.player_is_attacker and id in task.attackers
+
+func _combatants(ids: Array) -> Array:
+	var result: Array = []
+	for id in ids:
+		var fields: Dictionary = catalog.fields(session.cards[id].definition_guid)
+		if int(fields.get("category", 0)) in [2, 9] and int(fields.get("faction", 0)) in [1, 2]: result.append(id)
+	return result
+
+func _try_combat_drop(id: int, destination: Vector2, equipment_target: int) -> bool:
+	var incoming: Dictionary = catalog.fields(session.cards[id].definition_guid)
+	# Equipment remains a terminal action before join/start, as in the source.
+	if int(incoming.get("category", 0)) == 5 and equipment_target >= 0:
+		var receiver: int = session.stacks[equipment_target].card_ids.back()
+		if int(catalog.fields(session.cards[receiver].definition_guid).get("category", 0)) == 2: return false
+	var faction: int = int(incoming.get("faction", 0))
+	if faction not in [1, 2]: return false
+	var source = session.stacks[session.cards[id].stack_id]
+	var ids: Array = _combatants(source.card_ids.slice(source.card_ids.find(id)))
+	if ids.is_empty(): return false
+	_sync_combat_layouts()
+	var task_id: int = CombatLayout.task_at_position(combat_layouts, destination)
+	if task_id >= 0:
+		return session.combat.add_combatants(task_id, ids)
+	var target: int = _raw_nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
+	if target < 0: return false
+	var target_stack = session.stacks[target]
+	var other_faction: int = int(catalog.fields(session.cards[target_stack.card_ids[0]].definition_guid).get("faction", 0))
+	if other_faction not in [1, 2] or other_faction == faction: return false
+	var defenders: Array = _combatants(target_stack.card_ids)
+	if defenders.is_empty(): return false
+	for member in ids: session.cards[member].position = destination
+	return session.combat.start_combat(ids, defenders, faction == 1) >= 0
+
+func _raw_nearby_stack(id: int, point: Vector3, radius: float) -> int:
+	var candidates: Array = []
+	for stack in session.stacks.values():
+		if stack.id == session.cards[id].stack_id: continue
+		var positions: Array[Vector3] = []
+		var hit: bool = false
+		for index in range(stack.card_ids.size()):
+			var center := Vector3(stack.position.x, 0, stack.position.y) + _stack_step() * index
+			positions.append(center)
+			var raw: Vector3 = _card_collider_size(stack.card_ids[index])
+			hit = hit or BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - raw * 0.5, raw))
+		if hit: candidates.append({"id": stack.id, "eligible": true, "card_positions": positions})
+	return BoardLayout.choose_attach_candidate(point, candidates, session.cards[id].stack_id)
+
+func _try_equip_drop(id: int, destination: Vector2) -> bool:
+	if int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) != 5: return false
+	var point := Vector3(destination.x, 0, destination.y)
+	var radius: float = float(catalog.settings("CardSettings").get("attachRadius", 0.25))
+	var best: int = -1
+	var distance: float = INF
+	for card in session.cards.values():
+		if card.stack_id == session.cards[id].stack_id or int(catalog.fields(card.definition_guid).get("category", 0)) != 2: continue
+		var center := Vector3(card.position.x, 0, card.position.y)
+		var stack = session.stacks.get(card.stack_id)
+		if stack != null: center += _stack_step() * stack.card_ids.find(card.id)
+		var raw: Vector3 = _card_collider_size(card.id)
+		if BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - raw * 0.5, raw)) and center.distance_squared_to(point) < distance:
+			best = card.id
+			distance = center.distance_squared_to(point)
+	if best < 0: return false
+	if session.stacks[session.cards[id].stack_id].card_ids.back() != id:
+		notice.text = "Split equipment from its tail before equipping."
+		return true
+	if session.equipment.equip(best, id):
+		notice.text = "Equipped."
+		return true
+	return false

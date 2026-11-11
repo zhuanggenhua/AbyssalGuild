@@ -38,6 +38,9 @@ func run() -> void:
 		return
 	board.start_new()
 	board.set_process(false)
+	# Deliberately construct overlapping snapshots before calling the adapter.
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = Callable()
 	var starter: String = board.session.cards.values()[0].definition_guid
 	check(not board.market_panel.visible and not board.detail_panel.visible, "sidebars initially hidden to avoid covering starter")
 	var toggles: Dictionary = {}
@@ -101,16 +104,22 @@ func run() -> void:
 	var pack: int = board.session.spawn_card(starter, Vector2(-2, -1))
 	var pack_position: Vector2 = board.session.cards[pack].position
 	var observation := {"id": -1, "position": Vector2.INF, "locked": false}
-	var observe := func(kind: String, payload: Dictionary):
-		if kind == "pack_opened":
-			observation.id = int(payload.card_id)
-			observation.position = board.session.cards[observation.id].position
-			observation.locked = board.layout_locks.has(board.session.cards[pack].stack_id)
-	board.session.event_occurred.connect(observe)
+	# Capture raw factory input before its synchronous overlap resolver, which
+	# now runs before pack_opened is emitted.
+	board.session.spawn_target_selector = board._select_spawn_target
+	var observe := func():
+		for card in board.session.cards.values():
+			if card.id != pack:
+				observation.id = card.id
+				observation.position = card.position
+				observation.locked = board.layout_locks.has(board.session.cards[pack].stack_id)
+		board._resolve_layout()
+	board.session.spawn_layout_resolver = observe
 	board.dragging = pack
 	board.drag_moved = false
 	board._finish_drag(Vector2.ZERO)
-	board.session.event_occurred.disconnect(observe)
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = Callable()
 	observe = Callable()
 	check(observation.locked, "actual pack draw locks source stack during emission")
 	check(observation.position == pack_position, "pack output starts at source pack XZ")
@@ -150,6 +159,8 @@ func run() -> void:
 	var price: int = int(board.catalog.fields(offer).get("buyPrice", 3))
 	for i in range(price): board.session.spawn_card(board.catalog.find_by_name("Coin"), Vector2.ZERO)
 	var expected: Vector2 = SceneSpawn.vendor_position(board.catalog, board.session.scene_name, offer, board.session.board_bounds, board.session.board_top_margin)
+	board.session.spawn_target_selector = board._select_spawn_target
+	board.session.spawn_layout_resolver = board._resolve_layout
 	board._buy(offer)
 	var purchase: int = -1
 	for card in board.session.cards.values():
@@ -158,6 +169,30 @@ func run() -> void:
 	if purchase >= 0:
 		check(board.session.cards[purchase].position.is_equal_approx(expected), "purchase uses source vendor spawn without arbitrary relocation")
 	check(board.session.stats().currency == 0, "purchase consumes exact source price")
+	clear_board(board)
+	var chest_guid: String = ""
+	for entry in board.catalog.data.cards:
+		if entry.get("script_class", "") == "ChestDefinition": chest_guid = entry.guid; break
+	var chest: int = board.session.spawn_card(chest_guid, Vector2.ZERO, -1, {"refuse_attach": true})
+	var chest_stack: int = board.session.cards[chest].stack_id
+	var withdrawal := {"position": Vector2.INF, "ignored": -1}
+	board.session.spawn_target_selector = func(id: int, ignored: int):
+		withdrawal.position = board.session.cards[id].position
+		withdrawal.ignored = ignored
+		return board._select_spawn_target(id, ignored)
+	board.session.cards[chest].stored_coins = 2
+	board.selected = chest
+	var source_offset: float = board._card_footprint(chest).x
+	board._withdraw_selected()
+	check(withdrawal.position.is_equal_approx(Vector2(source_offset, 0)), "chest withdrawal uses source card width not arbitrary 1.7")
+	check(withdrawal.ignored == chest_stack, "withdraw factory excludes original chest stack")
+	var far_edge := Vector2(board.session.board_bounds.end.x - 0.05, board.session.board_bounds.end.y)
+	board.session.cards[chest].position = far_edge
+	board.session.stacks[chest_stack].position = far_edge
+	board._withdraw_selected()
+	var zero_footprint_expected := Vector2(board.session.board_bounds.end.x, board.session.board_bounds.end.y - board.session.board_top_margin)
+	check(withdrawal.position.is_equal_approx(zero_footprint_expected), "withdraw point clamps to source bounds and header with zero footprint")
+	board.session.spawn_target_selector = board._select_spawn_target
 	print("Board integration checks: %d passed / %d total" % [checks - failures, checks])
 	board.queue_free()
 	# Drain deferred node/audio/resource deletion before terminating the tree.

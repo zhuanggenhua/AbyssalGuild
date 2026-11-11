@@ -141,3 +141,9 @@ parity, or grant redistribution permission. The 2026-11-11 cloud recovery checke
 1324 available files byte-for-byte against the lock; missing originals were
 `Documentation.pdf`, `Sounds/KingsFeast.wav`, and `Sprites/Artwork.png`. All 275
 serialized gameplay entries, 3 scenes and 31 prefabs reimported successfully.
+
+The complete recovery supersedes that partial checkpoint: all 1327 source files
+now match the lock, including those three binaries. Strict import (without the
+allow-missing option), source reimport comparison and 176 private output files
+are deterministic. The sparse mode remains available for genuinely incomplete
+local copies; it is no longer needed for this verified private source snapshot.

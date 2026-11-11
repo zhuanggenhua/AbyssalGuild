@@ -18,22 +18,35 @@ static func vendor_position(catalog, scene_name: String, pack_guid: String, boar
 					break
 			if index < 0:
 				continue
-			var object_id := str(fields.get("m_GameObject", {}).get("fileID", ""))
-			var transform_id := ""
-			for component in documents:
-				if component.get("object_type", "") == "Transform" and str(component.get("fields", {}).get("m_GameObject", {}).get("fileID", "")) == object_id:
-					transform_id = str(component.get("file_id", ""))
-			var transform: Variant = _world_transform(documents, transform_id, [])
-			if transform == null:
-				return null
-			if board_bounds is Rect2:
-				transform.origin = Vector3(board_bounds.get_center().x, 0, board_bounds.end.y - top_margin * 0.5)
-			var spacing := float(fields.get("spacing", 1.1))
-			# Buyer is zone zero; each offered entry occupies a zone even if locked.
-			var local_x := -offered.size() * spacing * 0.5 + (index + 1) * spacing
-			var position: Vector3 = transform * Vector3(local_x, 0, 0) + _vector(fields.get("spawnOffset", {"z": -1.4}))
-			return Vector2(position.x, position.z)
+			return _zone_position(documents, fields, index + 1, board_bounds, top_margin)
 	return null
+
+static func buyer_position(catalog, scene_name: String, board_bounds: Variant = null, top_margin: float = 1.5) -> Variant:
+	for scene in catalog.data.get("scenes", []):
+		if str(scene.get("name", "")) != scene_name:
+			continue
+		var documents: Array = scene.get("documents", [])
+		for document in documents:
+			if document.get("script_class", "") == "TradeManager":
+				return _zone_position(documents, document.get("fields", {}), 0, board_bounds, top_margin)
+	return null
+
+static func _zone_position(documents: Array, fields: Dictionary, zone_index: int, board_bounds: Variant, top_margin: float) -> Variant:
+	var object_id := str(fields.get("m_GameObject", {}).get("fileID", ""))
+	var transform_id := ""
+	for component in documents:
+		if component.get("object_type", "") == "Transform" and str(component.get("fields", {}).get("m_GameObject", {}).get("fileID", "")) == object_id:
+			transform_id = str(component.get("file_id", ""))
+	var transform: Variant = _world_transform(documents, transform_id, [])
+	if transform == null:
+		return null
+	if board_bounds is Rect2:
+		transform.origin = Vector3(board_bounds.get_center().x, 0, board_bounds.end.y - top_margin * 0.5)
+	var spacing := float(fields.get("spacing", 1.1))
+	# Buyer is zone zero; each offered entry occupies a zone even if locked.
+	var local_x: float = -fields.get("offeredPacks", []).size() * spacing * 0.5 + zone_index * spacing
+	var position: Vector3 = transform * Vector3(local_x, 0, 0) + _vector(fields.get("spawnOffset", {"z": -1.4}))
+	return Vector2(position.x, position.z)
 
 static func _vector(value: Dictionary, fallback: Vector3 = Vector3.ZERO) -> Vector3:
 	return Vector3(float(value.get("x", fallback.x)), float(value.get("y", fallback.y)), float(value.get("z", fallback.z)))

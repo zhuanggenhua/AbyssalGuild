@@ -27,7 +27,10 @@ and interrupt-BGM behavior are not ported. The pool steals a player if full;
 Unity's overlapping PlayOneShot behavior is not reproduced exactly.
 
 `play_music()` resolves `_BGMClip` and `_defaultMusicVolume`. KingsFeast.wav is
-missing in this restored snapshot, so music returns false and stays silent.
+now present in the strict private import: stereo 44.1 kHz, 130.168 seconds,
+source volume 0.3. The positive playback/stream-length test passes both with
+the actual import cache and the isolated buffer decoder. If absent in another
+licensed copy, music returns false and stays silent.
 Do not add unlicensed replacement music. Audio files remain private ignored
 assets. No sounds are played unless the caller explicitly wires their event.
 

@@ -5,7 +5,7 @@
 ## 固定环境和权限
 
 - GitHub 托管的 `ubuntu-24.04`，Python `3.12.14`，`requirements.txt` 中固定的 `PyYAML==6.0.3`。
-- 官方 `actions/checkout` v7.0.1 和 `actions/setup-python` v7.1.0 固定到完整提交 SHA，不使用浮动 action 标签。
+- 官方 `actions/checkout` v7.0.1 和 `actions/setup-python` v7.1.0 固定到完整提交 SHA，不使用浮动 action 标签。两个 SHA 分别通过[checkout 官方 tag](https://api.github.com/repos/actions/checkout/git/ref/tags/v7.0.1)与[setup-python 官方 tag](https://api.github.com/repos/actions/setup-python/git/ref/tags/v7.1.0)核验。
 - Godot **4.6.3 stable** Linux x86_64，仅从 [Godot 官方发布页](https://github.com/godotengine/godot/releases/tag/4.6.3-stable)下载。执行前校验 SHA-256，并核对版本 `4.6.3.stable.official.7d41c59c4`。
 - 归档 `Godot_v4.6.3-stable_linux.x86_64.zip` 的 SHA-256 为 `d0bc2113065e481c9c2c2b2c37daa4e8be3fe9e27f0ab9ab0b6096e9a37907f3`。来源是[官方 release asset 425558795 的 digest](https://api.github.com/repos/godotengine/godot/releases/assets/425558795)，2026-11-11 核验。上游另提供 `SHA512-SUMS.txt`；本工作流直接固定官方 API 发布的 SHA-256。校验不匹配即停止，不跳过验证。
 - 工作流令牌仅有 `contents: read`，checkout 不保留凭据；不使用仓库 secrets、子模块、LFS、第三方安装 action、`pull_request_target` 或手动 dispatch。
@@ -16,9 +16,11 @@
 
 `tools/test_public_ci.sh` 首先拒绝含有 `source/`、`third_party/`、`data/`、`assets/imported/`、`.godot/`、`build/`、`artifacts/` 或 `.env*` 的工作目录，然后调用现有的 `tools/test_all.sh`。不会删除开发者的本地内容来凑出一个公开环境。
 
-- Python：当前 27 个合成输入测试，覆盖导入、源清单、防篡改、视觉资源与场景元数据。
+- Python：合成输入测试覆盖导入、源清单、防篡改、视觉资源与场景元数据；另有无需真实引擎或原模板数据的进程运行器回归。
 - Godot：由 `tools/test_all.sh` 维护的公开组，包括战斗、战斗布局、堆叠、存档、合成视觉绑定、桌面布局、合成相机和音频、缺少数据时的 UI 防护。各脚本通过 `tools/test_godot.sh` 隔离项目和用户数据。
 - 除命令退出状态外，CI 会检查日志中的 `SCRIPT ERROR`、`ERROR`、`FAIL` 和断言错误，以免引擎报告错误但退出码为零造成假成功。
+
+所有 `tools/test_godot.sh` 调用还会经过标准库 Python 进程监控器 `tools/run_godot_test.py`。它保留隔离目录与 `GODOT` 覆盖，收集并转发 stdout/stderr，拒绝错误诊断（包括 ANSI 颜色输出和 `Assertionfailed`），并在超时后终止引擎进程组。每个 Godot 脚本默认限时 90 秒，可用 `GODOT_TEST_TIMEOUT` 设置为大于 0、最多 3600 的秒数；超时退出码为 124。单脚本运行器不依赖 GNU `timeout`，可用于 Linux/macOS；公开 CI 的总时限仍由 Linux 外层命令和 GitHub 作业控制。
 
 以下内容会明确标记为 **SKIP**，不是通过：
 

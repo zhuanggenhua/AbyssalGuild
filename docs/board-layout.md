@@ -133,9 +133,8 @@ registration order, not Unity Physics.OverlapSphere hit order. The pure model
 eligibility gate runs before ranking; source chest handling runs in the merge.
 Regular spawn attachment never invokes the drag-only equipment action.
 
-Generic craft/loot/encounter spawns currently participate in separation but not all
-source initialization-time attachment paths. Combat presentation still exposes
-points rather than source rects; the board deliberately does not fabricate combat
-rectangles for separation. Smooth movement, original drag splitting timing and
-physics-engine hit ordering remain unverified. The helper's combat-rect math is
-unit-tested but not yet supplied with an equivalent live combat rectangle.
+All live factory paths now use explicit automatic/excluded/refuse attachment
+policies before creation events; see `spawn-factory.md`. The combat helper supplies
+live rectangle bounds to the solver. Fighter geometry is retained across saves.
+Smooth movement, original drag-splitting timing and physics-engine hit ordering
+remain unverified. See the source-backed board and combat integration tests.

@@ -54,7 +54,7 @@ func _new_scene(scene_name: String, next_id: int):
 	var center: Dictionary = defaults.get("defaultSpawnPosition", {})
 	for reference in defaults.get("defaultSpawnCards", []):
 		var position := Vector2(float(center.get("x", 0)), float(center.get("z", 0))) + _random_position(session) * float(defaults.get("defaultSpawnRadius", 1))
-		session.spawn_card(session.catalog.ref_guid(reference), position)
+		session.spawn_card(session.catalog.ref_guid(reference), position, -1, {"refuse_attach": session.catalog.get_definition(session.catalog.ref_guid(reference)).get("script_class", "") != "PackDefinition"})
 	return session
 
 ## Fully staged transaction: no live mutation or public event on rejection.
@@ -103,6 +103,8 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 	var remap := {}
 	for traveler in travelers:
 		var id: int = _restore_card(destination, traveler, _random_position(destination))
+		if id < 0:
+			return Codec._fail("Traveler rejected by destination card factory")
 		remap[traveler.id] = id
 	for record in gear.wearers:
 		if not remap.has(record.wearer):
@@ -111,6 +113,8 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 		destination.equipment.equipped[wearer] = {}
 		for entry in record.items:
 			var item: int = _restore_card(destination, gear_cards[entry.item], destination.cards[wearer].position)
+			if item < 0:
+				return Codec._fail("Equipment rejected by destination card factory")
 			Equipment.detach(destination, item)
 			remap[entry.item] = item
 			destination.equipment.equipped[wearer][int(entry.slot)] = item
@@ -145,7 +149,9 @@ func _restore_card(session, original, position: Vector2) -> int:
 	# Dynamic recipe cards may not be in an independently configured catalog.
 	if session.catalog.get_definition(original.definition_guid).is_empty():
 		Codec._recipe_card(session.catalog, original.definition_guid)
-	var id: int = session.spawn_card(original.definition_guid, position)
+	var id: int = session.spawn_card(original.definition_guid, position, -1, {"refuse_attach": true})
+	if id < 0 or not session.cards.has(id):
+		return -1
 	for key in ["base_definition_guid", "uses_left", "nutrition", "health", "stored_coins"]:
 		session.cards[id].set(key, original.get(key))
 	return id

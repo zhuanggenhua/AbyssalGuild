@@ -9,7 +9,7 @@ and FBX files without changing bytes into ignored `assets/imported/`. It does
 not grant redistribution permission. Never force-add that directory or the
 source/catalog to a public commit. No original image, audio, model or generated
 manifest is included in the repository. Godot imports FBX with its available
-importer; imported models/audio are staged, not yet used by the game.
+importer; the current board uses imported board models, card art and audio.
 
 `manifest.json` records source paths, GUIDs, SHA-256, material colors/textures,
 scene category-to-prefab references, colliders, board renderers, resolved camera
@@ -17,9 +17,11 @@ transform chains, scalar instance overrides and directional-light records. Missi
 same input produce identical manifests. Run source-lock verification separately
 before import: this adapter records hashes, not a claim of license or lock validity.
 
-The local restored snapshot yields 149 PNG, 18 WAV and 4 FBX files. Its three
-missing indexed files are Documentation.pdf, Sounds/KingsFeast.wav and
-Sprites/Artwork.png. These counts are observations, not hard-coded assumptions.
+The complete restored snapshot yields 150 PNG, 19 WAV and 4 FBX files (173
+private assets). Source-lock verification covers all 1327 original files. Both
+missing-file reports are empty, including the recovered PDF, KingsFeast music
+and Artwork atlas. Repeated strict imports produce byte-identical outputs.
+These counts are observations, not hard-coded assumptions.
 
 Card definitions reference art via `artTexture`. Original `CardInstance.cs`
 assigns that texture to `_OverlayTex`. The adapter resolves the same GUID to a
@@ -30,13 +32,11 @@ The original zero-thickness collider gets a 0.02-unit Godot interaction thicknes
 The art-plane layout and label placement are adapter choices, not source parity.
 
 Board01/Board02 use SkinnedMeshRenderer with Body_01/Body_02 and Header materials.
-The board adapter applies only the body color to the existing generated board.
-It does not reproduce board mesh blend shapes or infer playable bounds from
-serialized m_AABB. Camera properties and prefab instance modifications are
-recorded; source half-height can be applied explicitly, but existing HUD framing
-is preserved by default. The explicit source-camera API below resolves and applies camera transforms and scalar overrides.
-Unity shader graphs, overlay composition, base textures, rounded mesh geometry,
-fonts, lighting, shadows and effects are not reproduced.
+The adapter uses the actual privately imported FBX, material slots and Scale
+blend shape when its Godot cache is available. A generated fallback uses the
+verified geometry bounds otherwise. Source camera/light mappings are described
+below. Unity shader graphs, original card overlay composition/rounded meshes,
+fonts and effects are not reproduced, and lighting is not visually calibrated.
 
 Validation:
 

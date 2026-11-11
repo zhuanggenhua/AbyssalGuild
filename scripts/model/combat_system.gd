@@ -207,7 +207,19 @@ func save_state() -> Dictionary:
 		var progress: Array = []
 		for card_id in task.attackers + task.defenders:
 			progress.append({"card": card_id, "value": task.progress[card_id]})
-		records.append({"id": id, "attackers": task.attackers.duplicate(), "defenders": task.defenders.duplicate(), "player_is_attacker": task.player_is_attacker, "timer": task.timer, "progress": progress})
+		var record := {"id": id, "attackers": task.attackers.duplicate(), "defenders": task.defenders.duplicate(), "player_is_attacker": task.player_is_attacker, "timer": task.timer, "progress": progress}
+		if task.has("layout"):
+			# Derived configuration/positions belong to the current scene adapter.
+			# Preserve invalid live metadata for validation, never silently discard it.
+			if task.layout is Dictionary:
+				var layout := {}
+				for key in ["center", "cell"]:
+					var value = task.layout.get(key)
+					layout[key] = [value.x, value.y] if value is Vector2 else value
+				record["layout"] = layout
+			else:
+				record["layout"] = task.layout
+		records.append(record)
 	return {"tasks": records, "next_id": _next_id}
 
 func stage_state(raw: Variant, cards: Dictionary) -> Dictionary:
@@ -230,6 +242,22 @@ func stage_state(raw: Variant, cards: Dictionary) -> Dictionary:
 		if id < 1 or id >= result.next_id or result.tasks.has(id) or not is_finite(timer) or record.attackers.is_empty() or record.defenders.is_empty():
 			return invalid
 		var task := {"attackers": [], "defenders": [], "player_is_attacker": record.player_is_attacker, "timer": timer, "progress": {}}
+		if record.has("layout"):
+			if not record.layout is Dictionary or record.layout.size() != 2:
+				return invalid
+			var layout := {}
+			for key in ["center", "cell"]:
+				var axes = record.layout.get(key)
+				if not axes is Array or axes.size() != 2:
+					return invalid
+				for axis in axes:
+					if not Equipment.valid_number(axis) or absf(float(axis)) > 1.0e20 or (key == "cell" and float(axis) <= 0.0):
+						return invalid
+				layout[key] = Vector2(float(axes[0]), float(axes[1]))
+				# Vector2 may use float32, so reject positive values that underflow.
+				if key == "cell" and (layout[key].x <= 0.0 or layout[key].y <= 0.0):
+					return invalid
+			task["layout"] = layout
 		for side in ["attackers", "defenders"]:
 			for raw_id in record[side]:
 				if not Equipment.valid_integer(raw_id, 1):

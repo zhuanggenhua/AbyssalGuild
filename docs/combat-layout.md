@@ -87,3 +87,14 @@ Changed/custom scenes with such overrides need an expanded adapter first.
 No jump/projectile animations, attack/return/death delays, UI art, color, sound,
 camera shake, live combat membership changes or automatic merge mutation are
 implemented here. Correct target geometry is not a claim of visual/runtime parity.
+
+## Live board integration
+
+The board now initializes/updates per-task state, draws a simple generated
+rectangle and assigns target fighter slots. It passes bounds to stack separation
+and center to AI, supports drag-to-join/start and attacker-only flee, and clamps
+survivors when combat ends. Native saves persist only center and initial cell
+spacing; scene configuration and derived positions are reconstructed on Continue.
+The 32-check combat-board suite covers these paths. Generated rendering,
+target-pose collider queries and immediate repositioning are not Unity animation
+or exact physics-hit ordering.

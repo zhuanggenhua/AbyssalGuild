@@ -47,7 +47,7 @@ static func _explore(session, stack, recipe: Dictionary) -> void:
 			continue
 		var loot: String = session._roll_loot(fields.get("loot", []))
 		if not loot.is_empty():
-			session.spawn_card(loot, stack.position)
+			session.spawn_card(loot, stack.position, -1, {"ignored_stack_id": stack.id})
 			session.event_occurred.emit("exploration_finished", {"definition_guid": guid})
 		break
 	consume(session, stack, recipe)
@@ -80,7 +80,7 @@ static func _grow(session, stack, recipe: Dictionary) -> void:
 			session.cards[id].stack_id = separate.id
 			session.cards[id].position = separate.position
 	if not output.is_empty():
-		session.spawn_card(output, stack.position)
+		session.spawn_card(output, stack.position, -1, {"ignored_stack_id": stack.id})
 
 static func research_candidates(session) -> Array:
 	var candidates: Array = []
@@ -100,11 +100,11 @@ static func _research(session, stack, recipe: Dictionary) -> void:
 	if candidates.is_empty():
 		return
 	var chosen: Dictionary = candidates[session.rng.randi_range(0, candidates.size() - 1)]
-	spawn_recipe_card(session, str(chosen.guid), stack.position)
+	spawn_recipe_card(session, str(chosen.guid), stack.position, stack.id)
 	session._discover_recipe(str(chosen.fields.id))
 
 ## Also suitable for the session's pack-recipe path: clone the actual scene template.
-static func spawn_recipe_card(session, recipe_guid: String, position: Vector2) -> int:
+static func spawn_recipe_card(session, recipe_guid: String, position: Vector2, ignored_stack_id: int = -1) -> int:
 	var recipe: Dictionary = session.catalog.fields(recipe_guid)
 	var manager: Dictionary = _card_manager(session.catalog)
 	var template: Dictionary = session.catalog.fields(session.catalog.ref_guid(manager.get("recipeCardTemplate", {})))
@@ -130,7 +130,7 @@ static func spawn_recipe_card(session, recipe_guid: String, position: Vector2) -
 	fields.description = description
 	fields.recipe_guid = recipe_guid
 	session.catalog.definitions[key] = {"guid": key, "script_class": "CardDefinition", "fields": fields}
-	return session.spawn_card(key, position)
+	return session.spawn_card(key, position, -1, {"ignored_stack_id": ignored_stack_id})
 
 static func _card_manager(catalog) -> Dictionary:
 	for scene in catalog.data.get("scenes", []):

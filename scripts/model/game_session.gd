@@ -37,6 +37,11 @@ var paused: bool = false
 var speed: float = 1.0
 var rng := RandomNumberGenerator.new()
 var _next_id: int = 1
+## Pure view geometry query; session owns validation and merge side effects.
+var spawn_target_selector: Callable = Callable()
+var spawn_layout_resolver: Callable = Callable()
+var spawn_query_height: float = 0.0
+var _selecting_spawn: bool = false
 
 func configure(source_catalog, random_seed: int = 1, selected_scene: String = "Main") -> void:
 	catalog = source_catalog
@@ -79,19 +84,26 @@ func start_new_game() -> int:
 		var offset := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1))
 		while offset.length_squared() > 1:
 			offset = Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1))
-		var spawned: int = spawn_card(catalog.ref_guid(reference), position + Vector2(offset.x, offset.z) * radius)
+		var spawned: int = spawn_card(catalog.ref_guid(reference), position + Vector2(offset.x, offset.z) * radius, -1, {"refuse_attach": catalog.get_definition(catalog.ref_guid(reference)).get("script_class", "") != "PackDefinition"})
 		if first_id < 0:
 			first_id = spawned
 	return first_id
 
-func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: int = -1) -> int:
-	if catalog.get_definition(guid).is_empty():
+func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: int = -1, options: Dictionary = {}) -> int:
+	var definition: Dictionary = catalog.get_definition(guid)
+	if definition.is_empty() or _selecting_spawn:
 		return -1
+	var is_pack: bool = definition.get("script_class", "") == "PackDefinition"
+	# CreateCardInstance rejects aggressive definitions before instance allocation.
+	# Packs use CreatePackInstance, a separate source factory without this gate.
+	if not is_pack and friendly_mode and definition.fields.get("isAggressive", false):
+		return -1
+	var direct_target: bool = target_stack >= 0
 	var card = CardModel.new(_next_id, guid, catalog.fields(guid))
 	_next_id += 1
 	card.position = position
 	cards[card.id] = card
-	if catalog.get_definition(guid).get("script_class", "") == "PackDefinition":
+	if is_pack:
 		card.uses_left = catalog.fields(guid).get("slots", []).size()
 	if not stacks.has(target_stack):
 		var stack = StackModel.new(_next_id)
@@ -101,8 +113,22 @@ func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: in
 		target_stack = stack.id
 	card.stack_id = target_stack
 	stacks[target_stack].card_ids.append(card.id)
+	if not direct_target and not options.get("refuse_attach", false) and spawn_target_selector.is_valid():
+		var ignored: int = int(options.get("ignored_stack_id", -1))
+		spawn_query_height = float(options.get("height", 0.0))
+		_selecting_spawn = true
+		var selected: Variant = spawn_target_selector.call(card.id, ignored)
+		_selecting_spawn = false
+		spawn_query_height = 0.0
+		# The selector only supplies geometry. Recheck live membership and rules.
+		if selected is int and selected != ignored and cards.has(card.id) and stacks.has(selected):
+			move_to_stack(card.id, selected)
+	if not direct_target and spawn_layout_resolver.is_valid():
+		spawn_layout_resolver.call()
+	# Auto-deposit may already have consumed the card. Retain its instance ID and
+	# definition metadata: source emits created after Initialize's attachment too.
 	# Source CreatePackInstance does not publish card-created or stats events.
-	if catalog.get_definition(guid).get("script_class", "") != "PackDefinition":
+	if not is_pack:
 		_notify_stats_changed()
 		event_occurred.emit("card_created", {"card_id": card.id, "base_definition_guid": card.base_definition_guid})
 	changed.emit()
@@ -209,7 +235,7 @@ func open_pack(id: int) -> int:
 			catalog.definitions[output] = {"guid": output, "script_class": "CardDefinition", "fields": {"id": output, "displayName": "Recipe: " + str(catalog.fields(catalog.ref_guid(recipe.get("resultingCard", {}))).get("displayName", "???")), "category": 8, "isSellable": true, "sellPrice": 1, "recipe_guid": recipe_guid}}
 	if output.is_empty():
 		output = _weighted(slot.get("Entries", []), true)
-	var spawned: int = spawn_card(output, card.position)
+	var spawned: int = spawn_card(output, card.position, -1, {"height": 0.1})
 	card.uses_left -= 1
 	if card.uses_left <= 0:
 		kill_card(id)
@@ -371,6 +397,8 @@ func tick(delta: float) -> void:
 	ai.tick(step)
 	combat.tick(step)
 	for stack in stacks.values().duplicate():
+		if not stacks.has(stack.id) or stacks[stack.id] != stack:
+			continue
 		if stack.recipe_guid.is_empty() or stack.paused:
 			continue
 		stack.progress += step
@@ -404,8 +432,8 @@ func _complete_recipe(stack) -> void:
 	elif entry.get("script_class", "RecipeDefinition") == "RecipeDefinition":
 		SpecialRecipes.consume(self, stack, recipe)
 		# Spawn excludes the processing stack, as in the source.
-		var spawned: int = spawn_card(output, stack.position)
-		if spawned >= 0:
+		var spawned: int = spawn_card(output, stack.position, -1, {"ignored_stack_id": stack.id})
+		if not catalog.get_definition(output).is_empty():
 			event_occurred.emit("crafted", {"card_id": spawned, "definition_guid": output})
 	else:
 		# Never interpret unsupported Travel as ordinary crafting, even if forced.
@@ -453,8 +481,12 @@ func sell_card(id: int) -> bool:
 func _sell_cards(ids: Array) -> bool:
 	if ids.is_empty():
 		return false
-	var coin: String = catalog.find_by_name("Coin")
-	if coin.is_empty():
+	var coin: String = world.currency_guid
+	# Legacy headless fixtures without scene data have no TradeManager to resolve.
+	var fixture_without_scenes: bool = catalog.data.get("scenes", []).is_empty()
+	if coin.is_empty() and fixture_without_scenes:
+		coin = catalog.find_by_name("Coin")
+	if coin.is_empty() or catalog.get_definition(coin).is_empty() or int(catalog.fields(coin).get("category", -1)) != 7:
 		return false
 	var base_guids: Array = []
 	var total_price: int = 0
@@ -467,7 +499,10 @@ func _sell_cards(ids: Array) -> bool:
 			return false
 		base_guids.append(card.base_definition_guid)
 		total_price += int(fields.get("sellPrice", 1))
-	var position: Vector2 = cards[ids[0]].position
+	var resolved: Variant = preload("res://scripts/model/scene_spawn.gd").buyer_position(catalog, scene_name, board_bounds, board_top_margin)
+	if not resolved is Vector2 and not fixture_without_scenes:
+		return false
+	var position: Vector2 = resolved if resolved is Vector2 else cards[ids[0]].position
 	event_occurred.emit("cards_sold", {"base_definition_guids": base_guids})
 	for id in ids:
 		var stack = stacks.get(cards[id].stack_id)

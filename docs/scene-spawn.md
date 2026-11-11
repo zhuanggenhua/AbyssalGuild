@@ -64,3 +64,33 @@ Godot 4.6.3 with the private imported data:
 
 Use `bash tools/test_godot.sh res://tests/godot/test_scene_spawn.gd`.
 These tests assert model behavior, not mouse/animation or Unity execution parity.
+
+## Buyer payouts and scene currency
+
+`buyer_position(catalog, scene_name, board_bounds=null, top_margin=1.5)` now uses
+that same transform resolver with zone index zero. All offered vendor slots count
+when centering the row, regardless of unlock state. Main's initial buyer is
+`(-4.4, 1.85)` in source XZ; Island's is `(-0.55, 1.85)`. These values are test
+expectations derived from source configuration, not constants in the resolver.
+
+`Session._sell_cards` now pays `world.currency_guid`: Coin in Main, Coral in
+Island, matching `CardBuyer.ProcessTransaction`. Payout starts at the resolved
+buyer position and then follows the existing card factory/attachment path.
+Currency and placement are validated before the sold event or any card removal.
+Missing or non-currency definitions and unresolved real-scene buyer transforms
+reject the transaction atomically. This does not change category-wide currency
+counts, buying/payment eligibility, selling value, or event order.
+
+Compatibility exception: a synthetic catalog with no scenes at all retains the
+old Coin-name lookup and sold-card-position fallback. A real catalog containing
+scene data never silently falls back to Coin or guessed buyer coordinates.
+The resolver still does not expand TradeManager prefab instances; unresolved
+real scene configurations therefore fail safely rather than destroy sold cards.
+
+Validation: `test_trade_currency.gd` passes 40/40, covering Main/Island payout
+identity and location, buyer index and expanded board, sale-before-destruction
+notification, final stats event, RNG continuity, invalid mixed batches, nonempty
+storage, unsellable cards, invalid currency, broken transform chains, and the
+explicit synthetic compatibility path. Scene spawn remains 28/28. The complete
+`tools/test_all.sh` regression runner passed with no script errors after this
+change. The dedicated trade suite is run separately until added to that runner.

@@ -29,6 +29,9 @@ func run():
 		var music_guid: String = str(audio.source_settings.get("_BGMClip", {}).get("guid", ""))
 		if not assets.manifest.get("assets", {}).has(music_guid):
 			assert(not audio.play_music())
+		else:
+			assert(audio.play_music())
+			assert(audio.music != null and audio.music.playing and audio.music.stream.get_length() > 0)
 	audio._exit_tree()
 	assert(audio.stream_cache.is_empty())
 	for player in audio.pool:

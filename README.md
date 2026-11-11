@@ -34,4 +34,4 @@ godot --path .
 
 没有本地导入数据时会明确阻止开始游戏，不以假数据代替原模板。操作说明见 [`docs/board-ui.md`](docs/board-ui.md)。
 
-运行时和视觉验收进度见 [`docs/migration-progress.md`](docs/migration-progress.md)。
+运行时和视觉验收进度见 [`docs/migration-progress.md`](docs/migration-progress.md)，已确认的剩余差异见 [`docs/remaining-parity.md`](docs/remaining-parity.md)。公开仓库的 GitHub Actions 仅验证不含授权素材的代码与合成测试。

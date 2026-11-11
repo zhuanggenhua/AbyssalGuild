@@ -134,6 +134,7 @@ func _init() -> void:
 			DirAccess.remove_absolute(path + suffix)
 	combined_subsystems()
 	ai_checkpoints()
+	combat_layout_checkpoints()
 	print("Save codec checks: ", checks, "; failures: ", failures)
 	quit(0 if failures == 0 else 1)
 
@@ -305,3 +306,45 @@ func ai_checkpoints() -> void:
 	reloaded.tick(0.25)
 	check(JSON.stringify(Codec.capture(target), "", true, true) == JSON.stringify(Codec.capture(reloaded), "", true, true), "immediate legacy resave preserves next tick restart and RNG semantics")
 	check(Codec.restore(source, Codec.capture(target)).ok, "reinitialized legacy AI can be checkpointed again")
+
+func combat_layout_checkpoints() -> void:
+	var source = combat_session()
+	var hero: int = source.spawn_card("hero", Vector2(2, 3))
+	var mob: int = source.spawn_card("mob", Vector2(-4, 5))
+	var battle: int = source.combat.start_combat([hero], [mob])
+	var original := {"center": Vector2(-3.25, 8.5), "cell": Vector2(1.5, 2.25), "config": {"untrusted": "not persisted"}, "size": Vector2(9, 9), "positions": {hero: Vector2(4, 5)}}
+	source.combat.tasks[battle]["layout"] = original.duplicate(true)
+	var rng_before: int = source.rng.state
+	var snapshot := Codec.capture(source)
+	check(snapshot.session.combat.tasks[0].layout == {"center": [-3.25, 8.5], "cell": [1.5, 2.25]}, "combat geometry serializes only center and initial cell spacing")
+	check(source.combat.tasks[battle].layout == original and source.rng.state == rng_before, "layout capture leaves runtime geometry and RNG unchanged")
+	var target = combat_session()
+	target.changed.connect(func(): notifications += 1)
+	check(Codec.restore(target, JSON.parse_string(JSON.stringify(snapshot, "", true, true))).ok, "combat layout JSON roundtrip")
+	check(target.combat.tasks[battle].layout == {"center": original.center, "cell": original.cell}, "restored geometry contains only placement metadata as Vector2")
+	check(target.rng.state == rng_before, "layout restoration consumes no RNG")
+	var path := "user://test-save-combat-layout-" + str(OS.get_process_id()) + ".json"
+	check(Codec.save_file(source, path).ok, "midcombat geometry saves to disk")
+	target.combat.tasks[battle].layout.center = Vector2(99, 99)
+	check(Codec.load_file(target, path).ok, "midcombat geometry loads from disk")
+	check(target.combat.tasks[battle].layout.center == original.center and target.combat.tasks[battle].layout.cell == original.cell, "midcombat load preserves center and initial spacing")
+	for suffix in ["", ".bak", ".tmp", ".bak.tmp"]:
+		if FileAccess.file_exists(path + suffix): DirAccess.remove_absolute(path + suffix)
+	for value in [null, [], 1, "layout", {}, {"center": [0, 0]}, {"center": [0, 0], "cell": [1, 1], "positions": {}}]:
+		var bad := snapshot.duplicate(true)
+		bad.session.combat.tasks[0].layout = value
+		reject(target, bad, "malformed combat layout shape")
+	for key in ["center", "cell"]:
+		for value in [null, {}, [], [1], [1, 2, 3], Vector2.ONE, ["1", 1], [true, 1], [NAN, 1], [1, INF], [1.0e21, 1]]:
+			var bad := snapshot.duplicate(true)
+			bad.session.combat.tasks[0].layout[key] = value
+			reject(target, bad, "invalid combat layout " + key)
+	for value in [[0, 1], [1, 0], [-1, 1], [1, -1], [1.0e-100, 1]]:
+		var bad := snapshot.duplicate(true)
+		bad.session.combat.tasks[0].layout.cell = value
+		reject(target, bad, "nonpositive or unrepresentable cell axis")
+	var legacy := snapshot.duplicate(true)
+	legacy.session.combat.tasks[0].erase("layout")
+	check(Codec.restore(target, legacy).ok, "legacy battle without layout loads")
+	check(not target.combat.tasks[battle].has("layout"), "legacy restoration does not invent placement metadata")
+	check(not Codec.capture(target).session.combat.tasks[0].has("layout"), "legacy re-save omits geometry until adapter initializes it")

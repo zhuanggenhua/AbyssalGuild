@@ -49,12 +49,17 @@ Original shaders, fonts, frame/slot artwork and card meshes are not reproduced.
 Stack footprints include the source margin, trailing step and first-card size.
 The source iteration-limited separation solver handles stack overlap and board
 shrink. Pack draws keep the pack locked and remove the former artificial sideways
-spawn. Draws, purchases and passive production attempt eligible nearby attachment.
+spawn. The central factory attempts eligible nearby attachment before creation events,
+with explicit exclusions for processing stacks, encounters, restoration and
+withdrawal. Friendly mode applies to every ordinary factory output.
 See `board-layout.md` for the boundary between exact target math and approximate
-broad phase. Combat rectangles and source animation timing remain separate work.
+broad phase. Combat rectangles, fighter rows, drag-to-join/start and attacker-only flee are
+now connected. Initial center/cell spacing persists through native saves; the
+AI uses that actual center. Source animation timing remains separate work.
 
 Source sound mappings play pickup/drop, purchases, sales, normal craft and combat
-feedback when the private WAV files exist. Missing background music stays silent.
+feedback when the private WAV files exist. The restored background music is
+bound and structurally tested; missing optional music still stays silent.
 No listening-level validation has been performed.
 
 ## Checks and remaining acceptance
