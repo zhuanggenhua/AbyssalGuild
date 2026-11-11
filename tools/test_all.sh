@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 python3 -m unittest discover -s tests -p 'test_*.py' -v
-for test in test_combat test_stacking test_save_codec test_visual_assets test_board_layout test_source_camera test_audio_feedback test_ui_smoke; do
+for test in test_combat test_combat_layout test_stacking test_save_codec test_visual_assets test_board_layout test_source_camera test_audio_feedback test_ui_smoke; do
   bash tools/test_godot.sh "res://tests/godot/$test.gd"
 done
 if [[ -f data/stackcraft.json ]]; then
