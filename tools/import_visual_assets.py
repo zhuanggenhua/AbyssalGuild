@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 from import_stackcraft import parse_unity, json_bytes, sha256
+from visual_scene_metadata import apply_overrides, camera_records, light_records
 
 SUPPORTED = {'.png', '.wav', '.fbx'}
 
@@ -70,8 +71,8 @@ def build(source, catalog, output):
             'renderers': [{'owner': f.get('m_GameObject'), 'materials': f.get('m_Materials', [])} for f in renderers]}
         return guid
     for scene in catalog.get('scenes', []):
-        config = {'categories': {}, 'boards': [], 'cameras': []}
         docs = scene['documents']
+        config = {'categories': {}, 'boards': [], 'cameras': camera_records(docs), 'lights': light_records(docs)}
         for doc in docs:
             f = doc['fields']
             if 'cardPrefabs' in f:
@@ -79,20 +80,20 @@ def build(source, catalog, output):
                 for field in ('packPrefab', 'aggressiveMobPrefab'):
                     if f.get(field, {}).get('guid'):
                         config[field] = prefab(f[field]['guid'])
-            if doc['object_type'] == 'Camera':
-                transform = next((d['fields'] for d in docs if d['object_type'] == 'Transform' and d['fields'].get('m_GameObject') == f.get('m_GameObject')), {})
-                config['cameras'].append({'orthographic': f.get('orthographic'), 'orthographic_size': f.get('orthographic size'), 'field_of_view': f.get('field of view'), 'background': f.get('m_BackGroundColor'), 'transform': transform})
             guid = f.get('m_SourcePrefab', {}).get('guid', '')
             if index.get(guid, {}).get('source_path', '').startswith('Prefabs/Boards/'):
                 config['boards'].append(prefab(guid))
             if guid and index.get(guid, {}).get('source_path', '').endswith('.prefab'):
-                for component in read(guid):
-                    if component['object_type'] == 'Camera':
-                        camera = component['fields']
-                        config['cameras'].append({'prefab_guid': guid, 'orthographic': camera.get('orthographic'),
-                            'orthographic_size': camera.get('orthographic size'), 'field_of_view': camera.get('field of view'),
-                            'background': camera.get('m_BackGroundColor'),
-                            'instance_modifications': f.get('m_Modification', {}).get('m_Modifications', [])})
+                modification = f.get('m_Modification', {})
+                modifications = modification.get('m_Modifications', [])
+                effective = apply_overrides(read(guid), modifications)
+                external_parent = str(modification.get('m_TransformParent', {}).get('fileID', '0')) != '0'
+                for camera in camera_records(effective, external_parent):
+                    camera['prefab_guid'] = guid
+                    camera['instance_modifications'] = modifications
+                    config['cameras'].append(camera)
+                if not external_parent:
+                    config['lights'].extend(light_records(effective))
         result['scenes'][scene['name']] = config
     (output / 'manifest.json').write_bytes(json_bytes(result))
     return result

@@ -12,8 +12,8 @@ manifest is included in the repository. Godot imports FBX with its available
 importer; imported models/audio are staged, not yet used by the game.
 
 `manifest.json` records source paths, GUIDs, SHA-256, material colors/textures,
-scene category-to-prefab references, colliders, board renderers and camera
-settings. Missing files are explicit, not replaced. Repeated imports of the
+scene category-to-prefab references, colliders, board renderers, resolved camera
+transform chains, scalar instance overrides and directional-light records. Missing files are explicit, not replaced. Repeated imports of the
 same input produce identical manifests. Run source-lock verification separately
 before import: this adapter records hashes, not a claim of license or lock validity.
 
@@ -34,7 +34,7 @@ The board adapter applies only the body color to the existing generated board.
 It does not reproduce board mesh blend shapes or infer playable bounds from
 serialized m_AABB. Camera properties and prefab instance modifications are
 recorded; source half-height can be applied explicitly, but existing HUD framing
-is preserved by default. Camera transforms and overrides are not yet replayed.
+is preserved by default. The explicit source-camera API below resolves and applies camera transforms and scalar overrides.
 Unity shader graphs, overlay composition, base textures, rounded mesh geometry,
 fonts, lighting, shadows and effects are not reproduced.
 
@@ -76,3 +76,42 @@ private assets with Godot, run `tests/godot/test_source_board_mesh.gd` in the
 actual project to test Main/Island meshes, Body/Header slots, weights and bounds.
 The isolated test runner lacks the editor's resource cache and reports a skip
 for this optional source test.
+
+## Source camera, lighting and coordinate convention
+
+The model retains original Unity X/Z values. The view maps model (x,z) to Godot
+Vector3(x,y,-z); pointer rays must invert Z on their way back to the model.
+The imported board geometry currently retains source-sign coordinates, so the
+board view reflects its root Z scale. Card local caption/art layout remains
+upright. Never mix reflected camera coordinates with unreflected card positions.
+
+`camera_configuration(scene)` and `apply_source_camera(camera, scene)` resolve
+parent/child transforms from serialized quaternion values after prefab instance
+scalar overrides. Euler hints are deliberately ignored: Main's root hint says
+zero even though its actual quaternion is an 85-degree X rotation. External
+unresolved parents and missing required data return no configuration/false;
+there is no invented camera fallback in this API.
+
+Main and Island have the same source perspective camera: Unity (0,10,-1),
+rotation X +85 degrees, child identity, vertical FOV30, near2, far40. The view
+conversion yields Godot (0,10,1), rotation X -85 degrees. CameraController does
+not overwrite the starting pose in Awake/Start. Its original pan/zoom behavior
+and camera-shake animations are separate work, not implemented by these APIs.
+
+`directional_light_configuration` / `apply_source_light` expose the original
+scene light, including reflected pose, color, intensity, enabled shadows and
+shadow strength. Main/Island use intensity1, RGB(1,.95686275,.8392157), shadow
+strength .7. The source quaternion is (.1464466,.8535535,-.35355338,.35355338).
+Cross-engine shadow filtering, exposure and perceived lighting are not verified.
+Tests check source metadata, effective pose/projection/clips and light fields,
+not screenshots or pixel parity.
+
+The board now applies both source camera and directional light on scene entry.
+Card stack positions, detached combat cards and ray-plane coordinates use the
+same Z reflection; imported board root uses scale.z=-1. Wheel zoom moves along
+the source camera forward axis, rejects distances outside [5,20], and clamps
+planar position to board bounds plus .5 padding. Middle drag and keyboard pan
+remain immediate UI controls; Unity SmoothDamp, pointer blocking details and
+shake/tween timing are not reproduced. The original HUD layout is not recreated.
+UI tests exercise source perspective settings, model/ray roundtrip, physics
+picking and zoom followed by drop. These are headless tests, not visual approval.

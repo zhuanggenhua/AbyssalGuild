@@ -55,7 +55,7 @@ func run() -> void:
 	board.drag_moved = true
 	board.drag_delta = board.session.cards[bush].position - board.session.cards[villager].position
 	var target_point: Vector2 = board.session.cards[bush].position
-	board._finish_drag(board.camera.unproject_position(Vector3(target_point.x, 0, target_point.y)))
+	board._finish_drag(board.camera.unproject_position(Vector3(target_point.x, 0, -target_point.y)))
 	check(board.session.cards[villager].stack_id == board.session.cards[bush].stack_id, "drag drop merges real cards")
 	board._refresh()
 	var stack = board.session.stacks[board.session.cards[bush].stack_id]
@@ -63,7 +63,7 @@ func run() -> void:
 	board.dragging = villager
 	board.drag_moved = true
 	board.drag_delta = Vector2(3, 2) - stack.position
-	board._finish_drag(board.camera.unproject_position(Vector3(3, 0, 2)))
+	board._finish_drag(board.camera.unproject_position(Vector3(3, 0, -2)))
 	board._refresh()
 	check(is_equal_approx(board.views[villager].position.x, 3.0), "split is reflected on 3D board")
 	board._toggle_pause()
@@ -120,7 +120,7 @@ func run() -> void:
 	board.dragging = gear
 	board.drag_moved = true
 	board.drag_delta = Vector2(5, 5)
-	board._finish_drag(board.camera.unproject_position(Vector3(2, 0, 2)))
+	board._finish_drag(board.camera.unproject_position(Vector3(2, 0, -2)))
 	check(board.session.equipment.owners.get(gear, -1) == wearer, "drop equipment onto character equips it")
 	check(not board.views[gear].visible, "equipped item hidden from board")
 	board.selected = wearer
@@ -153,6 +153,7 @@ func run() -> void:
 	check(board.notice.text.begins_with("Could not save"), "failed save is explained")
 	DirAccess.remove_absolute("user://session.json.tmp")
 	_test_world_and_campaign(board)
+	await _test_source_camera_interaction(board)
 	print("UI checks: %d passed / %d total" % [checks - failures, checks])
 	board.queue_free()
 	await process_frame
@@ -164,7 +165,7 @@ func _drop_on(board, moving: int, destination: Vector2) -> void:
 	board.dragging = moving
 	board.drag_moved = true
 	board.drag_delta = destination - board.session.cards[moving].position
-	board._finish_drag(board.camera.unproject_position(Vector3(destination.x, 0, destination.y)))
+	board._finish_drag(board.camera.unproject_position(Vector3(destination.x, 0, -destination.y)))
 
 func _scene_quest_ids(board, scene_name: String) -> Array:
 	var ids: Array = []
@@ -283,3 +284,46 @@ func _test_world_and_campaign(board) -> void:
 	board.start_new()
 	board.set_process(false)
 	check(not board.session.friendly_mode, "unchecked title choice starts normal mode without stale friendly setting")
+
+func _test_source_camera_interaction(board) -> void:
+	var source_camera: Dictionary = board.visual_assets.camera_configuration("Main")
+	check(not source_camera.is_empty(), "imported Main camera has resolved source configuration")
+	check(board.camera.projection == Camera3D.PROJECTION_PERSPECTIVE, "source camera uses perspective projection")
+	check(is_equal_approx(board.camera.fov, 30.0), "source camera vertical field of view is 30 degrees")
+	check(is_equal_approx(board.camera.near, 2.0) and is_equal_approx(board.camera.far, 40.0), "source camera clipping planes are 2 and 40")
+	if DirAccess.dir_exists_absolute("res://.godot/imported"):
+		check(board.original_board != null, "source board geometry is instantiated with imported project cache")
+	else:
+		check(board.original_board == null and board.board_mesh.visible, "isolated no-import-cache run uses explicit fallback board")
+		print("UI note: source FBX node assertion requires actual project import cache; fallback verified here.")
+	if board.original_board != null:
+		check(is_equal_approx(board.original_board.scale.z, -1.0), "original board reflects source positive Z to view negative Z")
+	for model_point in [Vector2.ZERO, Vector2(2, 1), Vector2(-2, -1)]:
+		var screen: Vector2 = board.camera.unproject_position(Vector3(model_point.x, 0, -model_point.y))
+		check(board._board_point(screen).distance_to(model_point) < 0.001, "source model/view plane ray roundtrip " + str(model_point))
+	var wood: int = board.session.spawn_card(board.catalog.find_by_name("Wood"), Vector2(3, 1))
+	board._refresh()
+	check(is_equal_approx(board.views[wood].position.z, -board.session.cards[wood].position.y), "card node reflects model Z")
+	await physics_frame
+	await physics_frame
+	var screen: Vector2 = board.camera.unproject_position(board.views[wood].global_position)
+	check(board._pick(screen) == wood, "source perspective ray picks rendered card")
+	var before_transform: Transform3D = board.camera.global_transform
+	var before_fov: float = board.camera.fov
+	var before_size: float = board.camera.size
+	var zoom := InputEventMouseButton.new()
+	zoom.button_index = MOUSE_BUTTON_WHEEL_UP
+	zoom.pressed = true
+	zoom.position = screen
+	board._unhandled_input(zoom)
+	check(not board.camera.global_transform.is_equal_approx(before_transform) or not is_equal_approx(board.camera.fov, before_fov) or not is_equal_approx(board.camera.size, before_size), "wheel zoom changes camera")
+	var destination := Vector2(4, -1)
+	var destination_screen: Vector2 = board.camera.unproject_position(Vector3(destination.x, 0, -destination.y))
+	check(board._board_point(destination_screen).distance_to(destination) < 0.001, "model/view plane ray roundtrip survives zoom")
+	_drop_on(board, wood, destination)
+	check(board.session.cards[wood].position.distance_to(destination) < 0.001, "drag destination survives perspective zoom")
+	check(is_equal_approx(board.views[wood].position.z, -destination.y), "dragged card retains reflected position after zoom")
+	await physics_frame
+	await physics_frame
+	screen = board.camera.unproject_position(board.views[wood].global_position)
+	check(board._pick(screen) == wood, "rendered card remains pickable after zoom and move")

@@ -15,6 +15,8 @@ var feedback = AudioFeedback.new()
 var friendly_choice: CheckBox
 var session = Session.new()
 var camera: Camera3D
+var source_light: DirectionalLight3D
+var panning: bool = false
 var views: Dictionary = {}
 var running: bool = false
 var selected: int = -1
@@ -68,6 +70,7 @@ func _build_world() -> void:
 	world.environment.ambient_light_energy = 0.8
 	add_child(world)
 	var light := DirectionalLight3D.new()
+	source_light = light
 	light.rotation_degrees = Vector3(-65, -20, 0)
 	light.light_energy = 0.8
 	add_child(light)
@@ -226,6 +229,8 @@ func _enter_game() -> void:
 	vendor_guids = SceneConfig.offered_packs(catalog, session.scene_name)
 	_build_shop()
 	visual_assets.apply_scene(camera, board_mesh, session.scene_name)
+	visual_assets.apply_source_camera(camera, session.scene_name)
+	visual_assets.apply_source_light(source_light, session.scene_name)
 	# Original mesh is optional; validated source vertex bounds remain the fallback.
 	geometry_key = ""
 	_update_board_geometry()
@@ -254,8 +259,7 @@ func _process(delta: float) -> void:
 	if Input.is_physical_key_pressed(KEY_W): direction.z -= 1
 	if Input.is_physical_key_pressed(KEY_S): direction.z += 1
 	camera.position += direction * delta * 8
-	camera.position.x = clampf(camera.position.x, -10, 10)
-	camera.position.z = clampf(camera.position.z, 0, 16)
+	_clamp_camera()
 
 func _name(guid: String) -> String:
 	var fields: Dictionary = catalog.fields(guid)
@@ -284,7 +288,7 @@ func _sync_views() -> void:
 		views[id].caption.text = _name(session.cards[id].definition_guid)
 		views[id].highlight(id == selected)
 		if session.combat.membership.has(id):
-			views[id].position = Vector3(session.cards[id].position.x, 0.12, session.cards[id].position.y)
+			views[id].position = Vector3(session.cards[id].position.x, 0.12, -session.cards[id].position.y)
 	for stack in session.stacks.values():
 		for index in range(stack.card_ids.size()):
 			var id: int = stack.card_ids[index]
@@ -298,7 +302,7 @@ func _sync_views() -> void:
 			var offset := Vector2.ZERO
 			if dragging >= 0 and session.cards.has(dragging) and card.stack_id == session.cards[dragging].stack_id and index >= stack.card_ids.find(dragging):
 				offset = drag_delta
-			views[id].position = Vector3(stack.position.x + offset.x, 0.06 + index * _stack_step().y, stack.position.y + offset.y + index * _stack_step().z)
+			views[id].position = Vector3(stack.position.x + offset.x, 0.06 + index * _stack_step().y, -(stack.position.y + offset.y + index * _stack_step().z))
 			views[id].highlight(id == selected)
 
 func _pick(screen: Vector2) -> int:
@@ -311,7 +315,7 @@ func _pick(screen: Vector2) -> int:
 func _board_point(screen: Vector2) -> Vector2:
 	var point = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(screen), camera.project_ray_normal(screen))
 	if point == null: return Vector2.ZERO
-	return Vector2(point.x, point.z)
+	return Vector2(point.x, -point.z)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not running: return
@@ -319,7 +323,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_pause()
 	if event is InputEventMouseButton:
 		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
-			camera.size = clampf(camera.size + (-1 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1), 12, 34)
+			_zoom_camera(1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0)
+		if event.button_index == MOUSE_BUTTON_MIDDLE:
+			panning = event.pressed
 		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 			selected = _pick(event.position)
 			_refresh()
@@ -336,6 +342,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				drag_moved = false
 			else:
 				_finish_drag(event.position)
+	if event is InputEventMouseMotion and panning:
+		camera.position += Vector3(-event.relative.x, 0, -event.relative.y) * 0.01 * camera.position.y / 10.0
+		_clamp_camera()
 	if event is InputEventMouseMotion and dragging >= 0:
 		drag_moved = drag_moved or event.position.distance_to(press_position) > 7
 		if drag_moved: drag_delta = _board_point(event.position) - drag_origin
@@ -587,6 +596,7 @@ func _update_board_geometry() -> void:
 	if original_board != null:
 		add_child(original_board)
 		original_board.position.y = -0.05
+		original_board.scale.z = -1.0
 		board_mesh.hide()
 	else:
 		board_mesh.show()
@@ -627,3 +637,22 @@ func _combat_geometry() -> Array:
 			has_player = has_player or int(catalog.fields(session.cards[card_id].definition_guid).get("faction", 0)) == 1
 		if count > 0: result.append({"id": id, "ongoing": true, "has_player": has_player, "position": position / count})
 	return result
+
+# Model coordinates retain Unity XZ. Only the view reflects source +Z to Godot -Z.
+func _clamp_camera() -> void:
+	if not session.board_bounds is Rect2: return
+	var bounds: Rect2 = session.board_bounds
+	camera.position.x = clampf(camera.position.x, bounds.position.x - 0.5, bounds.end.x + 0.5)
+	camera.position.z = clampf(camera.position.z, -bounds.end.y - 0.5, -bounds.position.y + 0.5)
+
+func _zoom_camera(scroll: float) -> void:
+	if camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
+		camera.size = clampf(camera.size - scroll, 12, 34)
+		return
+	var forward: Vector3 = -camera.global_basis.z
+	var candidate: Vector3 = camera.position + forward * scroll
+	var distance: float = candidate.y / maxf(-forward.y, 0.0001)
+	# Original controller rejects, rather than clamps, an out-of-range zoom step.
+	if distance >= 5.0 and distance <= 20.0:
+		camera.position = candidate
+		_clamp_camera()

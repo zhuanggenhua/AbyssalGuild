@@ -186,3 +186,32 @@ func update_board_mesh_boost(board_node: Node, normalized_boost: float) -> void:
 				board_node.set_blend_shape_value(index, clampf(normalized_boost, 0, 1))
 	for child in board_node.get_children():
 		update_board_mesh_boost(child, normalized_boost)
+
+func camera_configuration(scene_name: String = "Main") -> Dictionary:
+	return preload("res://scripts/ui/source_camera.gd").configuration(scene_configuration(scene_name))
+
+func apply_source_camera(camera: Camera3D, scene_name: String = "Main") -> bool:
+	return preload("res://scripts/ui/source_camera.gd").apply(camera, scene_configuration(scene_name))
+
+func directional_light_configuration(scene_name: String = "Main") -> Dictionary:
+	for light in scene_configuration(scene_name).get("lights", []):
+		var fields: Dictionary = light.get("fields", {})
+		if int(fields.get("m_Type", -1)) != 1 or not fields.has("m_Intensity") or not fields.has("m_Color"):
+			continue
+		var pose := preload("res://scripts/ui/source_camera.gd").reflected_pose(light.get("transform_chain", []))
+		if pose.is_empty():
+			continue
+		return {"transform": pose.transform, "color": source_color(fields.m_Color),
+			"intensity": float(fields.m_Intensity), "shadows": fields.get("m_Shadows", {})}
+	return {}
+
+func apply_source_light(light: DirectionalLight3D, scene_name: String = "Main") -> bool:
+	var config := directional_light_configuration(scene_name)
+	if config.is_empty():
+		return false
+	light.global_transform = config.transform
+	light.light_color = config.color
+	light.light_energy = config.intensity
+	light.shadow_enabled = int(config.shadows.get("m_Type", 0)) != 0
+	light.shadow_opacity = float(config.shadows.get("m_Strength", 1.0))
+	return true
