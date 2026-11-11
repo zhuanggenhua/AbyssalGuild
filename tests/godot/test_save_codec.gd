@@ -42,6 +42,7 @@ func _init() -> void:
 	source.cards[second].uses_left = 2
 	var stack = source.stacks[source.cards[first].stack_id]
 	stack.recipe_guid = "recipe"
+	source.crafting.activate(stack) # Explicit synthetic saved task, not recipe selection.
 	stack.progress = 1.234567891234
 	stack.paused = true
 	source.discovered_recipes["recipe-id"] = true

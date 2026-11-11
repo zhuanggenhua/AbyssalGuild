@@ -113,19 +113,20 @@ The native renderer uses standard alpha blending as an explicit approximation;
 source built-in shader and exact Unity random/renderer behavior remain unresolved.
 
 
-## Reproduced interaction gaps under repair
+## Reproduced interaction gaps now covered
 
-A static/source-backed Godot audit identified remaining functionality beyond
-rendering acceptance. These are not covered by the completed-slice claims above:
+- Crafting now advances in reverse task activation order, independent of stack
+  registration. Explicit activation order persists through active/inactive scene
+  saves and held-state normalization. Legacy native v1 files use documented
+  deterministic saved-row fallback. See [crafting order](crafting-activation-order.md).
+- Live drag-target highlighting, hovered card/equipment information and per-stack
+  craft progress are connected to board input and view lifecycle. Menu/modal,
+  travel, title, same-ID replacement and focus-loss cleanup have integration
+  coverage. See [live feedback](card-feedback-board.md).
 
-- Crafting must advance in reverse task activation order, not registered-stack
-  order; this deterministic source ordering affects quest credit, new tasks and
-  RNG continuation and still needs explicit persisted task-order state.
-- Live drag-target highlighting, hover information and per-stack craft progress
-  affordances still need their prepared helper/view integration.
-
-These findings use locked original paths and isolated Godot probes, not Unity
-execution. Subsequent fixes must include interruption and repeated-input checks.
+These fixes use locked original paths and isolated Godot probes, not Unity
+execution. Headless input and resource checks do not establish rendered/manual
+acceptance or close the presentation gaps listed above.
 
 Required day-cycle actions now remain in the persistent header, independent of
 collapsed sidebars. Singleton chest clicks share the existing withdrawal path
@@ -148,8 +149,8 @@ owned input/scaled-time pauses. Carried releases, menu/pace/equipment exceptions
 real combat/cycle motion and silent restoration are tested. Explicit title Quit
 confirmation and Escape/gamepad-East menu/modal cancellation are also connected,
 including real headless Viewport event routing. Physical controller/window
-acceptance remains unverified. Source card information/progress/target helpers
-remain prepared but their live board wiring is still a separate unfinished slice.
+acceptance remains unverified. Source card information/progress/target helpers now have live board wiring and
+interruption checks, as described in the completed interaction slice above.
 
 
 Whole-price convenience purchases now validate each coin's remaining source
@@ -159,3 +160,14 @@ destinations before first-visit quest activation, and no longer wait until Conti
 to become visible. Both changes preserve failed-action atomicity and have actual
 source-card reproduction/continuation tests. Save APIs still require frame
 boundaries rather than arbitrary reentrant gameplay callbacks.
+
+
+## Newly reproduced AI placement gaps
+
+Source audit also found two narrow AI differences still under repair: accepted
+mob movement (and exhausted patrols) needs an immediate overlap-resolution call,
+including when an unrelated card is held; equidistant player target selection
+needs registered-stack/member ordering rather than card creation order. The
+native drag-protection lock remains an intentional interaction difference from
+source physics. These findings do not invalidate the separate crafting/feedback
+checks, and are not represented as presentation-only gaps.

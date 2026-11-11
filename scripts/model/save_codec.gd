@@ -46,7 +46,8 @@ static func _capture_unsettled(session) -> Dictionary:
 		"scene_name": session.scene_name, "friendly_mode": session.friendly_mode,
 		"next_id": session._next_id, "rng_seed": str(session.rng.seed), "rng_state": str(session.rng.state),
 		"cards": card_rows, "stacks": stack_rows, "discovered_recipes": session.discovered_recipes.duplicate(true),
-		"vendor_payments": session.vendor_payments.duplicate(true), "quests": session.quest_tracker.save_state()}}
+		"vendor_payments": session.vendor_payments.duplicate(true), "quests": session.quest_tracker.save_state(),
+		"crafting": session.crafting.save_state()}}
 	for key in ["equipment", "combat", "world", "ai", "collection", "cycle"]:
 		var helper = session.get(key)
 		if helper != null and helper.has_method("save_state"):
@@ -164,6 +165,11 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 		stacks[stack.id] = stack
 		all_ids[stack.id] = true
 	var helpers := {}
+	var crafting_raw: Variant = data.get("crafting", session.crafting.legacy_state(stacks))
+	var staged_crafting: Dictionary = session.crafting.stage_state(crafting_raw, stacks)
+	if not staged_crafting.ok:
+		return _fail("crafting: " + str(staged_crafting.error))
+	helpers.crafting = staged_crafting
 	for key in ["equipment", "combat", "world", "ai", "collection"]:
 		var helper = session.get(key)
 		if data.has(key):
@@ -224,6 +230,7 @@ static func restore(session, snapshot: Variant) -> Dictionary:
 	session.catalog.definitions = staged.catalog.definitions
 	session.cards = staged.cards
 	session.stacks = staged.stacks
+	session.crafting.apply_state(staged.helpers.crafting)
 	for key in ["day", "elapsed", "day_duration", "phase", "paused", "speed", "discovered_recipes", "vendor_payments"]:
 		session.set(key, data[key])
 	for guid in session.vendor_payments:

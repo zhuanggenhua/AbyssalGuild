@@ -61,6 +61,7 @@ func _init() -> void:
 		if stack.card_ids.is_empty(): continue
 		check(session.matches_recipe(stack, entry.fields), "actual source ingredient fixture matches")
 		stack.recipe_guid = str(entry.guid)
+		session.crafting.activate(stack) # Static display fixture, not gameplay selection.
 		stack.progress = float(entry.fields.craftingDuration) * 0.375
 		var rng_before: int = session.rng.state
 		var before: String = JSON.stringify(SaveCodec.capture(session))

@@ -229,6 +229,7 @@ func test_session_integration() -> void:
 	check(stack.recipe_guid == str(research.guid), "source exhausted continuous research repeats")
 	# Invalid forced travel tasks cannot degrade into ordinary recipes.
 	stack.recipe_guid = "unsupported-travel"
+	session.crafting.activate(stack) # Explicit forced task for rejection coverage.
 	session.catalog.definitions["unsupported-travel"] = {"script_class": "TravelRecipe", "fields": {"craftingDuration": 1, "requiredIngredients": research.fields.requiredIngredients, "resultingCard": grow.fields.resultingCard}}
 	events.clear()
 	session.tick(1)

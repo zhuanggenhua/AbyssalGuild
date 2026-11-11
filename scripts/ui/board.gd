@@ -11,6 +11,9 @@ const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
+const CardInteraction = preload("res://scripts/ui/card_interaction_descriptors.gd")
+const CardHoverView = preload("res://scripts/ui/card_hover_view.gd")
+const CraftProgressView = preload("res://scripts/ui/craft_progress_view.gd")
 const NavigationInput = preload("res://scripts/ui/navigation_input.gd")
 const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
 const OptionsAdapter = preload("res://scripts/ui/options_adapter.gd")
@@ -108,6 +111,17 @@ var vendor_buttons: Dictionary = {}
 var data_error: Error = OK
 var refresh_clock: float = 0.0
 var active_tab: String = "quests"
+var card_hover
+var craft_progress
+var hovered_card_id: int = -1
+var hovered_panel_owner: int = -1
+var card_drag_targets: Dictionary = {}
+var _card_pointer := Vector2.ZERO
+var _card_pointer_known: bool = false
+var _hover_view_instance: int = 0
+var _hover_definition: String = ""
+var _feedback_session_instance: int = 0
+var _feedback_scene: String = ""
 
 func _ready() -> void:
 	NavigationInput.ensure_cancel_bindings()
@@ -118,6 +132,8 @@ func _ready() -> void:
 	_build_ui()
 	for dialog in [archive_dialog, game_over_dialog, quit_dialog, options_panel.reset_dialog]:
 		NavigationInput.enable_modal_cancel(dialog)
+		dialog.visibility_changed.connect(_sync_card_feedback)
+	for panel in [pause_overlay, options_panel]: panel.visibility_changed.connect(_sync_card_feedback)
 	data_error = catalog.load_file()
 	visual_assets.load_manifest()
 	feedback.configure(catalog, visual_assets)
@@ -170,6 +186,9 @@ func _build_world() -> void:
 	add_child(camera)
 	camera.look_at(Vector3.ZERO)
 	camera.current = true
+	craft_progress = CraftProgressView.new()
+	craft_progress.name = "CraftProgress"
+	add_child(craft_progress)
 
 func _label(text: String, parent: Node, size: int = 16) -> Label:
 	var label := Label.new()
@@ -271,6 +290,14 @@ func _build_ui() -> void:
 	notice.position = Vector2(285, 835)
 	notice.size = Vector2(865, 50)
 	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	card_hover = CardHoverView.new()
+	card_hover.name = "CardHoverInfo"
+	# Its whole rectangle owns GUI input, including header/background. Scrolling
+	# must not zoom the camera or start a card drag through the information panel.
+	card_hover.mouse_filter = Control.MOUSE_FILTER_STOP
+	hud.add_child(card_hover)
+	hud.resized.connect(_layout_card_hover)
+	_layout_card_hover()
 	title_panel = PanelContainer.new()
 	layer.add_child(title_panel)
 	title_panel.position = Vector2(380, 90)
@@ -380,6 +407,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	_clear_card_feedback()
 	vendor_unlock.cancel()
 	_cancel_archive_slots()
 	archive_dialog.hide()
@@ -454,8 +482,7 @@ func _process(delta: float) -> void:
 	if external_pause:
 		# Combat travel/return and cycle waits remain real-time under external
 		# menu/reveal pauses. Their scaled death waits and action clocks stop.
-		session.combat.tick(0.0, delta)
-		session.cycle.advance(delta)
+		session.tick_paused(delta)
 		_sync_views()
 		return
 	session.tick(delta)
@@ -481,10 +508,12 @@ func _sync_views() -> void:
 	_ensure_layout()
 	for id in views.keys():
 		if not session.cards.has(id):
+			if id in [hovered_card_id, hovered_panel_owner]: _clear_card_hover()
 			views[id].queue_free()
 			views.erase(id)
 	for id in session.cards:
 		if views.has(id) and views[id].get_meta("definition_guid", "") != session.cards[id].definition_guid:
+			if id in [hovered_card_id, hovered_panel_owner]: _clear_card_hover()
 			views[id].hide()
 			views[id].queue_free()
 			views.erase(id)
@@ -532,6 +561,7 @@ func _sync_views() -> void:
 	camera.v_offset = shake.y
 	CyclePresentation.apply(session.cycle.presentation_state(), views)
 	_sync_equipment_display()
+	_sync_card_feedback()
 
 func _pick_target(screen: Vector2) -> Dictionary:
 	var origin := camera.project_ray_origin(screen)
@@ -553,10 +583,114 @@ func _sync_equipment_display() -> void:
 		if not panel.is_empty(): metadata[id] = panel
 	equipment_display.sync(session.equipment.equipped, views, metadata, session.phase == "playing")
 
+func _layout_card_hover() -> void:
+	if card_hover == null or hud == null: return
+	var available: Vector2 = hud.size
+	var top: float = 100.0 if available.y > 180 else minf(12, available.y)
+	var bottom: float = 80.0 if available.y > 240 else 12.0
+	var extent := Vector2(maxf(0, minf(400, available.x - 24)), maxf(0, minf(315, available.y - top - bottom)))
+	var origin := Vector2(clampf(285, 12, maxf(12, available.x - extent.x - 12)), maxf(top, available.y - bottom - extent.y))
+	card_hover.set_bounds(Rect2(origin, extent))
+
+func _record_card_pointer(screen: Vector2) -> void:
+	if not screen.is_finite(): return
+	_card_pointer = screen
+	_card_pointer_known = true
+
+func _clear_card_hover() -> void:
+	hovered_card_id = -1
+	hovered_panel_owner = -1
+	_hover_view_instance = 0
+	_hover_definition = ""
+	if is_instance_valid(card_hover): card_hover.set_descriptor({})
+
+func _clear_drag_target_feedback() -> void:
+	card_drag_targets = {}
+	CardInteraction.apply_target_highlights(views, {})
+
+func _clear_card_feedback() -> void:
+	_card_pointer_known = false
+	_feedback_session_instance = 0
+	_feedback_scene = ""
+	_clear_card_hover()
+	_clear_drag_target_feedback()
+	if is_instance_valid(craft_progress): craft_progress.reset()
+
+func _hover_source_visible(id: int, panel: bool = false) -> bool:
+	if not session.cards.has(id) or not views.has(id): return false
+	var view = views[id]
+	if not is_instance_valid(view) or view.is_queued_for_deletion() or not view.is_visible_in_tree(): return false
+	if panel:
+		return is_instance_valid(view.equipment_panel) and view.equipment_panel.is_visible_in_tree()
+	return true
+
+func _own_hover_control(control: Control) -> bool:
+	return control != null and card_hover.visible and (control == card_hover or card_hover.is_ancestor_of(control))
+
+func _sync_card_hover(gui: Control) -> void:
+	# Source Hover is below Sequence and Modal. Keep notices/actions independent.
+	if not _card_pointer_known or session.phase != "playing" or vendor_unlock.is_active():
+		_clear_card_hover()
+		return
+	if gui != null and gui != hud and not _own_hover_control(gui):
+		_clear_card_hover()
+		return
+	var id: int = hovered_panel_owner if hovered_panel_owner >= 0 else hovered_card_id
+	var panel: bool = hovered_panel_owner >= 0
+	if _own_hover_control(gui):
+		# Preserve its valid source while scrolling; never ray-pick through the panel.
+		if not _hover_source_visible(id, panel) or views[id].get_instance_id() != _hover_view_instance or session.cards[id].definition_guid != _hover_definition:
+			_clear_card_hover()
+			return
+	else:
+		var hit: Dictionary = _pick_target(_card_pointer)
+		panel = int(hit.get("panel_owner", -1)) >= 0
+		id = int(hit.get("panel_owner", -1)) if panel else int(hit.get("card_id", -1))
+		if not _hover_source_visible(id, panel):
+			_clear_card_hover()
+			return
+		hovered_panel_owner = id if panel else -1
+		hovered_card_id = -1 if panel else id
+		_hover_view_instance = views[id].get_instance_id()
+		_hover_definition = session.cards[id].definition_guid
+	var info: Dictionary = CardInteraction.equipment_panel_info(session, id) if panel else CardInteraction.hover_info(session, id)
+	if info.is_empty(): _clear_card_hover()
+	else: card_hover.set_descriptor(info)
+
+func _sync_card_feedback() -> void:
+	if not is_instance_valid(card_hover) or not is_instance_valid(craft_progress): return
+	# Numeric IDs may be reused after travel/load, so clear before reading a new owner.
+	if _feedback_session_instance != session.get_instance_id() or _feedback_scene != session.scene_name:
+		_clear_card_feedback()
+		_feedback_session_instance = session.get_instance_id()
+		_feedback_scene = session.scene_name
+	if not running or not hud.visible or title_panel.visible:
+		_clear_card_feedback()
+		return
+	if _ui_pause_active() or _navigation_modal_active():
+		_clear_card_hover()
+		_clear_drag_target_feedback()
+		craft_progress.reset()
+		return # Existing held pointer permission/model pause is never changed here.
+	var progress: Dictionary = CardInteraction.crafting_progress(session)
+	if vendor_unlock.is_active():
+		for descriptor in progress.values(): descriptor.paused = true
+	craft_progress.sync(progress)
+	var gui: Control = get_viewport().gui_get_hovered_control()
+	_sync_card_hover(gui)
+	var candidates: Array = []
+	var allowed: bool = _card_pointer_known and _allows_card_actions() and dragging >= 0 and drag_grant == dragging and session.cards.has(dragging) and (gui == null or gui == hud)
+	if allowed:
+		for stack_id in session.stacks:
+			if session.can_move_to_stack(dragging, stack_id): candidates.append(stack_id)
+	card_drag_targets = CardInteraction.drag_targets(session, dragging, candidates, allowed)
+	CardInteraction.apply_target_highlights(views, card_drag_targets)
+
 # Pointer routing is separate from ray casting for deterministic adapter tests.
 func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	# Ignore repeated/replacement presses until the captured pointer is released.
 	if dragging >= 0: return
+	_record_card_pointer(screen)
 	drag_grant = -1
 	var id: int = int(hit.get("card_id", -1))
 	var panel: int = int(hit.get("panel_owner", -1))
@@ -566,6 +700,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	if panel >= 0:
 		pressed_panel = panel if _allows_equipment_panel_input() else -1
 		dragging = -1
+		_sync_card_feedback()
 		return
 	pressed_panel = -1
 	if is_gear and session.equipment.owners.has(id) and _allows_card_actions():
@@ -591,6 +726,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	drag_origin = _board_point(screen)
 	drag_delta = Vector2.ZERO
 	drag_moved = false
+	_sync_card_feedback()
 
 func _board_point(screen: Vector2) -> Vector2:
 	var point = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(screen), camera.project_ray_normal(screen))
@@ -630,6 +766,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
+	if running and (event is InputEventMouseMotion or event is InputEventMouseButton):
+		_record_card_pointer(event.position)
 	# Middle-button pan bypasses GUI blocking, matching the source input path.
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
 		panning = event.pressed and _camera_input_enabled()
@@ -672,6 +810,7 @@ func _finish_drag(screen: Vector2) -> void:
 	drag_grant = -1
 	session.combat.dragged.clear()
 	dragging = -1
+	_clear_drag_target_feedback()
 	if (not _allows_card_actions() and not carried_press) or not session.cards.has(id):
 		session.drag.finish_standard()
 		drag_delta = Vector2.ZERO
@@ -1038,6 +1177,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_clear_card_feedback()
 	vendor_unlock.cancel()
 	_cancel_archive_slots()
 	archive_dialog.hide()
@@ -1062,6 +1202,7 @@ func _show_title() -> void:
 	for view in views.values(): view.hide()
 	for rectangle in combat_rectangles.values(): rectangle.hide()
 	for zone in trade_views.values(): zone.hide()
+	_clear_card_feedback() # Menu visibility callbacks must not repopulate old bars.
 
 func _prepare_quit() -> bool:
 	# Source IsEndingCycle stays set from feeding through ready/game-over.
@@ -1070,6 +1211,11 @@ func _prepare_quit() -> bool:
 	return result.ok
 
 func _notification(what: int) -> void:
+	if what in [NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]:
+		_card_pointer_known = false
+		_clear_card_hover()
+		_clear_drag_target_feedback()
+		return
 	if what != NOTIFICATION_WM_CLOSE_REQUEST or quit_dispatched or _navigation_modal_active(): return
 	if options_panel != null and options_panel.visible and options_panel.dirty:
 		options_panel.request_close()

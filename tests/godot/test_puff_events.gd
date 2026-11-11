@@ -308,6 +308,7 @@ func _test_source_data() -> void:
 				var id: int = s.spawn_card(c.ref_guid(ingredient.card), Vector2.ZERO, stack_id)
 				stack_id = s.cards[id].stack_id
 		s.stacks[stack_id].recipe_guid = recipe.guid
+		s.crafting.activate(s.stacks[stack_id]) # Forced cue fixture includes travel checkpoint.
 		events = listen(s)
 		s._complete_recipe(s.stacks[stack_id])
 		check(named(events, "puff_requested").is_empty() and named(events, "recipe_pop_requested").is_empty(), "Actual " + script + " excludes base Puff and Pop")

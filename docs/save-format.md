@@ -23,7 +23,7 @@ The envelope has `format: "abyssal-guild-session"`, `version: 1`, and `session`:
 - Cards: stable instance ID, current/base definition GUIDs, stack ID, uses remaining, health, nutrition, stored coins, and 2D position.
 - Stacks: stable ID, bottom-to-top card IDs, position, recipe GUID, craft progress and pause.
 - Progress: discovered recipe IDs, vendor installment amounts, completed quest IDs and active quest counters through QuestTracker's snapshot API.
-- Determinism: next instance ID and RNG seed/state.
+- Determinism: next instance ID, RNG seed/state, and explicit oldest-to-newest crafting task activation order. Present malformed order is rejected atomically; legacy v1 without the field uses saved stack-row order. See [crafting activation order](crafting-activation-order.md).
 - Equipment/combat helper snapshots, including their persistent references and active state. Transient drag state is intentionally not persisted.
 - World helper snapshot: scene, completed encounters and processed encounter days.
 - AI helper snapshot: configured scene and one record per live imported CardAI prefab, recording running status, movement wait and (for running nonaggressive producers) production wait. These native checkpoints preserve exact continuation rather than recreating Unity coroutines.

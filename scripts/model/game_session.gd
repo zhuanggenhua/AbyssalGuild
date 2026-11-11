@@ -13,6 +13,7 @@ const CombatSystem = preload("res://scripts/model/combat_system.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 const CycleController = preload("res://scripts/model/cycle_controller.gd")
 const HeldStack = preload("res://scripts/model/held_stack.gd")
+const CraftingOrder = preload("res://scripts/model/crafting_order.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)
 var catalog
@@ -28,6 +29,7 @@ var campaign = Campaign.new()
 var ai = MobAI.new()
 var cycle = CycleController.new()
 var drag = HeldStack.new()
+var crafting = CraftingOrder.new()
 var scene_name: String = "Main"
 var friendly_mode: bool = false
 var board_bounds: Variant = null
@@ -60,6 +62,7 @@ func configure(source_catalog, random_seed: int = 1, selected_scene: String = "M
 	combat.configure(self, equipment)
 	cycle.configure(self)
 	drag.configure(self)
+	crafting.configure(self)
 	rng.seed = random_seed
 	quest_tracker.configure(catalog, scene_name)
 	if not event_occurred.is_connected(_track_quest_event):
@@ -105,6 +108,7 @@ func capture_card_targets(ids: Array) -> Dictionary:
 
 func start_new_game() -> int:
 	drag.reset()
+	crafting.reset()
 	campaign.saved_scenes.clear()
 	campaign.current_scene = scene_name
 	ai.reset()
@@ -456,6 +460,7 @@ func _check_recipe(stack) -> void:
 				break
 	stack.recipe_guid = str(chosen.guid)
 	stack.progress = 0
+	crafting.activate(stack)
 	_discover_recipe(str(chosen.fields.id))
 
 func tick(delta: float) -> void:
@@ -463,28 +468,28 @@ func tick(delta: float) -> void:
 		return
 	# Source real-time combat travel/return continues while scaled gameplay pauses.
 	if paused or phase != "playing":
-		combat.tick(0.0, delta)
-		cycle.advance(delta)
+		tick_paused(delta)
 		return
-	var tick_scene: String = scene_name
 	var step: float = delta * speed
 	ai.tick(step)
 	combat.tick(step, delta)
-	for stack in stacks.values().duplicate():
-		if not stacks.has(stack.id) or stacks[stack.id] != stack:
-			continue
-		if stack.recipe_guid.is_empty() or stack.paused:
-			continue
-		stack.progress += step
-		if stack.progress >= float(catalog.fields(stack.recipe_guid).get("craftingDuration", 5)):
-			_complete_recipe(stack)
-			if scene_name != tick_scene:
-				return # Never advance old-scene stacks or destination time after travel.
+	if crafting.advance(step):
+		return # Never advance old-scene tasks or destination time after travel.
 	elapsed += step
 	if elapsed >= day_duration:
 		# Automatic day-end pause is silent in TimeManager, unlike user cycling.
 		cycle.request_end_day()
 	changed.emit()
+
+## Source Update still checks completed tasks when scaled time is zero. Share
+## this path with external menu/vendor pauses; incomplete tasks cannot advance.
+func tick_paused(delta: float) -> void:
+	if delta <= 0:
+		return
+	combat.tick(0.0, delta)
+	if crafting.advance(0.0):
+		return
+	cycle.advance(delta)
 
 func _complete_recipe(stack) -> void:
 	var entry: Dictionary = catalog.get_definition(stack.recipe_guid)

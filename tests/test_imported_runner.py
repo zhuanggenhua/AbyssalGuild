@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_crafting_order_board": "Crafting order board clock: 1/1 passed",
+    "test_card_feedback_board": "Card feedback board checks: 1 passed / 1 total",
     "test_vendor_unlock_board": "Vendor unlock board checks: 1 passed / 1 total",
     "test_navigation_ui": "Navigation UI checks: 1 passed / 1 total",
     "test_held_stack_board": "Held stack board checks: 1 passed / 1 total",

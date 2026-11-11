@@ -75,6 +75,7 @@ func run() -> void:
 
 	var craft = session.stacks[101]
 	craft.recipe_guid = "recipe"
+	session.crafting.activate(craft) # Explicit presentation-only task fixture.
 	craft.progress = 2.25
 	var craft_hover: Dictionary = Descriptors.hover_info(session, 3)
 	check(craft_hover.kind == "craft" and craft_hover.header == "Make a thing" and craft_hover.body == "Time left: 5.8s", "craft takes precedence on every member")
@@ -109,6 +110,7 @@ func run() -> void:
 	craft.recipe_guid = "missing"
 	check(Descriptors.crafting_progress(session).is_empty(), "missing recipe omitted without starting another")
 	craft.recipe_guid = "recipe"
+	session.crafting.activate(craft) # Explicit presentation-only task fixture.
 	session.catalog.definitions.recipe.fields.requiredIngredients[0].count = 99
 	check(Descriptors.crafting_progress(session).has(101), "presentation trusts registered task instead of rematching ingredients")
 	session.catalog.definitions.recipe.fields.requiredIngredients[0].count = 1
