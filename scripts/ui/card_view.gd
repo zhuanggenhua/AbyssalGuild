@@ -1,9 +1,10 @@
 extends Node3D
-## Generated geometry with optional locally imported source art and appearance.
+## Source mesh/material adapter when complete; generated geometry otherwise.
 var card_id: int
 var caption: Label3D
 var body: MeshInstance3D
 var material: StandardMaterial3D
+var source_material: ShaderMaterial
 
 func configure(id: int, title: String, category: int, is_pack: bool, visual_assets = null, fields: Dictionary = {}, scene_name: String = "Main", collider_size: Vector3 = Vector3.ZERO) -> void:
 	card_id = id
@@ -26,7 +27,14 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 		var colors: Dictionary = appearance.get("material", {}).get("colors", {})
 		if colors.has("_Color"):
 			material.albedo_color = visual_assets.source_color(colors._Color)
-	body.material_override = material
+	if visual_assets != null:
+		var imported: MeshInstance3D = visual_assets.create_card_mesh(appearance)
+		if imported != null:
+			body.free()
+			body = imported
+			source_material = body.material_override
+	if source_material == null:
+		body.material_override = material
 	add_child(body)
 	var collision := StaticBody3D.new()
 	collision.set_meta("card_id", id)
@@ -48,8 +56,16 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 	caption.pixel_size = mesh.size.x / 200.0
 	caption.width = 175
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if source_material != null:
+		var title_data: Dictionary = appearance.get("prefab", {}).get("title", {})
+		var pose: Dictionary = preload("res://scripts/ui/source_camera.gd").reflected_pose(title_data.get("transform_chain", []))
+		if not pose.is_empty():
+			caption.transform = pose.transform
+			caption.position.y += 0.01 # Avoid coplanar text on the source flat mesh.
+			caption.modulate = visual_assets.source_color(title_data.get("color", {}))
+			caption.pixel_size = float(title_data.get("rect_size", {}).get("x", mesh.size.x)) / 200.0
 	add_child(caption)
-	if visual_assets != null:
+	if visual_assets != null and source_material == null:
 		var art: Texture2D = visual_assets.texture(appearance.get("art_guid", ""))
 		if art != null:
 			var face := MeshInstance3D.new()
@@ -70,3 +86,5 @@ func highlight(value: bool) -> void:
 	material.emission_enabled = value
 	material.emission = Color("31666b")
 	material.emission_energy_multiplier = 0.25
+	if source_material != null:
+		source_material.set_shader_parameter("selection_emission", Vector3(0.192, 0.4, 0.42) * (0.25 if value else 0.0))

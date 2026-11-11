@@ -1,8 +1,9 @@
 extends RefCounted
-## Optional private assets. Generated geometry is an adapter, not shader/mesh parity.
+## Optional private media bindings with generated-geometry fallback.
 var manifest: Dictionary = {}
 var root_path: String = "res://assets/imported/"
 var texture_cache: Dictionary = {}
+var model_cache: Dictionary = {}
 
 func load_manifest(path: String = "res://assets/imported/manifest.json") -> Error:
 	if not FileAccess.file_exists(path):
@@ -22,6 +23,7 @@ func load_manifest(path: String = "res://assets/imported/manifest.json") -> Erro
 	manifest = parsed
 	root_path = path.get_base_dir() + "/"
 	texture_cache.clear()
+	model_cache.clear()
 	return OK
 
 func texture(guid: String) -> Texture2D:
@@ -215,3 +217,28 @@ func apply_source_light(light: DirectionalLight3D, scene_name: String = "Main") 
 	light.shadow_enabled = int(config.shadows.get("m_Type", 0)) != 0
 	light.shadow_opacity = float(config.shadows.get("m_Strength", 1.0))
 	return true
+
+func model_scene(guid: String) -> PackedScene:
+	if model_cache.has(guid):
+		return model_cache[guid]
+	var entry: Dictionary = manifest.get("assets", {}).get(guid, {})
+	if entry.get("kind", "") != "fbx":
+		return null
+	var relative: String = str(entry.get("path", ""))
+	if relative.is_empty() or relative.is_absolute_path() or relative.contains("..") or relative.contains(":") or relative.contains("\\"):
+		return null
+	var path := root_path + relative
+	var remap := ConfigFile.new()
+	# A copied FBX without an editor import is not a loadable runtime scene.
+	if remap.load(path + ".import") != OK or not FileAccess.file_exists(str(remap.get_value("remap", "path", ""))):
+		return null
+	if not ResourceLoader.exists(path, "PackedScene"):
+		return null
+	var packed = ResourceLoader.load(path, "PackedScene")
+	if not packed is PackedScene:
+		return null
+	model_cache[guid] = packed
+	return packed
+
+func create_card_mesh(appearance_data: Dictionary) -> MeshInstance3D:
+	return preload("res://scripts/ui/card_mesh_binding.gd").create(self, appearance_data)

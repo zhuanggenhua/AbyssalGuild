@@ -29,14 +29,18 @@ PNG, displayed on a transparent plane. Scene `cardPrefabs`, `packPrefab` and
 `aggressiveMobPrefab` choose the actual prefab. The renderer on the collider's
 object supplies the material's `_Color`; collider X/Z supply card dimensions.
 The original zero-thickness collider gets a 0.02-unit Godot interaction thickness.
-The art-plane layout and label placement are adapter choices, not source parity.
+That generated art-plane fallback remains an adapter. Complete private bindings
+now use actual Card/Pack FBX and an independently written UV compositor; see
+`card-mesh-binding.md`. Source title pose/color is retained, while typography
+and full pixel parity remain unverified.
 
 Board01/Board02 use SkinnedMeshRenderer with Body_01/Body_02 and Header materials.
 The adapter uses the actual privately imported FBX, material slots and Scale
 blend shape when its Godot cache is available. A generated fallback uses the
 verified geometry bounds otherwise. Source camera/light mappings are described
-below. Unity shader graphs, original card overlay composition/rounded meshes,
-fonts and effects are not reproduced, and lighting is not visually calibrated.
+below. Card shader-graph behavior is independently rewritten for the audited base/art
+composition without copying the graph itself. Other shaders, fonts and effects
+remain incomplete, and lighting is not visually calibrated.
 
 Validation:
 

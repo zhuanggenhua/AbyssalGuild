@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import shutil
 from import_stackcraft import parse_unity, json_bytes, sha256
-from visual_scene_metadata import apply_overrides, camera_records, light_records
+from visual_scene_metadata import apply_overrides, camera_records, light_records, transform_chain
 
 SUPPORTED = {'.png', '.wav', '.fbx'}
 
@@ -53,6 +53,7 @@ def build(source, catalog, output):
                     continue
                 fields = doc['fields']; saved = fields.get('m_SavedProperties', {})
                 result['materials'][guid] = {'source_path': relative, 'name': fields.get('m_Name'),
+                    'shader_source_path': index.get(fields.get('m_Shader', {}).get('guid', ''), {}).get('source_path', ''),
                     'colors': {k: v for item in saved.get('m_Colors', []) for k, v in item.items()},
                     'textures': {k: v for item in saved.get('m_TexEnvs', []) for k, v in item.items()},
                     'floats': {k: v for item in saved.get('m_Floats', []) for k, v in item.items()}}
@@ -65,9 +66,25 @@ def build(source, catalog, output):
         # Root card renderer is selected by collider owner, never a text child.
         collider = colliders[0] if colliders else {}
         renderer = next((f for f in renderers if f.get('m_GameObject') == collider.get('m_GameObject')), renderers[0] if renderers else {})
+        owner = renderer.get('m_GameObject')
+        mesh_filter = next((d['fields'] for d in docs if d['object_type'] == 'MeshFilter' and d['fields'].get('m_GameObject') == owner), {})
+        mesh = renderer.get('m_Mesh') or mesh_filter.get('m_Mesh', {})
+        pose = transform_chain(docs, owner)
+        # Only a directly parented Title with explicit text color is supported.
+        title = {}
+        root_transform = next((d for d in docs if d['object_type'] == 'Transform' and d['fields'].get('m_GameObject') == owner), {})
+        for doc in docs:
+            if doc['object_type'] != 'GameObject' or doc['fields'].get('m_Name') != 'Title':
+                continue
+            title_owner = {'fileID': doc['file_id']}
+            rect = next((d['fields'] for d in docs if d['object_type'] == 'RectTransform' and d['fields'].get('m_GameObject') == title_owner), {})
+            text = next((d['fields'] for d in docs if d['object_type'] == 'MonoBehaviour' and d['fields'].get('m_GameObject') == title_owner and 'm_fontColor' in d['fields']), {})
+            keys = ('m_LocalPosition', 'm_LocalRotation', 'm_LocalScale')
+            if pose and text and all(k in rect for k in keys) and str(rect.get('m_Father', {}).get('fileID')) == str(root_transform.get('file_id')):
+                title = {'transform_chain': pose + [{k: rect[k] for k in keys}], 'color': text['m_fontColor'], 'rect_size': rect.get('m_SizeDelta', {})}
         result['prefabs'][guid] = {'source_path': index.get(guid, {}).get('source_path', ''),
             'size': collider.get('m_Size', {}), 'materials': renderer.get('m_Materials', []),
-            'mesh': renderer.get('m_Mesh', {}),
+            'mesh': mesh, 'transform_chain': pose, 'title': title,
             'renderers': [{'owner': f.get('m_GameObject'), 'materials': f.get('m_Materials', [])} for f in renderers]}
         return guid
     for scene in catalog.get('scenes', []):

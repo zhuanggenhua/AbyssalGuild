@@ -29,9 +29,13 @@ The full private source and assets now pass the 1327-file source lock.
 
 ## Presentation and platform acceptance
 
-- Original source UI composition, rounded card meshes/shaders, original fonts,
+- Original source UI composition, complete rendering/lighting parity, original fonts,
   equipment/price overlays, drag/craft/feed/death/projectile animations, camera
   smoothing/shake and source sound timing remain incomplete.
+- Original Card/Pack FBX and independently rewritten UV/material composition are
+  now bound when complete private inputs exist. This has structural/resource
+  coverage, not pixel/GPU acceptance. Equipment panels and full stat overlays
+  remain incomplete.
 - Nearby attachment currently uses deterministic target-pose collider geometry,
   not Unity Physics overlap ordering or animated transforms. Source target-layout
   math is covered, but cross-engine physics equivalence is not established.
