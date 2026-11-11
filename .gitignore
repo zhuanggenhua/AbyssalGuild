@@ -1,0 +1,14 @@
+# Godot generated/import caches
+.godot/
+*.tmp
+# Licensed source and generated content stay local until distribution is cleared.
+source/
+third_party/
+assets/imported/
+data/
+build/
+artifacts/
+.env
+.env.*
+__pycache__/
+*.pyc
