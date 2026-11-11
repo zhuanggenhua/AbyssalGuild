@@ -212,29 +212,53 @@ func _build_world() -> void:
 	add_child(world)
 	var light := DirectionalLight3D.new()
 	source_light = light
-	light.rotation_degrees = Vector3(-65, -20, 0)
-	light.light_energy = 0.8
 	add_child(light)
 	var board := MeshInstance3D.new()
 	board_mesh = board
 	var mesh := BoxMesh.new()
-	mesh.size = Vector3(28, 0.2, 22)
 	board.mesh = mesh
-	board.position.y = -0.2
-	var material := StandardMaterial3D.new()
-	material.albedo_color = Color("25434a")
-	board.material_override = material
 	add_child(board)
 	camera = Camera3D.new()
-	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
-	camera.size = 23
-	camera.position = Vector3(0, 24, 8)
 	add_child(camera)
-	camera.look_at(Vector3.ZERO)
+	_restore_title_world()
 	camera.current = true
 	craft_progress = CraftProgressView.new()
 	craft_progress.name = "CraftProgress"
 	add_child(craft_progress)
+
+func _restore_title_world() -> void:
+	# Unity returns by loading Title as a fresh scene. This native single-scene
+	# shell must likewise discard gameplay geometry, lighting and camera state.
+	# Preserve the same explicit native title backdrop used on first launch.
+	if is_instance_valid(original_board):
+		original_board.hide()
+		original_board.queue_free()
+	original_board = null
+	geometry_key = ""
+	board_mesh.mesh.size = Vector3(28, 0.2, 22)
+	board_mesh.position = Vector3(0, -0.2, 0)
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color("25434a")
+	board_mesh.material_override = material
+	board_mesh.show()
+	source_light.transform = Transform3D.IDENTITY
+	source_light.rotation_degrees = Vector3(-65, -20, 0)
+	source_light.light_color = Color.WHITE
+	source_light.light_energy = 0.8
+	source_light.shadow_enabled = false
+	source_light.shadow_opacity = 1.0
+	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
+	camera.keep_aspect = Camera3D.KEEP_HEIGHT
+	camera.size = 23
+	camera.fov = 75
+	camera.near = 0.05
+	camera.far = 4000
+	camera.position = Vector3(0, 24, 8)
+	camera.look_at(Vector3.ZERO)
+	camera.h_offset = 0
+	camera.v_offset = 0
+	camera_motion.configure(camera.position)
+	panning = false
 
 func _label(text: String, parent: Node, size: int = 16) -> Label:
 	var label := Label.new()
@@ -322,6 +346,8 @@ func _build_ui() -> void:
 	left.add_child(speeds)
 	for speed in [1.0, 2.0]:
 		speed_buttons[speed] = _button("%dx" % speed, speeds, _set_speed.bind(speed))
+		speed_buttons[speed].clip_text = false
+		speed_buttons[speed].size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_button("Save", left, _save_game)
 	_button("Save & title", left, _request_return_title)
 	_label("MARKET", left, 20)
@@ -342,13 +368,15 @@ func _build_ui() -> void:
 	inspection.custom_minimum_size.y = 125
 	_button("Sell selected card", right, _sell_selected)
 	_button("Sell selected stack", right, _sell_selected_stack)
-	_button("Withdraw selected chest coin", right, _withdraw_selected)
-	_button("Unequip selected character", right, _unequip_selected)
-	_button("Engage selected enemy", right, _engage_selected)
+	_button("Withdraw chest coin", right, _withdraw_selected).tooltip_text = "Withdraw selected chest coin"
+	_button("Unequip character", right, _unequip_selected).tooltip_text = "Unequip selected character"
+	_button("Engage enemy", right, _engage_selected).tooltip_text = "Engage selected enemy"
 	var tabs := HBoxContainer.new()
 	right.add_child(tabs)
-	_button("Quests", tabs, _show_journal_tab.bind("quests"))
-	_button("Recipes", tabs, _show_journal_tab.bind("recipes"))
+	for tab in ["quests", "recipes"]:
+		var tab_button := _button(tab.capitalize(), tabs, _show_journal_tab.bind(tab))
+		tab_button.clip_text = false
+		tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ledger = RichTextLabel.new()
 	ledger.meta_hover_started.connect(_on_ledger_hover)
 	ledger.custom_minimum_size = Vector2(210, 260)
@@ -1384,6 +1412,7 @@ func _show_title() -> void:
 	right_pressed_panel = -1
 	pause_overlay.hide()
 	running = false
+	_restore_title_world()
 	dragging = -1
 	hud.hide()
 	title_navigation.open(TitleNavigation.HOME)

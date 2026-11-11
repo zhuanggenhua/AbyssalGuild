@@ -32,6 +32,7 @@ SUITES = (
     ("test_combat_sprite_binding", r"Private combat sprites: PASS"),
     ("test_combat_presentation", r"Combat presentation checks: [1-9]\d* passed"),
     ("test_combat_feedback_ui", r"Combat feedback UI checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_gui_layout", r"GUI layout and title reset: [1-9]\d* checks, 0 failures"),
     ("test_ui_smoke", r"UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_ai_placement_board", r"AI placement board: [1-9]\d*/[1-9]\d* passed"),
     ("test_crafting_order_board", r"Crafting order board clock: [1-9]\d*/[1-9]\d* passed"),

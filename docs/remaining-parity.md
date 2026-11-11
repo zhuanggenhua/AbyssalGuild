@@ -53,8 +53,8 @@ The full private source and assets now pass the 1327-file source lock.
   math is covered, but cross-engine physics equivalence is not established.
 - Godot headless source-data, synthetic, missing-data and real imported-FBX checks
   pass separately. None substitute for rendered legibility, mouse/touch play,
-  listening, Windows execution or export/install acceptance. No working display
-  server was available for screenshot/manual verification in this environment.
+  listening, Windows execution or export/install acceptance. A later cloud-native display enabled a bounded pointer/keyboard smoke run;
+  see [GUI smoke](gui-smoke.md). Broader rendered/platform acceptance remains open.
 
 All 14 source quest types and ordinary/Exploration/Growth/Research/Travel recipe
 execution paths have implementations; do not infer they are missing wholesale.
@@ -268,3 +268,13 @@ binding, event order and real-time tracks; [UI feedback](text-button-feedback.md
 covers callback-before-sound, explicit source control mapping, modal cancellation,
 silent row hover and native underline cleanup. This closes the concrete omissions
 from that inventory, without claiming exact GPU/canvas/font/physical-input output.
+
+
+## Native GUI follow-up
+
+A real cloud-native smoke run exposed collapsed journal tabs, truncated inspector
+actions and gameplay world state leaking into the title. These now have focused
+container/world-lifecycle corrections and explicit regression coverage. See
+[GUI smoke and layout](gui-smoke.md) for the tested paths and remaining Starter
+edge-framing, audio-device and platform limitations. This is not full visual
+parity or final acceptance.
