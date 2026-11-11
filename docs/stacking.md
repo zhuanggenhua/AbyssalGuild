@@ -49,3 +49,9 @@ Verification: `bash tools/test_godot.sh res://tests/godot/test_stacking.gd` uses
 synthetic asymmetric matrix entries and mixed stacks to distinguish first/last
 ordering, effective/base definitions, active-craft gates/resume, and chest handling.
 No Unity runtime or original content assets are required.
+
+The live pointer path now owns this context through `session.drag`, splits at
+press rather than release, and validates/resumes the original on every ordinary
+end path. Whole-stack pickup remains unpaused. Native held checkpoints and the
+source click-early-return safety correction are documented in
+[held-stack lifecycle](held-stack-lifecycle.md).

@@ -10,6 +10,8 @@ var equipment_panel: Node3D
 var _default_state: Dictionary = {}
 var _unflashed_color: Color = Color.WHITE
 var hurt_flash: float = 0.0
+var drag_target: Node3D
+var _feedback_footprint := Vector3.ZERO
 
 func configure(id: int, title: String, category: int, is_pack: bool, visual_assets = null, fields: Dictionary = {}, scene_name: String = "Main", collider_size: Vector3 = Vector3.ZERO) -> void:
 	card_id = id
@@ -42,6 +44,7 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 	if source_material == null:
 		body.material_override = material
 	add_child(body)
+	_feedback_footprint = mesh.size
 	var collision := StaticBody3D.new()
 	collision.set_meta("card_id", id)
 	var shape := CollisionShape3D.new()
@@ -134,3 +137,12 @@ func set_hurt_flash(amount: float) -> void:
 		# Generated fallback has no original texture composite to flash.
 		material.albedo_color = _unflashed_color.lerp(Color.WHITE, hurt_flash) * (1.0 + hurt_flash * 0.5)
 		material.albedo_color.a = _unflashed_color.a
+
+func set_drag_target(value: bool) -> void:
+	# Lazy independent overlay: neither selected-card emission nor hurt flash changes.
+	if drag_target == null and value:
+		drag_target = preload("res://scripts/ui/card_target_outline.gd").new()
+		drag_target.name = "DragTargetOutline"
+		drag_target.configure(_feedback_footprint)
+		add_child(drag_target)
+	if drag_target != null: drag_target.visible = value

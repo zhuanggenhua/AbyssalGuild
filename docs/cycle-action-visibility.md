@@ -37,9 +37,12 @@ Unity was not launched, and source files/assets were not copied into this repo.
   Opening/closing the pause menu refreshes their disabled state immediately.
 - An unmoved singleton-chest click and the existing explicit withdrawal command
   share the same placement/withdrawal adapter. The pointer-granted card alone may
-  complete its already-valid click across a day boundary. Releasing again,
-  dragging away/back, a new locked-phase click or a canceled menu interaction
-  cannot withdraw another coin. New selling-phase clicks remain allowed.
+  complete its already-valid click across a day boundary or a later Pause/Options
+  overlay. Menu toggles preserve the captured pointer rather than canceling it;
+  actual pointer-up still completes once. Releasing again, dragging away/back,
+  or a new locked-phase click cannot withdraw another coin. New selling-phase
+  clicks remain allowed. This corrects the earlier menu-cancellation assumption
+  after tracing the source input dispatch; see [held-stack lifecycle](held-stack-lifecycle.md).
 - Pace controls offer only 1x (Normal) and 2x (Fast); both refresh the HUD on use.
   During ending-cycle phases they are disabled and their callbacks reject stale
   activation. Manual playing-phase pause still allows selecting a new pace.

@@ -21,7 +21,10 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
 
 - Click a pack to draw. Right-click selects without opening. Drag a card and its
   trailing cards to another eligible stack, or onto open space to split/move.
-  Releasing over a UI panel cancels dragging.
+  Tail pickup splits immediately and pauses only the original craft. Returning
+  it resumes the same timer. A captured release over UI or after opening Pause/
+  Options still resolves that hold once; it does not silently cancel or roll back.
+  See [held-stack lifecycle](held-stack-lifecycle.md).
 - Bottom buttons open Market & controls and Inspect & journal. Sidebars start
   collapsed so the source perspective camera's starter area is not covered.
 - Select a card to inspect source text and state. Sell card and sell stack are

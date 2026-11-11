@@ -40,6 +40,7 @@ func run() -> void:
 	board._begin_card_press({"card_id": loose, "panel_owner": -1}, Vector2.ZERO)
 	check(board.equipment_display.is_expanded(wearer), "any loose equipment press preserves open panel")
 	board.dragging = -1
+	board.session.drag.finish_standard()
 	board.test_hit = {"card_id": wearer, "panel_owner": wearer}
 	board._begin_card_press(board.test_hit, Vector2.ZERO)
 	check(board.dragging == -1 and board.equipment_display.is_expanded(wearer), "panel press does not drag wearer or toggle before release")

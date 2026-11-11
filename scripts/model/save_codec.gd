@@ -10,6 +10,26 @@ const RecipeCardDefinition = preload("res://scripts/model/recipe_card_definition
 const Catalog = preload("res://scripts/model/catalog.gd")
 
 static func capture(session) -> Dictionary:
+	if session.drag.transitioning:
+		return {"capture_error": "Cannot save during a held-stack transition"}
+	var snapshot := _capture_unsettled(session)
+	if not session.drag.active():
+		return snapshot
+	# Native policy: save the physical split as an ordinary unattached release.
+	# Settle only an isolated model, including recipe RNG/discovery/quest effects.
+	# No live pointer, model object, RNG state, signal or geometry callback changes.
+	var catalog = Catalog.new()
+	catalog.configure(session.catalog.data)
+	var settled = session.get_script().new()
+	settled.configure(catalog, session.rng.seed, session.scene_name)
+	var restored := restore(settled, snapshot)
+	if not restored.ok:
+		return {"capture_error": "Cannot normalize held checkpoint: " + str(restored.error)}
+	settled.drag.copy_hold_from(session.drag)
+	settled.drag.finish_standard()
+	return _capture_unsettled(settled)
+
+static func _capture_unsettled(session) -> Dictionary:
 	var card_rows: Array = []
 	var stack_rows: Array = []
 	for card in session.cards.values():
@@ -58,6 +78,8 @@ static func _recipe_card(catalog, guid: String, scene_name: String = "Main") -> 
 
 ## Stage using independent model objects; no live session/catalog mutation on failure.
 static func _stage(session, snapshot: Variant) -> Dictionary:
+	if snapshot is Dictionary and snapshot.has("capture_error"):
+		return _fail(str(snapshot.capture_error))
 	if not snapshot is Dictionary or snapshot.get("format") != FORMAT or snapshot.get("version") != VERSION:
 		return _fail("Unsupported save format or version")
 	var data = snapshot.get("session")
@@ -198,6 +220,7 @@ static func restore(session, snapshot: Variant) -> Dictionary:
 		return staged
 	var data: Dictionary = staged.data
 	# Commit only after all fields and cross references passed validation.
+	session.drag.reset()
 	session.catalog.definitions = staged.catalog.definitions
 	session.cards = staged.cards
 	session.stacks = staged.stacks

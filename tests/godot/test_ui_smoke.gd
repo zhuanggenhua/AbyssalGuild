@@ -215,9 +215,9 @@ func _check_scene_ui(board, scene_name: String, vendor_count: int) -> void:
 		check(board.session.cards.has(id), scene_name + " view references live card")
 
 func _make_travel_stack(board) -> int:
-	var portal: int = board.session.spawn_card(board.catalog.find_by_name("Grand Portal"), Vector2(-6, -5))
-	var traveler: int = board.session.spawn_card(board.catalog.find_by_name("Villager"), Vector2(-8, -5))
-	_drop_on(board, traveler, Vector2(-6, -5))
+	var portal: int = board.session.spawn_card(board.catalog.find_by_name("Grand Portal"), Vector2(-3, -2))
+	var traveler: int = board.session.spawn_card(board.catalog.find_by_name("Villager"), Vector2(-5, -2))
+	_drop_on(board, traveler, Vector2(-3, -2))
 	check(board.session.cards[traveler].stack_id == board.session.cards[portal].stack_id, "UI drop assembles travel stack")
 	return board.session.cards[portal].stack_id
 
@@ -232,10 +232,10 @@ func _test_world_and_campaign(board) -> void:
 			chest_guid = entry.guid
 			break
 	check(not chest_guid.is_empty(), "real source chest definition available")
-	var chest: int = board.session.spawn_card(chest_guid, Vector2(6, 6))
-	var coin: int = board.session.spawn_card(board.catalog.find_by_name("Coin"), Vector2(-5, 6))
+	var chest: int = board.session.spawn_card(chest_guid, Vector2(3, 1))
+	var coin: int = board.session.spawn_card(board.catalog.find_by_name("Coin"), Vector2(-3, 1))
 	var currency: int = board.session.stats().currency
-	_drop_on(board, coin, Vector2(6, 6))
+	_drop_on(board, coin, Vector2(3, 1))
 	check(board.session.cards[chest].stored_coins == 1 and not board.session.cards.has(coin), "actual UI drop deposits and consumes coin")
 	check(board.session.stats().currency == currency and board.notice.text == "Stored 1 coins.", "chest drop preserves currency and reports amount")
 	board.selected = chest

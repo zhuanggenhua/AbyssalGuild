@@ -83,3 +83,17 @@ rather than replayed. These native checkpoints extend the source format and do
 not claim Unity save compatibility. The independent cycle validation suite adds
 144 checks, including active and inactive campaign scenes and no-mutation failures.
 See [cycle timeline](cycle-timeline.md) for clock and continuation semantics.
+
+## Held-card checkpoints
+
+The live pointer is never serialized. During a hold, capture normalizes an
+isolated clone to an ordinary non-reattached release at the registered held pose.
+It preserves actual split membership, resumes a valid original recipe at its
+elapsed progress, cancels an invalid original, and checks an idle detached tail.
+Any recipe RNG/discovery/quest effects occur only in the clone and are captured
+there. Repeated capture is deterministic and emits no live signals or mutations.
+Reload continues this settled state, not the still-held live interaction. No
+spatial attachment, click or terminal action is replayed. Successful restore
+clears old transient IDs; validation failure leaves the live hold unchanged.
+Reentrant capture inside a half-applied held transition fails explicitly.
+See [held-stack lifecycle](held-stack-lifecycle.md) for the contract and tests.

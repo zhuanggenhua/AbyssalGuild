@@ -12,6 +12,7 @@ const WorldRules = preload("res://scripts/model/world_rules.gd")
 const CombatSystem = preload("res://scripts/model/combat_system.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 const CycleController = preload("res://scripts/model/cycle_controller.gd")
+const HeldStack = preload("res://scripts/model/held_stack.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)
 var catalog
@@ -26,6 +27,7 @@ var world = WorldRules.new()
 var campaign = Campaign.new()
 var ai = MobAI.new()
 var cycle = CycleController.new()
+var drag = HeldStack.new()
 var scene_name: String = "Main"
 var friendly_mode: bool = false
 var board_bounds: Variant = null
@@ -57,6 +59,7 @@ func configure(source_catalog, random_seed: int = 1, selected_scene: String = "M
 	equipment.configure(self)
 	combat.configure(self, equipment)
 	cycle.configure(self)
+	drag.configure(self)
 	rng.seed = random_seed
 	quest_tracker.configure(catalog, scene_name)
 	if not event_occurred.is_connected(_track_quest_event):
@@ -101,6 +104,7 @@ func capture_card_targets(ids: Array) -> Dictionary:
 	return result
 
 func start_new_game() -> int:
+	drag.reset()
 	campaign.saved_scenes.clear()
 	campaign.current_scene = scene_name
 	ai.reset()

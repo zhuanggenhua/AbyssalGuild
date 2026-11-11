@@ -118,10 +118,6 @@ source built-in shader and exact Unity random/renderer behavior remain unresolve
 A static/source-backed Godot audit identified remaining functionality beyond
 rendering acceptance. These are not covered by the completed-slice claims above:
 
-- Pressing a tail in a crafting stack currently delays the split until release,
-  so its recipe can consume a held card. Source immediate split, paused-original
-  progress and return-to-original resume need a complete gesture lifecycle,
-  including retained pointer-up routing through a later menu or Options panel.
 - Source vendor unlocks queue a gameplay pause/input lock, notice, focus and
   highlight sequence; current activation is immediate without that sequence.
 - Explicit title quit confirmation, gamepad cancel, drag-target highlighting,
@@ -137,3 +133,16 @@ controls remain. Recipe cards now share one pure scene-aware definition builder
 for packs, research, cold saves and traveler restoration; ingredient text and
 all template fields survive fresh-catalog continuation. These corrections have
 focused synthetic/source-data coverage, not manual input/rendered acceptance.
+
+
+Held tails now split at pointer-down, pause only the original craft, retain its
+progress when returned and resolve source-standard versus terminal drops. Actual
+pointer-up remains captured across later UI/menu/phase locks. A native save
+settles a cloned held state as an ordinary non-reattached release, without live
+RNG/state/signals changing. Source successful-click orphan pauses receive an
+explicit safe cleanup; see [held lifecycle](held-stack-lifecycle.md).
+
+Vendor reveal timeline/presenter, source card information/progress/target views
+and keyboard/gamepad cancel adapters now have independent helper coverage. Their
+live board wiring remains a separate unfinished slice, so these helpers do not
+yet establish that the corresponding gameplay UI features are available.

@@ -370,7 +370,11 @@ func _enter_game() -> void:
 	_cancel_archive_slots()
 	archive_dialog.hide()
 	_clear_puffs()
+	session.drag.reset()
+	session.combat.dragged.clear()
+	dragging = -1
 	drag_grant = -1
+	drag_delta = Vector2.ZERO
 	session.cycle.pose_sampler = _sample_cycle_pose
 	session.cycle.layout_resolver = _resolve_layout
 	combat_presentation.reset()
@@ -447,6 +451,12 @@ func _name(guid: String) -> String:
 	return str(fields.get("displayName", fields.get("id", guid)))
 
 func _sync_views() -> void:
+	if dragging >= 0 and not session.cards.has(dragging):
+		session.drag.finish_standard()
+		session.combat.dragged.erase(dragging)
+		dragging = -1
+		drag_grant = -1
+		drag_delta = Vector2.ZERO
 	_sync_combat_layouts()
 	_ensure_layout()
 	for id in views.keys():
@@ -525,6 +535,8 @@ func _sync_equipment_display() -> void:
 
 # Pointer routing is separate from ray casting for deterministic adapter tests.
 func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
+	# Ignore repeated/replacement presses until the captured pointer is released.
+	if dragging >= 0: return
 	drag_grant = -1
 	var id: int = int(hit.get("card_id", -1))
 	var panel: int = int(hit.get("panel_owner", -1))
@@ -547,6 +559,10 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 		dragging = id # Lock the just-detached stack before placement can move its visible pose.
 		_sync_views()
 	dragging = id if _can_drag_card(id) else -1
+	if dragging >= 0 and not session.combat.membership.has(id):
+		var lifted: Vector2 = session.card_target_position(id)
+		if views.has(id): lifted = Vector2(views[id].global_position.x, -views[id].global_position.z)
+		if not session.drag.begin(id, lifted).ok: dragging = -1
 	drag_grant = dragging
 	if dragging >= 0:
 		session.combat.dragged[dragging] = true
@@ -590,9 +606,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			else:
 				panning = false
 				_finish_drag(event.position)
-	if event is InputEventMouseMotion and dragging >= 0:
-		drag_moved = drag_moved or event.position.distance_to(press_position) > 7
-		if drag_moved: drag_delta = _board_point(event.position) - drag_origin
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
@@ -609,15 +622,24 @@ func _input(event: InputEvent) -> void:
 	if running and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var hovered := get_viewport().gui_get_hovered_control()
 		if hovered != null and hovered != hud: equipment_display.pointer_down()
-	if running and dragging >= 0 and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
-		var hovered := get_viewport().gui_get_hovered_control()
-		if hovered != null and hovered != hud:
-			session.combat.dragged.clear()
-			dragging = -1
-			drag_grant = -1
-			drag_delta = Vector2.ZERO
-		else:
+	if running and dragging >= 0:
+		if event is InputEventMouseMotion: _update_drag_position(event.position)
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			# Pointer-up belongs to the original press even over GUI or later locks.
 			_finish_drag(event.position)
+
+func _update_drag_position(screen: Vector2) -> void:
+	if not session.cards.has(dragging): return
+	drag_moved = drag_moved or screen.distance_to(press_position) > 7
+	if not drag_moved: return
+	var point := _board_point(screen)
+	drag_delta = point - drag_origin
+	if session.drag.active() and not session.combat.membership.has(dragging):
+		# Move the registered split, not only its drawing: saves/other systems
+		# observe the real held position. Combat keeps its separate drag offset.
+		_set_board_card_position(dragging, _clamp_stack_position(dragging, session.card_target_position(dragging) + drag_delta))
+		drag_origin = point
+		drag_delta = Vector2.ZERO
 
 func _finish_drag(screen: Vector2) -> void:
 	if pressed_panel >= 0:
@@ -625,11 +647,12 @@ func _finish_drag(screen: Vector2) -> void:
 		pressed_panel = -1
 		return
 	var id: int = dragging
-	var carried_press: bool = id >= 0 and drag_grant == id and running and not _ui_pause_active()
+	var carried_press: bool = id >= 0 and drag_grant == id and running
 	drag_grant = -1
 	session.combat.dragged.clear()
 	dragging = -1
 	if (not _allows_card_actions() and not carried_press) or not session.cards.has(id):
+		session.drag.finish_standard()
 		drag_delta = Vector2.ZERO
 		return
 	feedback.play_event("CardDrop")
@@ -643,53 +666,59 @@ func _finish_drag(screen: Vector2) -> void:
 			if session.combat.flee(id):
 				_set_board_card_position(id, result.position)
 				notice.text = "Fled combat."
+		session.drag.finish_terminal()
 		drag_delta = Vector2.ZERO
 		_refresh()
 		return
-	if drag_moved:
-		var stack = session.stacks[session.cards[id].stack_id]
-		var destination: Vector2 = session.card_target_position(id) + drag_delta
-		var trade: Dictionary = _try_trade_drop(id, destination, carried_press)
-		if trade.terminal:
-			drag_delta = Vector2.ZERO
-			_refresh()
-			return
-		id = int(trade.card_id)
-		if not session.cards.has(id):
-			drag_delta = Vector2.ZERO
-			_refresh()
-			return
-		stack = session.stacks[session.cards[id].stack_id]
-		var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true)
-		if _try_equip_drop(id, destination) or _try_combat_drop(id, destination, target):
-			drag_delta = Vector2.ZERO
-			_refresh()
-			return
-		if target >= 0:
-			var target_card: int = session.stacks[target].card_ids.back()
-			if int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5 and int(catalog.fields(session.cards[target_card].definition_guid).get("category", 0)) == 2:
-				if stack.card_ids.back() != id:
-					notice.text = "Split equipment from its tail before equipping."
-				else:
-					notice.text = "Equipped." if session.equipment.equip(target_card, id) else "Cannot equip this item."
-			else:
-				var stored_before: int = session.cards[target_card].stored_coins
-				if not session.move_to_stack(id, target):
-					notice.text = "These cards cannot stack, or the current recipe rejects extra ingredients."
-				elif session.world._is_chest(target_card):
-					notice.text = "Stored %d coins." % (session.cards[target_card].stored_coins - stored_before)
-		else:
-			destination = _clamp_stack_position(id, destination)
-			session.split_stack(id, destination)
-	else:
+	# Programmatic/native adapter callers may submit a release directly. Actual
+	# pointer input already split at press; this fallback never re-splits a hold.
+	if not session.drag.active() and not session.drag.begin(id).ok:
+		drag_delta = Vector2.ZERO
+		return
+	var destination: Vector2 = session.card_target_position(id) + drag_delta
+	_set_board_card_position(id, destination)
+	var click_handled := false
+	if not drag_moved:
 		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
 			var pack_stack: int = session.cards[id].stack_id
 			layout_locks[pack_stack] = true
 			session.open_pack(id, carried_press)
 			layout_locks.erase(pack_stack)
+			click_handled = true
 		elif session.world._is_chest(id):
-			_withdraw_chest(id, carried_press)
-
+			click_handled = _withdraw_chest(id, carried_press)
+	if click_handled:
+		# Native safety cleanup for source HandleClick's early-return pause leak.
+		session.drag.finish_standard()
+	else:
+		var trade: Dictionary = _try_trade_drop(id, destination, carried_press)
+		if trade.terminal:
+			session.drag.finish_terminal()
+		else:
+			id = int(trade.card_id)
+			if not session.cards.has(id):
+				session.drag.finish_standard()
+			else:
+				var equipment_target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true)
+				if _try_equip_drop(id, destination):
+					if session.equipment.owners.has(id): session.drag.finish_terminal()
+					else: session.drag.finish_standard() # Existing native equipment-tail guard.
+				elif _try_combat_drop(id, destination, equipment_target):
+					session.drag.finish_terminal()
+				else:
+					destination = _clamp_stack_position(id, destination)
+					_set_board_card_position(id, destination)
+					var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
+					var attached := -1
+					if target >= 0:
+						var target_card: int = session.stacks[target].card_ids.back()
+						var stored_before: int = session.cards[target_card].stored_coins
+						if session.move_to_stack(id, target, session.drag.original_stack_id(id)):
+							attached = target
+							if session.world._is_chest(target_card): notice.text = "Stored %d coins." % (session.cards[target_card].stored_coins - stored_before)
+						else:
+							notice.text = "These cards cannot stack, or the current recipe rejects extra ingredients."
+					session.drag.finish_standard(attached)
 	drag_delta = Vector2.ZERO
 	_refresh()
 
@@ -987,7 +1016,11 @@ func _show_title() -> void:
 	_cancel_archive_slots()
 	archive_dialog.hide()
 	_clear_puffs()
+	session.drag.reset()
+	session.combat.dragged.clear()
+	dragging = -1
 	drag_grant = -1
+	drag_delta = Vector2.ZERO
 	combat_presentation.reset()
 	camera.h_offset = 0
 	camera.v_offset = 0
@@ -1074,16 +1107,17 @@ func _withdraw_selected() -> void:
 	_withdraw_chest(selected)
 	_refresh()
 
-func _withdraw_chest(id: int, carried_press: bool = false) -> void:
+func _withdraw_chest(id: int, carried_press: bool = false) -> bool:
 	if (not _allows_card_actions() and not carried_press) or not session.world.can_click_chest(id):
 		notice.text = "Select an unstacked chest to withdraw a coin."
-		return
+		return false
 	var position: Vector2 = session.card_target_position(id) + Vector2(_card_footprint(id).x, 0)
 	# Source EnforcePlacementRules(spawnPos, null) uses no card footprint.
 	position = BoardLayout.enforce_placement(position, BoardLayout.stack_state(-1, position, Vector2.ZERO, 1), session.board_bounds, session.board_top_margin)
 	var withdrew: bool = session.world.withdraw_coin(id, true, position)
 	notice.text = "Withdrew a coin." if withdrew else "Chest is empty."
 	if withdrew: feedback.play_event("Coin")
+	return withdrew
 
 func _stack_step() -> Vector3:
 	var step: Dictionary = catalog.settings("CardSettings").get("stackStep", {})
@@ -1234,6 +1268,8 @@ func _resolve_layout() -> void:
 	_apply_layout(BoardLayout.resolve_overlaps(_layout_states(), rectangles, session.board_bounds, session.board_top_margin, int(catalog.settings("CardSettings").get("maxIterations", 8))))
 
 func _ensure_layout() -> void:
+	# A pickup split is not a placement: keep the original in reach until drop.
+	if session.drag.active(): return
 	if session.catalog != null and _layout_signature() != layout_key:
 		_resolve_layout()
 
@@ -1250,7 +1286,7 @@ func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -
 			var raw: Vector3 = _card_collider_size(stack.card_ids[index])
 			intersects = intersects or BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - raw * 0.5, raw))
 		if intersects:
-			var eligible: bool = session.can_move_to_stack(card_id, stack.id)
+			var eligible: bool = session.can_move_to_stack(card_id, stack.id, session.drag.original_stack_id(card_id))
 			# Equipment drops are a separate source action ahead of ordinary attachment.
 			var incoming: Dictionary = catalog.fields(session.cards[card_id].definition_guid)
 			var receiver: Dictionary = catalog.fields(session.cards[stack.card_ids.back()].definition_guid)
@@ -1470,7 +1506,10 @@ func _try_trade_drop(card_id: int, destination: Vector2, carried_press: bool = f
 	if not snapshot.ok or not TradeLayout.can_trade(zone, snapshot.cards):
 		notice.text = "This trade zone cannot accept these cards."
 		return outcome
-	var stack_id: int = session.split_stack(card_id, destination)
+	# Pickup already registered the held tail. Preserve that identity and craft.
+	var stack_id: int = source.id
+	if source.card_ids.front() != card_id: stack_id = session.split_stack(card_id, destination)
+	_set_board_card_position(card_id, destination)
 	var dropped = session.stacks[stack_id]
 	if zone.kind == "buyer":
 		outcome.accepted = session.sell_stack(stack_id)
@@ -1514,21 +1553,13 @@ func _ui_pause_active() -> bool:
 func _toggle_pause_menu() -> void:
 	if not running or session.phase != "playing" or options_panel.visible: return
 	pause_overlay.visible = not pause_overlay.visible
-	if pause_overlay.visible:
-		dragging = -1
-		drag_grant = -1
-		drag_delta = Vector2.ZERO
-		session.combat.dragged.clear()
+	# External pause changes time, not an already captured pointer.
 	_refresh()
 
 func _open_options() -> void:
 	if running:
 		if session.phase != "playing": return
 		pause_overlay.show()
-		dragging = -1
-		drag_grant = -1
-		drag_delta = Vector2.ZERO
-		session.combat.dragged.clear()
 	options_panel.open()
 	if running: _refresh()
 
