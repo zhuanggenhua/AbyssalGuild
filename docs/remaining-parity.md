@@ -35,7 +35,7 @@ The full private source and assets now pass the 1327-file source lock.
 ## Presentation and platform acceptance
 
 - Original source UI composition, complete rendering/lighting parity, original fonts,
-  some drag/craft/death interpolation and source event/sound timing remain
+  transient spawn/current-pose details and source event/sound timing remain
   incomplete. Realtime feeding/encounter stages and native Puff rendering are now
   connected; source built-in shader, Unity random distribution and GPU output
   are not identical or visually verified. Source-parameter camera smoothing, zoom and cycle navigation locks
@@ -193,3 +193,25 @@ deterministic order; see [combat order](combat-order.md).
 Growth seeds resolve before output selection, and returned equipment resolves
 immediately rather than waiting for a view refresh. Crowded-board callback order
 and all six real growth recipes are covered in [placement lifecycle](placement-lifecycle.md).
+
+
+## Ordinary motion, title controls and interrupted clicks
+
+Source-parameter ordinary movement, lifted drag heads and exponentially following
+tails now have a read-only board adapter. Real-time pause behavior and higher
+priority combat/cycle/equipment ownership are covered in [card motion](card-motion.md).
+This does not make nearby physics queries Unity-identical or establish rendered
+acceptance; crafting/death effects and remaining UI composition remain separate.
+
+Title duration/toggle references now supply their actual source defaults and
+whole-second range, with live labels and explicit missing-reference fallbacks.
+See [title preferences](title-gameplay-preferences.md).
+
+A surviving killer can flee during scaled death cleanup without skipping its
+remaining delay. Later progress reset, cross-combat continuation and safe destroyed
+references are covered in [death-wait flee](combat-death-wait-flee.md).
+
+Successful chest clicks return to the original press position after raw offset
+coin creation, and picking up an interpolating singleton now aligns its held
+root with its visible pose. [Chest lifecycle](chest-click-lifecycle.md) includes
+actual headless pointer routing and rejects duplicate or newly phase-locked input.

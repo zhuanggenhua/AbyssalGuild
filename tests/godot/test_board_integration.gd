@@ -192,8 +192,7 @@ func run() -> void:
 	board.session.cards[chest].position = far_edge
 	board.session.stacks[chest_stack].position = far_edge
 	board._withdraw_selected()
-	var zero_footprint_expected := Vector2(board.session.board_bounds.end.x, board.session.board_bounds.end.y - board.session.board_top_margin)
-	check(withdrawal.position.is_equal_approx(zero_footprint_expected), "withdraw point clamps to source bounds and header with zero footprint")
+	check(withdrawal.position.is_equal_approx(far_edge + Vector2(source_offset, 0)), "null-stack withdrawal preserves raw source offset before factory placement")
 	board.session.spawn_target_selector = board._select_spawn_target
 	board._refresh()
 	if board.views[chest].stat_labels.has("price"):

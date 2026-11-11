@@ -10,6 +10,7 @@ const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
+const CardMotion = preload("res://scripts/ui/card_motion.gd")
 const CardDragInput = preload("res://scripts/ui/card_drag_input.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
 const CardInteraction = preload("res://scripts/ui/card_interaction_descriptors.gd")
@@ -17,6 +18,7 @@ const CardHoverView = preload("res://scripts/ui/card_hover_view.gd")
 const CraftProgressView = preload("res://scripts/ui/craft_progress_view.gd")
 const NavigationInput = preload("res://scripts/ui/navigation_input.gd")
 const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
+const TitleGameplayPrefs = preload("res://scripts/ui/title_gameplay_prefs.gd")
 const OptionsAdapter = preload("res://scripts/ui/options_adapter.gd")
 const TradeLayout = preload("res://scripts/model/trade_layout.gd")
 const TradeZoneView = preload("res://scripts/ui/trade_zone_view.gd")
@@ -39,6 +41,7 @@ var puffs: Array[Node3D] = []
 var puff_rng := RandomNumberGenerator.new()
 var puff_factory: Callable = Callable()
 var camera_motion = CameraMotion.new()
+var card_motion = CardMotion.new()
 var combat_presentation = CombatPresentation.new()
 var equipment_display = EquipmentDisplay.new()
 var pressed_panel: int = -1
@@ -107,6 +110,7 @@ var speed_buttons: Dictionary = {}
 var shop: VBoxContainer
 var market_panel: Control
 var detail_panel: Control
+var duration_label: Label
 var duration: HSlider
 var continue_button: Button
 var vendor_guids: Array[String] = []
@@ -138,6 +142,15 @@ func _ready() -> void:
 		dialog.visibility_changed.connect(_sync_card_feedback)
 	for panel in [pause_overlay, options_panel]: panel.visibility_changed.connect(_sync_card_feedback)
 	data_error = catalog.load_file()
+	var gameplay_prefs: Dictionary = TitleGameplayPrefs.resolve(catalog.data)
+	duration.min_value = gameplay_prefs.minimum
+	duration.max_value = gameplay_prefs.maximum
+	duration.step = 1.0 if gameplay_prefs.whole_numbers else 0.0
+	duration.rounded = gameplay_prefs.whole_numbers
+	duration.value = gameplay_prefs.initial
+	duration_label.text = TitleGameplayPrefs.duration_text(duration.value)
+	friendly_choice.button_pressed = gameplay_prefs.friendly
+	friendly_choice.text = TitleGameplayPrefs.friendly_text(friendly_choice.button_pressed)
 	visual_assets.load_manifest()
 	feedback.configure(catalog, visual_assets)
 	feedback.play_music()
@@ -148,6 +161,7 @@ func _ready() -> void:
 Visual and manual input acceptance are not complete."
 		vendor_guids = SceneConfig.offered_packs(catalog)
 		_build_shop()
+	if not gameplay_prefs.source_backed: title_status.text += "\n" + gameplay_prefs.warning
 	native_options_adapter.configure(feedback)
 	var options_adapter: Callable = options_apply_adapter if options_apply_adapter.is_valid() else native_options_adapter.apply
 	var options_loaded: Dictionary = options_panel.configure(options_adapter, options_hardware_modes, options_path)
@@ -322,16 +336,14 @@ func _build_ui() -> void:
 	_label("StackCraft · Godot migration", title, 22)
 	title_status = _label("Loading source data…", title)
 	title_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_label("Day duration · 60–180 seconds", title)
+	duration_label = _label(TitleGameplayPrefs.duration_text(120), title)
 	duration = HSlider.new()
-	duration.min_value = 60
-	duration.max_value = 180
-	duration.value = 120
-	duration.step = 10
 	title.add_child(duration)
+	duration.value_changed.connect(func(value: float): duration_label.text = TitleGameplayPrefs.duration_text(value))
 	friendly_choice = CheckBox.new()
-	friendly_choice.text = "Friendly mode (skip aggressive encounters)"
+	friendly_choice.text = TitleGameplayPrefs.friendly_text(false)
 	title.add_child(friendly_choice)
+	friendly_choice.toggled.connect(func(enabled: bool): friendly_choice.text = TitleGameplayPrefs.friendly_text(enabled))
 	_label("Saved games · native slots", title)
 	slot_picker = OptionButton.new()
 	slot_picker.item_selected.connect(_select_slot)
@@ -390,7 +402,7 @@ func start_new() -> void:
 	if data_error != OK: return
 	var candidate = Session.new()
 	candidate.configure(catalog, int(Time.get_unix_time_from_system()))
-	candidate.day_duration = duration.value
+	candidate.day_duration = int(duration.value)
 	candidate.friendly_mode = friendly_choice.button_pressed
 	if candidate.start_new_game() < 0:
 		title_status.text = "Starter pack is absent from the source data. Reimport and verify data."
@@ -422,6 +434,7 @@ func _enter_game() -> void:
 	drag_delta = Vector2.ZERO
 	session.cycle.pose_sampler = _sample_cycle_pose
 	session.cycle.layout_resolver = _resolve_layout
+	card_motion.reset()
 	combat_presentation.reset()
 	camera.h_offset = 0
 	camera.v_offset = 0
@@ -489,11 +502,11 @@ func _process(delta: float) -> void:
 		# Combat travel/return and cycle waits remain real-time under external
 		# menu/reveal pauses. Their scaled death waits and action clocks stop.
 		session.tick_paused(delta)
-		_sync_views()
+		_sync_views(delta)
 		return
 	session.tick(delta)
 	equipment_display.advance(scaled_delta)
-	_sync_views()
+	_sync_views(delta)
 	refresh_clock += delta
 	if refresh_clock >= 0.2:
 		refresh_clock = 0
@@ -503,7 +516,7 @@ func _name(guid: String) -> String:
 	var fields: Dictionary = catalog.fields(guid)
 	return str(fields.get("displayName", fields.get("id", guid)))
 
-func _sync_views() -> void:
+func _sync_views(real_delta: float = 0.0) -> void:
 	if dragging >= 0 and not session.cards.has(dragging):
 		session.drag.finish_standard()
 		session.combat.dragged.erase(dragging)
@@ -543,21 +556,27 @@ func _sync_views() -> void:
 		if session.combat.membership.has(id):
 			var combat_position: Vector2 = session.cards[id].position + (drag_delta if dragging == id else Vector2.ZERO)
 			views[id].position = Vector3(combat_position.x, 0.12, -combat_position.y)
+	var motion_records: Array = []
+	var motion_settings: Dictionary = CardDragInput.source_settings(catalog, session.scene_name)
+	var cycle_id: int = int(session.cycle.presentation_state().get("card_id", -1))
+	var step_fields: Dictionary = motion_settings.get("stackStep", {})
+	var step := Vector3(float(step_fields.get("x", 0)), float(step_fields.get("y", 0.002)), -float(step_fields.get("z", -0.18)))
 	for stack in session.stacks.values():
+		var held_index: int = stack.card_ids.find(dragging)
 		for index in range(stack.card_ids.size()):
 			var id: int = stack.card_ids[index]
 			var card = session.cards[id]
-			if not views.has(id):
-				var view = CardView.new()
-				add_child(view)
-				view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition", visual_assets, catalog.fields(card.definition_guid), session.scene_name, _card_collider_size(id))
-				view.set_meta("definition_guid", card.definition_guid)
-				views[id] = view
-			var offset := Vector2.ZERO
-			if dragging >= 0 and session.cards.has(dragging) and card.stack_id == session.cards[dragging].stack_id and index >= stack.card_ids.find(dragging):
-				offset = drag_delta
-			views[id].position = Vector3(stack.position.x + offset.x, 0.06 + index * _stack_step().y, -(stack.position.y + offset.y + index * _stack_step().z))
+			var target := Vector3(stack.position.x, 0.06, -stack.position.y) + step * index
+			var mode: String = "animated"
+			if held_index >= 0 and index >= held_index:
+				target += Vector3(drag_delta.x, 0, -drag_delta.y)
+				target.y = float(motion_settings.get("dragHeight", 0.1)) + (index-held_index)*step.y
+				mode = "instant" if index == held_index else "damped"
+			if session.combat.membership.has(id) or session.equipment.owners.has(id) or id == cycle_id: mode = "blocked"
+			motion_records.append({"id":id,"identity":"%d:%s" % [card.get_instance_id(),card.definition_guid],"target":target,"current":views[id].position,"mode":mode,"leader":stack.card_ids[index-1] if index > 0 else -1,"step":step})
 			views[id].highlight(id == selected)
+	var motion_poses: Dictionary = card_motion.sync(motion_records, real_delta, motion_settings)
+	for id in motion_poses: views[id].position = motion_poses[id]
 	var durations := {0: 0.3, 1: 0.3, 2: session.combat.projectile_duration(2), 3: session.combat.projectile_duration(3)}
 	combat_presentation.visual_assets = visual_assets
 	combat_presentation.scene_name = session.scene_name
@@ -727,7 +746,12 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 		if views.has(id): lifted = Vector2(views[id].global_position.x, -views[id].global_position.z)
 		drag_start_position.x = lifted.x
 		drag_start_position.z = lifted.y
-		if not session.drag.begin(id, lifted).ok: dragging = -1
+		if not session.drag.begin(id, lifted).ok:
+			dragging = -1
+		else:
+			# Source immediately updates the held root from its current visible
+			# pose, including whole stacks that begin() does not split.
+			_set_board_card_position(id, lifted)
 	drag_grant = dragging
 	if dragging >= 0:
 		session.combat.dragged[dragging] = true
@@ -859,7 +883,7 @@ func _finish_drag(screen: Vector2) -> void:
 			layout_locks.erase(pack_stack)
 			click_handled = true
 		elif session.world._is_chest(id):
-			click_handled = _withdraw_chest(id, carried_press)
+			click_handled = _withdraw_chest(id, carried_press, Vector2(drag_start_position.x, drag_start_position.z) if carried_press else destination)
 	if click_handled:
 		# Native safety cleanup for source HandleClick's early-return pause leak.
 		session.drag.finish_standard()
@@ -1200,6 +1224,7 @@ func _show_title() -> void:
 	dragging = -1
 	drag_grant = -1
 	drag_delta = Vector2.ZERO
+	card_motion.reset()
 	combat_presentation.reset()
 	camera.h_offset = 0
 	camera.v_offset = 0
@@ -1327,16 +1352,22 @@ func _withdraw_selected() -> void:
 	_withdraw_chest(selected)
 	_refresh()
 
-func _withdraw_chest(id: int, carried_press: bool = false) -> bool:
+func _withdraw_chest(id: int, carried_press: bool = false, click_origin: Variant = null) -> bool:
 	if (not _allows_card_actions() and not carried_press) or not session.world.can_click_chest(id):
 		notice.text = "Select an unstacked chest to withdraw a coin."
 		return false
 	var position: Vector2 = session.card_target_position(id) + Vector2(_card_footprint(id).x, 0)
-	# Source EnforcePlacementRules(spawnPos, null) uses no card footprint.
-	position = BoardLayout.enforce_placement(position, BoardLayout.stack_state(-1, position, Vector2.ZERO, 1), session.board_bounds, session.board_top_margin)
+	# Source EnforcePlacementRules(spawnPos, null) returns unchanged, even
+	# outside board bounds. The factory queries attachment before placement.
 	var withdrew: bool = session.world.withdraw_coin(id, true, position)
 	notice.text = "Withdrew a coin." if withdrew else "Chest is empty."
-	if withdrew: feedback.play_event("Coin")
+	if withdrew:
+		feedback.play_event("Coin")
+		if click_origin is Vector2 and session.cards.has(id):
+			# Successful OnClick restores the press origin after coin creation,
+			# then resolves again. Inspection withdrawal has no pointer origin.
+			_set_board_card_position(id, click_origin)
+			_resolve_layout()
 	return withdrew
 
 func _stack_step() -> Vector3:

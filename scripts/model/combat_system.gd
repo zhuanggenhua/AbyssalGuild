@@ -272,8 +272,11 @@ func _complete_execution(task_id: int) -> void:
 	var task: Dictionary = tasks[task_id]
 	if task.has("execution"):
 		var actor: int = task.execution.actor
-		if task.progress.has(actor):
-			task.progress[actor] = 0.0
+		# Source progress belongs to the card, not its old task. A killer may
+		# flee during death_wait and join another fight before this reset.
+		var current_id: int = int(membership.get(actor, -1))
+		if tasks.has(current_id) and tasks[current_id].progress.has(actor):
+			tasks[current_id].progress[actor] = 0.0
 		task.erase("execution")
 	if task.attackers.is_empty() or task.defenders.is_empty():
 		_finish(task_id)
@@ -302,6 +305,12 @@ func flee(card_id: int) -> bool:
 	return true
 
 func remove_combatant(card_id: int, return_to_board: bool = true) -> void:
+	if not return_to_board:
+		# A former actor can be destroyed after fleeing. Preserve the wait but
+		# drop the stale reference rather than following source coroutine errors.
+		for pending in tasks.values():
+			if pending.has("execution") and pending.execution.phase == "death_wait" and pending.execution.actor == card_id:
+				pending.execution.actor = -1
 	if not membership.has(card_id):
 		return
 	var task_id: int = membership[card_id]
@@ -310,7 +319,7 @@ func remove_combatant(card_id: int, return_to_board: bool = true) -> void:
 	task.defenders.erase(card_id)
 	task.progress.erase(card_id)
 	task.combatants.erase(card_id)
-	if task.has("execution") and card_id in [task.execution.actor, task.execution.target]:
+	if task.has("execution") and task.execution.phase != "death_wait" and card_id in [task.execution.actor, task.execution.target]:
 		task.erase("execution") # Safety: cancel dangling attack; never reroll a replacement.
 	membership.erase(card_id)
 	dragged.erase(card_id)
@@ -480,18 +489,26 @@ func stage_state(raw: Variant, cards: Dictionary, scene_name: String = "") -> Di
 				return invalid
 			if raw_execution.get("phase") not in ["travel", "return", "death_wait"] or not Equipment.valid_number(raw_execution.get("remaining")) or float(raw_execution.remaining) < 0 or float(raw_execution.remaining) > 3600:
 				return invalid
-			if not Equipment.valid_integer(raw_execution.get("actor"), 1) or not Equipment.valid_integer(raw_execution.get("target"), -1) or not Equipment.valid_integer(raw_execution.get("combat_type"), 0) or int(raw_execution.combat_type) > 3:
+			if not Equipment.valid_integer(raw_execution.get("actor"), -1) or not Equipment.valid_integer(raw_execution.get("target"), -1) or not Equipment.valid_integer(raw_execution.get("combat_type"), 0) or int(raw_execution.combat_type) > 3:
 				return invalid
 			var execution: Dictionary = raw_execution.duplicate(true)
 			execution.actor = int(execution.actor)
 			execution.target = int(execution.target)
 			execution.combat_type = int(execution.combat_type)
-			if execution.actor not in task.attackers + task.defenders:
-				return invalid
 			if execution.phase == "death_wait":
 				if execution.target != -1 or float(execution.remaining) > 0.5:
 					return invalid
+				# A live former actor may be on the board or in another combat.
+				# -1 explicitly records safe cancellation of a destroyed actor.
+				if execution.actor != -1:
+					if not cards.has(execution.actor):
+						return invalid
+					var actor_fields: Dictionary = catalog.fields(cards[execution.actor].definition_guid)
+					if int(actor_fields.get("category", 0)) not in [2, 9] or int(actor_fields.get("faction", 0)) not in [1, 2]:
+						return invalid
 			else:
+				if execution.actor not in task.attackers + task.defenders:
+					return invalid
 				if execution.target not in task.attackers + task.defenders or ((execution.actor in task.attackers) == (execution.target in task.attackers)) or (execution.phase == "return" and float(execution.remaining) > 0.3):
 					return invalid
 			if execution.phase == "travel":

@@ -75,6 +75,8 @@ func run() -> void:
 	board.drag_delta = Vector2(3, 2) - stack.position
 	board._finish_drag(board.camera.unproject_position(Vector3(3, 0, -2)))
 	board._refresh()
+	# Ordinary movement is now source-timed; a refresh alone advances no time.
+	board._sync_views(float(board.CardDragInput.source_settings(board.catalog, board.session.scene_name).get("moveDuration", 0.1)))
 	check(is_equal_approx(board.views[villager].position.x, 3.0), "split is reflected on 3D board")
 	board._toggle_pause()
 	check(board.session.paused, "pause button pauses model")
@@ -344,6 +346,7 @@ func _test_source_camera_interaction(board) -> void:
 	check(board._board_point(destination_screen).distance_to(destination) < 0.001, "model/view plane ray roundtrip survives zoom")
 	_drop_on(board, wood, destination)
 	check(board.session.cards[wood].position.distance_to(destination) < 0.001, "drag destination survives perspective zoom")
+	board._sync_views(float(board.CardDragInput.source_settings(board.catalog, board.session.scene_name).get("moveDuration", 0.1)))
 	check(is_equal_approx(board.views[wood].position.z, -destination.y), "dragged card retains reflected position after zoom")
 	await physics_frame
 	await physics_frame
