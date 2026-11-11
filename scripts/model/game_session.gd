@@ -4,6 +4,7 @@ const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
 const SpecialRecipes = preload("res://scripts/model/special_recipes.gd")
 const EquipmentSystem = preload("res://scripts/model/equipment_system.gd")
+const MobAI = preload("res://scripts/model/mob_ai.gd")
 const Campaign = preload("res://scripts/model/campaign.gd")
 const WorldRules = preload("res://scripts/model/world_rules.gd")
 const CombatSystem = preload("res://scripts/model/combat_system.gd")
@@ -19,6 +20,7 @@ var equipment = EquipmentSystem.new()
 var combat = CombatSystem.new()
 var world = WorldRules.new()
 var campaign = Campaign.new()
+var ai = MobAI.new()
 var scene_name: String = "Main"
 var friendly_mode: bool = false
 var board_bounds: Variant = null
@@ -47,10 +49,12 @@ func configure(source_catalog, random_seed: int = 1, selected_scene: String = "M
 	quest_tracker.configure(catalog, scene_name)
 	if not event_occurred.is_connected(_track_quest_event):
 		event_occurred.connect(_track_quest_event)
+	ai.configure(self, world, scene_name)
 
 func start_new_game() -> int:
 	campaign.saved_scenes.clear()
 	campaign.current_scene = scene_name
+	ai.reset()
 	world.reset()
 	equipment.reset()
 	combat.reset()
@@ -333,6 +337,7 @@ func tick(delta: float) -> void:
 		return
 	var tick_scene: String = scene_name
 	var step: float = delta * speed
+	ai.tick(step)
 	combat.tick(step)
 	for stack in stacks.values().duplicate():
 		if stack.recipe_guid.is_empty() or stack.paused:

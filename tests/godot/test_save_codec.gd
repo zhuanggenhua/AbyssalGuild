@@ -133,6 +133,7 @@ func _init() -> void:
 		if FileAccess.file_exists(path + suffix):
 			DirAccess.remove_absolute(path + suffix)
 	combined_subsystems()
+	ai_checkpoints()
 	print("Save codec checks: ", checks, "; failures: ", failures)
 	quit(0 if failures == 0 else 1)
 
@@ -212,3 +213,95 @@ func combined_subsystems() -> void:
 	legacy.session.erase("combat")
 	check(Codec.restore(target, legacy).ok, "base-only v1 snapshot loads")
 	check(target.equipment.equipped.is_empty() and target.combat.tasks.is_empty(), "missing old subsystem fields reset stale maps")
+
+func ai_session():
+	var session = combat_session()
+	var data: Dictionary = session.catalog.data.duplicate(true)
+	data.cards.append({"guid": "producer", "script_class": "CardDefinition", "fields": {"category": 9, "faction": 2, "produceCard": {"guid": "card"}, "produceInterval": 4.0}})
+	data.referenced_prefabs = [{"guid": "ai-prefab", "documents": [{"script_class": "CardAI"}]}]
+	data.scenes[0].documents.append({"script_class": "CardManager", "fields": {"cardPrefabs": [{"category": 9, "prefab": {"guid": "ai-prefab"}}]}})
+	session.catalog.configure(data)
+	session.ai.configure(session, session.world, "Main")
+	session.ai.point_validator = func(_position: Vector2, _stack: int): return true
+	return session
+
+func ai_checkpoints() -> void:
+	var source = ai_session()
+	var producer: int = source.spawn_card("producer")
+	check(source.ai.agents.has(producer) and source.world.production_timers.has(producer), "imported prefab mapping registers producer AI")
+	source.ai.agents[producer].move_timer = 0.25
+	source.world.production_timers[producer] = 0.125
+	source.world.processed_days[2] = true
+	var rng_before: int = source.rng.state
+	var snapshot := Codec.capture(source)
+	check(source.rng.state == rng_before, "AI capture consumes no RNG")
+	var target = ai_session()
+	target.changed.connect(func(): notifications += 1)
+	check(Codec.restore(target, JSON.parse_string(JSON.stringify(snapshot, "", true, true))).ok, "AI checkpoint JSON restores")
+	check(target.ai.agents[producer].move_timer == 0.25, "movement timer restored exactly")
+	check(target.world.production_timers.get(producer) == 0.125, "world restore occurs before AI timer application")
+	check(target.world.processed_days.has(2), "world progress and AI timers coexist")
+	check(target.rng.state == rng_before, "AI restore consumes no RNG")
+	source.tick(0.5)
+	target.tick(0.5)
+	check(source.cards.size() == 2 and target.cards.size() == 2, "restored production wake produces exactly once")
+	check(JSON.stringify(Codec.capture(source), "", true, true) == JSON.stringify(Codec.capture(target), "", true, true), "AI next tick movement production and RNG continue exactly")
+	check(source.cards[producer].position != Vector2.ZERO, "restored movement wake executes patrol")
+	for key in ["move_timer", "produce_timer"]:
+		for value in [null, {}, "1", -0.1, INF, NAN]:
+			var bad := snapshot.duplicate(true)
+			bad.session.ai.agents[0][key] = value
+			reject(target, bad, "malformed AI " + key)
+	var bad := snapshot.duplicate(true)
+	bad.session.ai.agents.clear()
+	reject(target, bad, "missing live AI checkpoint record")
+	bad = snapshot.duplicate(true)
+	bad.session.ai.agents.append(bad.session.ai.agents[0].duplicate())
+	reject(target, bad, "duplicate AI checkpoint record")
+	bad = snapshot.duplicate(true)
+	bad.session.ai.scene = "Island"
+	reject(target, bad, "AI configured scene mismatch")
+	var hero: int = source.spawn_card("hero")
+	check(source.combat.start_combat([hero], [producer]) > 0, "producer enters combat")
+	var battle := Codec.capture(source)
+	check(not battle.session.ai.agents[0].running, "combat checkpoint stops producer AI")
+	check(Codec.restore(target, battle).ok, "stopped AI combat snapshot restores")
+	check(not target.world.production_timers.has(producer), "combat restore does not restart production")
+	bad = battle.duplicate(true)
+	bad.session.ai.agents[0].running = true
+	bad.session.ai.agents[0].produce_timer = 1.0
+	reject(target, bad, "running AI cannot coexist with staged combat membership")
+	# Older saves have no coroutine checkpoint; load must not draw RNG itself.
+	var legacy := snapshot.duplicate(true)
+	legacy.session.erase("ai")
+	check(Codec.restore(target, legacy).ok, "legacy checkpoint without AI loads")
+	check(target.ai.agents.is_empty() and target.world.production_timers.is_empty(), "legacy missing AI clears old agents and producer timers")
+	check(target.rng.state == rng_before, "legacy restore preserves stored RNG until tick")
+	target.paused = true
+	target.tick(0.25)
+	check(target.ai.agents.is_empty() and target.rng.state == rng_before, "paused legacy session postpones AI initialization")
+	var path := "user://test-save-legacy-ai-" + str(OS.get_process_id()) + ".json"
+	check(Codec.save_file(target, path).ok, "legacy AI can be resaved immediately while paused")
+	check(target.ai.agents.is_empty() and target.world.production_timers.is_empty() and target.rng.state == rng_before, "legacy resave normalization is read-only and consumes no RNG")
+	var pending := Codec.capture(target)
+	check(pending.session.ai.agents.size() == 1 and not pending.session.ai.agents[0].running and pending.session.ai.agents[0].move_timer == 0.0, "legacy capture emits stopped pending restart record")
+	check(not pending.session.ai.agents[0].has("produce_timer"), "pending legacy restart has no invented production timer")
+	var reloaded = ai_session()
+	check(Codec.load_file(reloaded, path).ok, "immediate legacy resave loads as native AI checkpoint")
+	check(not reloaded.ai.agents[producer].running and reloaded.world.production_timers.is_empty() and reloaded.rng.state == rng_before, "resaved pending AI waits until unpaused tick without RNG draw")
+	for suffix in ["", ".bak", ".tmp", ".bak.tmp"]:
+		if FileAccess.file_exists(path + suffix): DirAccess.remove_absolute(path + suffix)
+	var expected_rng := RandomNumberGenerator.new()
+	expected_rng.seed = legacy.session.rng_seed.to_int()
+	expected_rng.state = legacy.session.rng_state.to_int()
+	var expected_move: float = expected_rng.randf_range(0.5, 1.0) + target.ai.move_interval - 0.25
+	var expected_produce: float = expected_rng.randf_range(0.5, 1.0) + 4.0 - 0.25
+	target.paused = false
+	target.tick(0.25)
+	check(target.ai.agents[producer].running and target.ai.agents[producer].move_timer == expected_move, "first unpaused tick initializes legacy movement wait")
+	check(target.world.production_timers[producer] == expected_produce, "first unpaused tick initializes legacy producer wait")
+	check(target.rng.state == expected_rng.state, "legacy first tick consumes exactly initial movement and production RNG draws")
+	reloaded.paused = false
+	reloaded.tick(0.25)
+	check(JSON.stringify(Codec.capture(target), "", true, true) == JSON.stringify(Codec.capture(reloaded), "", true, true), "immediate legacy resave preserves next tick restart and RNG semantics")
+	check(Codec.restore(source, Codec.capture(target)).ok, "reinitialized legacy AI can be checkpointed again")

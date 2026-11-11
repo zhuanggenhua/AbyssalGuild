@@ -127,6 +127,7 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 	current_scene = target
 	live.scene_name = target
 	live.world.configure(live, target)
+	live.ai.configure(live, live.world, target)
 	live.quest_tracker.configure(live.catalog, target)
 	loaded = Codec.restore(live, snapshot)
 	if not loaded.ok:
@@ -173,6 +174,7 @@ func restore(snapshot: Variant) -> Dictionary:
 	saved_scenes = snapshot.scenes.duplicate(true)
 	live.scene_name = snapshot.current_scene
 	live.world.configure(live, snapshot.current_scene)
+	live.ai.configure(live, live.world, snapshot.current_scene)
 	live.quest_tracker.configure(live.catalog, snapshot.current_scene)
 	var result := Codec.restore(live, snapshot.scenes[snapshot.current_scene])
 	if not result.ok:

@@ -60,3 +60,19 @@ not the mesh AABB. It returns an empty rect if unavailable. This does not
 establish rendered pixel parity. A licensed local export must include the
 manifest JSON in its non-resource filters and the imported PNG/FBX resources.
 Do not publish such an export until redistribution rights are established.
+
+## Original board mesh adapter
+
+`create_board_mesh(scene_name, normalized_boost)` returns the privately imported
+FBX Node3D, or null when unavailable. Body/Header material slots get the colors
+from that scene's actual board prefab. `update_board_mesh_boost(node, value)`
+updates the source Scale blend shape, clamped to [0,1]. The caller places the
+returned model at the scene's board position; this snapshot uses (0,-0.05,0).
+The API does not add collisions or change world rules. The actual model is used,
+but its Unity shaders are approximated by StandardMaterial3D color mapping.
+
+The synthetic test exercises the normalized morph and clamping. After importing
+private assets with Godot, run `tests/godot/test_source_board_mesh.gd` in the
+actual project to test Main/Island meshes, Body/Header slots, weights and bounds.
+The isolated test runner lacks the editor's resource cache and reports a skip
+for this optional source test.

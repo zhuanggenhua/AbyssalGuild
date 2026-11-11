@@ -60,3 +60,19 @@ chest can withdraw coins. Optional private original card art, prefab colors and
 collider sizes now bind to views; missing media does not create fake source art.
 These updates supersede the earlier Main-only/no-travel limits, but not the
 unverified visual/manual-input acceptance boundary.
+
+## AI, mesh and sound checkpoint
+
+The board now wires source-enabled mob AI and passive production with saved timer
+state. Board footprints use the source stack step and imported dimensions; bounds
+come from actual FBX vertices/morphs (12×8 base, 24×16 full Scale target), not the
+misleading union AABB. When the private import cache exists the original board
+FBX and its material slots render; otherwise an explicitly generated surface
+uses those verified bounds. Board shrink clamps stacks. Current battle-position
+adapter averages fighters rather than reproducing the original combat rectangle.
+
+Imported source SFX now play for pickup/drop, purchases, sales, normal crafts and
+combat results. Missing background music remains silent. Source animation delays,
+listening-level validation and exact mixer/presentation timing remain unverified.
+UI smoke now passes 120 checks both with temporary fallback assets and the real
+project import cache. Resource teardown drains queued audio commands in tests.

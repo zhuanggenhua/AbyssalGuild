@@ -152,7 +152,134 @@ func run() -> void:
 	check(board.running and board.session == live and not board.title_panel.visible, "failed title-save retains live board")
 	check(board.notice.text.begins_with("Could not save"), "failed save is explained")
 	DirAccess.remove_absolute("user://session.json.tmp")
+	_test_world_and_campaign(board)
 	print("UI checks: %d passed / %d total" % [checks - failures, checks])
 	board.queue_free()
 	await process_frame
+	# Allow audio-server stop commands to drain before engine teardown.
+	await create_timer(0.5).timeout
 	quit(0 if failures == 0 else 1)
+
+func _drop_on(board, moving: int, destination: Vector2) -> void:
+	board.dragging = moving
+	board.drag_moved = true
+	board.drag_delta = destination - board.session.cards[moving].position
+	board._finish_drag(board.camera.unproject_position(Vector3(destination.x, 0, destination.y)))
+
+func _scene_quest_ids(board, scene_name: String) -> Array:
+	var ids: Array = []
+	for scene in board.catalog.data.scenes:
+		if scene.name != scene_name: continue
+		for document in scene.documents:
+			if document.get("script_class", "") != "QuestManager": continue
+			for group in document.fields.get("questGroups", []):
+				for reference in group.get("Quests", []):
+					var id: String = str(board.catalog.fields(board.catalog.ref_guid(reference)).get("id", ""))
+					if not ids.has(id): ids.append(id)
+	ids.sort()
+	return ids
+
+func _check_scene_ui(board, scene_name: String, vendor_count: int) -> void:
+	check(board.session.scene_name == scene_name and board.session.campaign.current_scene == scene_name, "campaign and session agree on " + scene_name)
+	var vendors: Array = board.SceneConfig.offered_packs(board.catalog, scene_name)
+	check(board.vendor_guids == vendors and vendors.size() == vendor_count, scene_name + " uses only its source vendors")
+	check(board.vendor_buttons.keys() == vendors, scene_name + " vendor buttons rebuilt without stale vendors")
+	var actual_quests: Array = board.session.quest_tracker.definitions.keys()
+	actual_quests.sort()
+	check(actual_quests == _scene_quest_ids(board, scene_name), scene_name + " exact source quest set configured")
+	check(board.selected == -1, scene_name + " clears stale selection")
+	check(board.session.world.scene_name == scene_name, scene_name + " world rules use destination")
+	for id in board.views:
+		check(board.session.cards.has(id), scene_name + " view references live card")
+
+func _make_travel_stack(board) -> int:
+	var portal: int = board.session.spawn_card(board.catalog.find_by_name("Grand Portal"), Vector2(-6, -5))
+	var traveler: int = board.session.spawn_card(board.catalog.find_by_name("Villager"), Vector2(-8, -5))
+	_drop_on(board, traveler, Vector2(-6, -5))
+	check(board.session.cards[traveler].stack_id == board.session.cards[portal].stack_id, "UI drop assembles travel stack")
+	return board.session.cards[portal].stack_id
+
+func _test_world_and_campaign(board) -> void:
+	board.friendly_choice.button_pressed = true
+	board.start_new()
+	board.set_process(false)
+	check(board.session.friendly_mode, "title friendly checkbox configures new session")
+	var chest_guid: String = ""
+	for entry in board.catalog.data.cards:
+		if entry.get("script_class", "") == "ChestDefinition":
+			chest_guid = entry.guid
+			break
+	check(not chest_guid.is_empty(), "real source chest definition available")
+	var chest: int = board.session.spawn_card(chest_guid, Vector2(6, 6))
+	var coin: int = board.session.spawn_card(board.catalog.find_by_name("Coin"), Vector2(-5, 6))
+	var currency: int = board.session.stats().currency
+	_drop_on(board, coin, Vector2(6, 6))
+	check(board.session.cards[chest].stored_coins == 1 and not board.session.cards.has(coin), "actual UI drop deposits and consumes coin")
+	check(board.session.stats().currency == currency and board.notice.text == "Stored 1 coins.", "chest drop preserves currency and reports amount")
+	board.selected = chest
+	board._withdraw_selected()
+	check(board.session.cards[chest].stored_coins == 0 and board.session.stats().currency == currency, "UI withdrawal returns stored currency")
+	check(board.notice.text == "Withdrew a coin.", "withdrawal reports success")
+	var card_count: int = board.session.cards.size()
+	board._withdraw_selected()
+	check(board.notice.text == "Chest is empty." and board.session.cards.size() == card_count, "empty chest withdrawal is harmless")
+	board.selected = -1
+	board._withdraw_selected()
+	check(board.notice.text.begins_with("Select an unstacked chest"), "invalid chest selection is explained")
+	board._save_game()
+	board._return_title()
+	board._continue_game()
+	board.set_process(false)
+	check(board.session.friendly_mode, "Continue restores friendly mode")
+	# Resolve the real TravelRecipe rather than creating a fixture or bypassing tick.
+	var recipe: Dictionary = {}
+	for entry in board.catalog.data.recipes:
+		if entry.get("script_class", "") == "TravelRecipe": recipe = entry
+	check(not recipe.is_empty(), "real travel recipe available")
+	var travel_stack: int = _make_travel_stack(board)
+	check(board.session.stacks[travel_stack].recipe_guid == str(recipe.guid), "UI stack selects source TravelRecipe")
+	# A bad target must report failure without changing scene or replacing the UI.
+	var targets: Array = recipe.fields.targetScenes.duplicate()
+	recipe.fields.targetScenes = ["Main", "Missing"]
+	var live = board.session
+	var old_vendor_guids: Array = board.vendor_guids.duplicate()
+	board.session.tick(float(recipe.fields.craftingDuration))
+	check(board.session == live and board.session.scene_name == "Main", "invalid travel retains live Main session")
+	check(board.vendor_guids == old_vendor_guids and board.notice.text.begins_with("Travel failed:"), "invalid travel retains vendors and reports failure")
+	check(board.session.stacks.has(travel_stack) and board.session.stacks[travel_stack].recipe_guid.is_empty(), "failed travel cancels recipe without destroying stack")
+	recipe.fields.targetScenes = targets
+	board.session._check_recipe(board.session.stacks[travel_stack])
+	board.session.tick(float(recipe.fields.craftingDuration))
+	board._refresh()
+	_check_scene_ui(board, "Island", 1)
+	check(board.notice.text == "Arrived at Island" and board.running, "runtime travel event updates running UI")
+	check(board.session.elapsed == 0, "travel tick does not advance Island clock")
+	check(board.session.campaign.saved_scenes.has("Main"), "Main snapshot retained in campaign")
+	check(board.session.friendly_mode, "friendly mode survives travel to Island")
+	board._save_game()
+	check(board.notice.text == "Saved locally.", "Island campaign save succeeds")
+	board._return_title()
+	check(board.title_panel.visible and not board.running, "Island save/title stops simulation")
+	board._continue_game()
+	board.set_process(false)
+	_check_scene_ui(board, "Island", 1)
+	check(board.session.campaign.saved_scenes.has("Main"), "Island Continue retains inactive Main snapshot")
+	check(board.session.friendly_mode, "Island Continue retains friendly mode")
+	# Atomic save failures on Island must not reset scene, vendors, or the live model.
+	live = board.session
+	DirAccess.make_dir_absolute("user://session.json.tmp")
+	board._return_title()
+	check(board.running and board.session == live and board.session.scene_name == "Island", "failed Island save retains live destination")
+	check(board.vendor_guids.size() == 1 and board.notice.text.begins_with("Could not save"), "failed Island save preserves market and explains error")
+	DirAccess.remove_absolute("user://session.json.tmp")
+	travel_stack = _make_travel_stack(board)
+	board.session.tick(float(recipe.fields.craftingDuration))
+	board._refresh()
+	_check_scene_ui(board, "Main", 8)
+	check(board.session.cards.has(chest) and board.session.cards[chest].base_definition_guid == chest_guid, "return Main restores original chest")
+	check(board.session.campaign.saved_scenes.has("Island"), "return Main preserves inactive Island")
+	check(board.session.friendly_mode, "friendly mode survives return Main")
+	board.friendly_choice.button_pressed = false
+	board.start_new()
+	board.set_process(false)
+	check(not board.session.friendly_mode, "unchecked title choice starts normal mode without stale friendly setting")

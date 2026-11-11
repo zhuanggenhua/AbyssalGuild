@@ -137,3 +137,52 @@ func _collect_board_vertices(node: Node, parent_transform: Transform3D, weight: 
 				result.append(transform * vertex)
 	for child in node.get_children():
 		_collect_board_vertices(child, transform, weight, result)
+
+func create_board_mesh(scene_name: String, normalized_boost: float = 0.0) -> Node3D:
+	# Private FBX resource only. Missing imports return null, never a fabricated model.
+	for guid in scene_configuration(scene_name).get("boards", []):
+		var prefab: Dictionary = manifest.get("prefabs", {}).get(guid, {})
+		var mesh_guid: String = str(prefab.get("mesh", {}).get("guid", ""))
+		var entry: Dictionary = manifest.get("assets", {}).get(mesh_guid, {})
+		if entry.get("kind", "") != "fbx":
+			continue
+		var path: String = root_path + str(entry.get("path", ""))
+		var remap := ConfigFile.new()
+		if remap.load(path + ".import") != OK or not FileAccess.file_exists(str(remap.get_value("remap", "path", ""))):
+			continue
+		var packed = ResourceLoader.load(path, "PackedScene")
+		if not packed is PackedScene:
+			continue
+		var instance = packed.instantiate()
+		if not instance is Node3D:
+			instance.free()
+			continue
+		instance.name = "SourceBoard"
+		instance.set_meta("source_prefab_guid", guid)
+		_apply_board_materials(instance, prefab.get("materials", []))
+		update_board_mesh_boost(instance, normalized_boost)
+		return instance
+	return null
+
+func _apply_board_materials(node: Node, references: Array) -> void:
+	if node is MeshInstance3D:
+		for surface in mini(node.mesh.get_surface_count(), references.size()):
+			var reference: Dictionary = references[surface]
+			var source: Dictionary = manifest.get("materials", {}).get(reference.get("guid", ""), {})
+			if source.is_empty():
+				continue
+			var material := StandardMaterial3D.new()
+			material.resource_name = str(source.get("name", "SourceMaterial"))
+			material.albedo_color = source_color(source.get("colors", {}).get("_Color", {}))
+			# Source board shader is not recreated; preserve material-slot/color mapping.
+			node.set_surface_override_material(surface, material)
+	for child in node.get_children():
+		_apply_board_materials(child, references)
+
+func update_board_mesh_boost(board_node: Node, normalized_boost: float) -> void:
+	if board_node is MeshInstance3D and board_node.mesh is ArrayMesh:
+		for index in board_node.mesh.get_blend_shape_count():
+			if board_node.mesh.get_blend_shape_name(index) == "Scale":
+				board_node.set_blend_shape_value(index, clampf(normalized_boost, 0, 1))
+	for child in board_node.get_children():
+		update_board_mesh_boost(child, normalized_boost)

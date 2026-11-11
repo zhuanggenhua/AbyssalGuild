@@ -3,11 +3,15 @@ const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
 const SaveCodec = preload("res://scripts/model/save_codec.gd")
+const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
 const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
 var catalog = Catalog.new()
 var visual_assets = VisualAssets.new()
 var board_mesh: MeshInstance3D
+var original_board: Node3D
+var geometry_key: String = ""
+var feedback = AudioFeedback.new()
 var friendly_choice: CheckBox
 var session = Session.new()
 var camera: Camera3D
@@ -38,10 +42,13 @@ var refresh_clock: float = 0.0
 var active_tab: String = "quests"
 
 func _ready() -> void:
+	add_child(feedback)
 	_build_world()
 	_build_ui()
 	data_error = catalog.load_file()
 	visual_assets.load_manifest()
+	feedback.configure(catalog, visual_assets)
+	feedback.play_music()
 	if data_error != OK:
 		title_status.text = "Source data is missing or invalid.\nImport your licensed StackCraft copy first:\npython tools/import_stackcraft.py --source /path/to/Assets/StackCraft --output data\nThen restart. See docs/data-import.md.\nNo replacement/mock game is loaded."
 	else:
@@ -219,8 +226,11 @@ func _enter_game() -> void:
 	vendor_guids = SceneConfig.offered_packs(catalog, session.scene_name)
 	_build_shop()
 	visual_assets.apply_scene(camera, board_mesh, session.scene_name)
-	# Bounds of this adapter mesh, not a claim about the source FBX morph.
-	session.board_bounds = Rect2(-14, -11, 28, 22)
+	# Original mesh is optional; validated source vertex bounds remain the fallback.
+	geometry_key = ""
+	_update_board_geometry()
+	session.ai.point_validator = _ai_point_valid
+	session.ai.combat_geometry = _combat_geometry
 	for view in views.values(): view.queue_free()
 	views.clear()
 	running = true
@@ -288,7 +298,7 @@ func _sync_views() -> void:
 			var offset := Vector2.ZERO
 			if dragging >= 0 and session.cards.has(dragging) and card.stack_id == session.cards[dragging].stack_id and index >= stack.card_ids.find(dragging):
 				offset = drag_delta
-			views[id].position = Vector3(stack.position.x + offset.x, 0.06 + index * 0.065, stack.position.y + offset.y + index * 0.43)
+			views[id].position = Vector3(stack.position.x + offset.x, 0.06 + index * _stack_step().y, stack.position.y + offset.y + index * _stack_step().z)
 			views[id].highlight(id == selected)
 
 func _pick(screen: Vector2) -> int:
@@ -317,6 +327,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			if event.pressed:
 				selected = _pick(event.position)
 				dragging = selected if not session.combat.membership.has(selected) else -1
+				if dragging >= 0:
+					session.combat.dragged[dragging] = true
+					feedback.play_event("CardPick")
 				press_position = event.position
 				drag_origin = _board_point(event.position)
 				drag_delta = Vector2.ZERO
@@ -332,6 +345,7 @@ func _input(event: InputEvent) -> void:
 	if running and dragging >= 0 and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		var hovered := get_viewport().gui_get_hovered_control()
 		if hovered != null and hovered != hud:
+			session.combat.dragged.clear()
 			dragging = -1
 			drag_delta = Vector2.ZERO
 		else:
@@ -339,8 +353,10 @@ func _input(event: InputEvent) -> void:
 
 func _finish_drag(screen: Vector2) -> void:
 	var id: int = dragging
+	session.combat.dragged.clear()
 	dragging = -1
 	if not session.cards.has(id): return
+	feedback.play_event("CardDrop")
 	if drag_moved:
 		var stack = session.stacks[session.cards[id].stack_id]
 		var destination: Vector2 = stack.position + drag_delta
@@ -351,7 +367,7 @@ func _finish_drag(screen: Vector2) -> void:
 		for other in session.stacks.values():
 			if other.id == stack.id: continue
 			for index in range(other.card_ids.size()):
-				var distance: float = drop.distance_to(other.position + Vector2(0, index * 0.43))
+				var distance: float = drop.distance_to(other.position + Vector2(0, index * _stack_step().z))
 				if distance < best:
 					best = distance
 					target = other.id
@@ -371,7 +387,7 @@ func _finish_drag(screen: Vector2) -> void:
 					notice.text = "Equipped." if session.equipment.equip(target_card, id) else "Cannot equip this item."
 			elif not session.move_to_stack(id, target): notice.text = "These cards cannot stack, or the current recipe rejects extra ingredients."
 		else:
-			destination = destination.clamp(Vector2(-12, -9), Vector2(12, 8))
+			destination = _clamp_stack_position(id, destination)
 			session.split_stack(id, destination)
 	else:
 		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
@@ -382,6 +398,7 @@ func _finish_drag(screen: Vector2) -> void:
 	_refresh()
 
 func _refresh() -> void:
+	_update_board_geometry()
 	_sync_views()
 	var stats: Dictionary = session.stats()
 	status.text = "Day %d  ·  %.0f / %.0f s  ·  %s  |  Coins %d  ·  Food %d / %d  ·  Cards %d / %d" % [session.day, session.elapsed, session.day_duration, session.phase.to_upper() + (" / PAUSED" if session.paused else " / %.0fx" % session.speed), stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit]
@@ -520,13 +537,93 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 		notice.text = "Arrived at " + session.scene_name
 	elif kind == "travel_failed":
 		notice.text = "Travel failed: " + str(payload.get("error", ""))
-	if kind == "encounter":
+	if kind == "pack_purchased": feedback.play_event("CashRegister")
+	elif kind == "cards_sold": feedback.play_event("Coins")
+	elif kind == "crafted": feedback.play_event("Pop")
+	elif kind == "combat_hit":
+		var combat_type: int = int(catalog.fields(session.cards[int(payload.attacker_id)].definition_guid).get("combatType", 0))
+		var style: String = ["Melee", "Melee", "Ranged", "Magic"][clampi(combat_type, 0, 3)]
+		feedback.play_event("Attack" + style)
+		feedback.play_event("Miss" if payload.result.type == "miss" else ("Critical" if payload.result.type == "critical" else "Hit" + style))
+	elif kind == "encounter":
 		notice.text = "Event: " + str(payload.get("message", ""))
 
 func _withdraw_selected() -> void:
 	if session.phase != "playing" or not session.world.can_click_chest(selected):
 		notice.text = "Select an unstacked chest to withdraw a coin."
 		return
-	var position: Vector2 = (session.cards[selected].position + Vector2(1.7, 0)).clamp(Vector2(-12, -9), Vector2(12, 8))
+	var position: Vector2 = _clamp_stack_position(selected, session.cards[selected].position + Vector2(1.7, 0))
 	notice.text = "Withdrew a coin." if session.world.withdraw_coin(selected, true, position) else "Chest is empty."
 	_refresh()
+
+func _stack_step() -> Vector3:
+	var step: Dictionary = catalog.settings("CardSettings").get("stackStep", {})
+	return Vector3(float(step.get("x", 0)), float(step.get("y", 0.002)), float(step.get("z", -0.18)))
+
+func _card_footprint(id: int) -> Vector2:
+	if not session.cards.has(id): return Vector2.ZERO
+	var fields: Dictionary = catalog.fields(session.cards[id].definition_guid)
+	var appearance: Dictionary = visual_assets.appearance(int(fields.get("category", 0)), catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition", fields, session.scene_name)
+	var size: Dictionary = appearance.get("prefab", {}).get("size", {})
+	return Vector2(float(size.get("x", 1.4)), float(size.get("z", 1.95)))
+
+func _update_board_geometry() -> void:
+	if session.catalog == null: return
+	var base_limit: int = int(catalog.settings("CardSettings").get("baseCardLimit", 24))
+	var boost: float = clampf((session.stats().card_limit - base_limit) / 100.0, 0.0, 1.0)
+	var key: String = session.scene_name + ":" + str(boost)
+	if key == geometry_key: return
+	geometry_key = key
+	var bounds: Rect2 = visual_assets.board_local_rect(session.scene_name, boost)
+	if not bounds.has_area():
+		# Verified original Board.fbx vertices: 12x8 base, 24x16 Scale target.
+		bounds = Rect2(Vector2(-6, -4) * (1.0 + boost), Vector2(12, 8) * (1.0 + boost))
+	var old_bounds: Variant = session.board_bounds
+	session.board_bounds = bounds
+	if original_board != null:
+		original_board.hide()
+		original_board.queue_free()
+	original_board = visual_assets.create_board_mesh(session.scene_name, boost)
+	if original_board != null:
+		add_child(original_board)
+		original_board.position.y = -0.05
+		board_mesh.hide()
+	else:
+		board_mesh.show()
+		board_mesh.mesh.size = Vector3(bounds.size.x, 0.2, bounds.size.y)
+		visual_assets.apply_scene(camera, board_mesh, session.scene_name)
+	if old_bounds is Rect2 and bounds.get_area() < old_bounds.get_area():
+		for stack in session.stacks.values():
+			stack.position = _clamp_stack_position(stack.card_ids[0], stack.position)
+			for id in stack.card_ids: session.cards[id].position = stack.position
+
+func _clamp_stack_position(card_id: int, point: Vector2) -> Vector2:
+	if not session.board_bounds is Rect2: return point
+	var bounds: Rect2 = session.board_bounds
+	var footprint: Vector2 = _card_footprint(card_id)
+	var stack = session.stacks.get(session.cards[card_id].stack_id)
+	var count: int = 1 if stack == null else stack.card_ids.size() - stack.card_ids.find(card_id)
+	var min_x: float = bounds.position.x + footprint.x * 0.5
+	var max_x: float = bounds.end.x - footprint.x * 0.5
+	var min_z: float = bounds.position.y + footprint.y * 0.5 + (count - 1) * absf(_stack_step().z)
+	var max_z: float = bounds.end.y - session.board_top_margin - footprint.y * 0.5
+	return Vector2(clampf(point.x, min_x, max_x), clampf(point.y, min_z, max_z))
+
+func _ai_point_valid(point: Vector2, stack_id: int) -> bool:
+	if not session.board_bounds is Rect2 or not session.stacks.has(stack_id): return false
+	return session.ai.point_in_board(point, session.board_bounds, _card_footprint(session.stacks[stack_id].card_ids[0]), session.board_top_margin)
+
+func _combat_geometry() -> Array:
+	var result: Array = []
+	for id in session.combat.tasks:
+		var task: Dictionary = session.combat.tasks[id]
+		var position := Vector2.ZERO
+		var count: int = 0
+		var has_player: bool = false
+		for card_id in task.attackers + task.defenders:
+			if not session.cards.has(card_id): continue
+			position += session.cards[card_id].position
+			count += 1
+			has_player = has_player or int(catalog.fields(session.cards[card_id].definition_guid).get("faction", 0)) == 1
+		if count > 0: result.append({"id": id, "ongoing": true, "has_player": has_player, "position": position / count})
+	return result
