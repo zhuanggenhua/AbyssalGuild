@@ -19,12 +19,40 @@ Confirmed original call sites (under source Scripts/):
 - Combat/CombatTask.cs: AttackMelee/Ranged/Magic and HitMelee/Ranged/Magic
   according to combat type, plus Critical and Miss at those outcomes.
 
-The original prefab configures an eight-player pool, 0.05-second per-event
-cooldown and no pitch randomization. The adapter reads those settings; if source
-randomization is enabled it uses the source 0.95–1.05 pitch range. It uses 2D
-playback. Unity mixer routing, saved volume preferences, positional playback
-and interrupt-BGM behavior are not ported. The pool steals a player if full;
-Unity's overlapping PlayOneShot behavior is not reproduced exactly.
+## Source pool, cooldown and gain audit
+
+Static reference: locked CardLoop commit
+`a11a89b04cea8370476f2559b639bb9b4cbc08d8`,
+`Scripts/Core/AudioManager.cs` (`Awake`, `GetNextSource`, `PlaySFX`) and
+`Prefabs/Core/AudioManager.prefab`. No Unity execution is required.
+
+- The prefab configures eight source slots, a 0.05-second per-AudioId cooldown,
+  and no pitch randomization. The adapter reads those settings.
+- `PlaySFX` records the unscaled request time before looking up the clip. A
+  missing AudioId therefore still consumes its cooldown; a rejected repeat
+  neither refreshes that timestamp nor advances the round-robin source index.
+  The adapter uses monotonic elapsed time, unaffected by gameplay time scaling.
+- Unity `PlayOneShot` does not stop earlier sounds when a source slot wraps.
+  The adapter now preserves that overlap for both equal and different clips.
+  A busy slot keeps its current player and starts a temporary child player,
+  freed on completion. Idle base players are reused. Unlike Unity's internal
+  voices, Godot overflow voices allocate nodes, but no fixed per-slot voice
+  count is introduced and wrapping no longer steals or replaces a sound.
+- If pitch randomization is enabled, the source 0.95–1.05 pitch is applied to
+  the reused logical slot and its already-playing voices. Other slots keep
+  their pitch. This matches changing pitch on the pooled Unity AudioSource.
+- `set_user_gains` applies app-local SFX gain to every live voice and composes
+  BGM gain with the source's 0.3 clip gain exactly once. It does not change the
+  app master bus or host settings. Persistence and option controls are described
+  in `options-ui.md`; the Unity mixer asset itself is not recreated.
+- Reconfiguration stops and releases every voice, resets cooldown/cache/index
+  state and copies source settings without mutating the imported catalog.
+  User gains survive reconfiguration. Leaving the tree stops all voices.
+
+Playback remains 2D. Optional positional playback and interrupt-BGM behavior
+are not ported; the audited source call sites above use the default arguments.
+Platform mixing, voice virtualization, allocation cost and audible quality are
+not certified as identical by these structural tests.
 
 `play_music()` resolves `_BGMClip` and `_defaultMusicVolume`. KingsFeast.wav is
 now present in the strict private import: stereo 44.1 kHz, 130.168 seconds,
@@ -34,6 +62,20 @@ licensed copy, music returns false and stays silent.
 Do not add unlicensed replacement music. Audio files remain private ignored
 assets. No sounds are played unless the caller explicitly wires their event.
 
-`test_audio_feedback.gd` checks synthetic event mapping, missing behavior,
-cooldown and available restored audio: all 18 source event WAVs decode. These
-are structural/headless tests, not listening or perceived-volume validation.
+`test_audio_feedback.gd` checks synthetic event mapping, per-event cooldown,
+failed-lookup cooldown, round-robin overlap with distinct and repeated clips,
+slot-wide pitch, live user gains, one-time BGM gain composition, natural voice
+cleanup, repeated configuration and tree exit. With the private import present,
+all 18 event WAVs decode and start concurrently across eight logical slots, and
+the source music starts with its existing user gain. These are structural,
+headless playback checks, not listening or perceived-volume validation.
+
+Run the focused checks with:
+
+```sh
+bash tools/test_godot.sh res://tests/godot/test_audio_feedback.gd
+bash tools/test_godot.sh res://tests/godot/test_options_ui.gd
+```
+
+The first command always runs synthetic checks and reports a skip if private
+imports are absent. The options integration check requires imported source data.

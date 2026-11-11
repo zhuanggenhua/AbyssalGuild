@@ -57,6 +57,8 @@ func configure(source_catalog, random_seed: int = 1, selected_scene: String = "M
 	quest_tracker.configure(catalog, scene_name)
 	if not event_occurred.is_connected(_track_quest_event):
 		event_occurred.connect(_track_quest_event)
+	if not event_occurred.is_connected(_track_cycle_event):
+		event_occurred.connect(_track_cycle_event)
 	ai.configure(self, world, scene_name)
 
 ## Settled source target, not an animated transform. Stored save fields stay unchanged.
@@ -250,7 +252,7 @@ func _weighted(entries: Array, minimum_one: bool) -> String:
 	return ""
 
 func open_pack(id: int) -> int:
-	if phase != "playing" or not cards.has(id):
+	if phase not in ["playing", "selling"] or not cards.has(id):
 		return -1
 	var card = cards[id]
 	var definition: Dictionary = catalog.get_definition(card.definition_guid)
@@ -559,9 +561,6 @@ func _sell_cards(ids: Array) -> bool:
 	for i in range(total_price):
 		spawn_card(coin, position)
 	_notify_stats_changed()
-	if phase == "selling" and stats().excess <= 0:
-		phase = "ready"
-		world.finish_day(day, friendly_mode, board_bounds, board_top_margin)
 	changed.emit()
 	return true
 
@@ -593,28 +592,57 @@ func buy_pack(guid: String) -> int:
 	changed.emit()
 	return purchased
 
+## Source AllCards order: registered stacks and their members, then each ongoing
+## combat's attackers and defenders. Equipped/unregistered cards are not included.
+## Keep this local to feeding: other consumers have independently audited ordering.
+func _feeding_card_ids() -> Array:
+	var result: Array = []
+	for stack in stacks.values():
+		for id in stack.card_ids:
+			if cards.has(id) and not equipment.owners.has(id):
+				result.append(id)
+	for task in combat.tasks.values():
+		for id in task.attackers + task.defenders:
+			if cards.has(id) and not result.has(id):
+				result.append(id)
+	return result
+
 func end_day() -> Dictionary:
 	if phase != "playing" and phase != "feeding":
 		return stats()
 	phase = "feeding"
 	paused = true
 	var hunger: int = int(catalog.settings("CardSettings").get("hungerPerCharacter", 2))
-	for character in cards.values().duplicate():
-		if int(catalog.fields(character.definition_guid).get("category", 0)) != 2:
+	var characters: Array = []
+	var foods: Array = []
+	# Snapshot eligibility once. New loot/characters created during feeding must
+	# not join this cycle's queue. A leftover returns at the tail for stable ties.
+	for id in _feeding_card_ids():
+		var category: int = int(catalog.fields(cards[id].definition_guid).get("category", 0))
+		if category == 2:
+			characters.append(id)
+		elif category == 3 and cards[id].nutrition > 0:
+			foods.append(id)
+	for character_id in characters:
+		if not cards.has(character_id):
 			continue
+		var character = cards[character_id]
 		var need: int = hunger
-		while need > 0:
+		while need > 0 and cards.has(character_id):
 			var nearest = null
 			var distance: float = INF
-			for food in cards.values():
-				if int(catalog.fields(food.definition_guid).get("category", 0)) == 3 and food.nutrition > 0:
-					var candidate: float = card_target_position_3d(character.id).distance_squared_to(card_target_position_3d(food.id))
-					if candidate < distance:
-						distance = candidate
-						nearest = food
+			for food_id in foods:
+				# Native safety: external callbacks may have removed a snapshot card.
+				if not cards.has(food_id) or cards[food_id].nutrition <= 0:
+					continue
+				var candidate: float = card_target_position_3d(character.id).distance_squared_to(card_target_position_3d(food_id))
+				if candidate < distance:
+					distance = candidate
+					nearest = cards[food_id]
 			if nearest == null:
 				kill_card(character.id)
 				break
+			foods.erase(nearest.id)
 			_prepare_food_for_feeding(nearest, card_target_position(character.id))
 			var eaten: int = mini(need, nearest.nutrition)
 			nearest.nutrition -= eaten
@@ -623,13 +651,14 @@ func end_day() -> Dictionary:
 			character.health = mini(maximum, character.health + _round_to_even(float(maximum) * 0.5 * eaten / hunger))
 			if nearest.nutrition <= 0:
 				kill_card(nearest.id)
+			elif cards.has(nearest.id):
+				foods.append(nearest.id)
 			_notify_stats_changed()
 	for stack in stacks.values():
 		_validate_craft(stack)
 	var snapshot: Dictionary = stats()
-	phase = "game_over" if snapshot.characters <= 0 else ("selling" if snapshot.excess > 0 else "ready")
-	if phase == "ready":
-		world.finish_day(day, friendly_mode, board_bounds, board_top_margin)
+	phase = "game_over" if snapshot.characters <= 0 else "selling"
+	_check_selling_condition()
 	changed.emit()
 	return snapshot
 
@@ -730,6 +759,21 @@ func _prepare_food_for_feeding(food, destination: Vector2) -> void:
 ## Internal connection is installed once by configure, before UI subscribers.
 func _track_quest_event(kind: String, payload: Dictionary) -> void:
 	quest_tracker.process_event(kind, payload, self)
+
+## Source subscribes to stats changes while selling, rather than only checking
+## after sales. In particular, the first payout coin can start the encounter
+## before the remaining coins are created. Ready claims the transition before
+## encounter spawns publish their own stats changes, preventing reentry.
+func _track_cycle_event(kind: String, _payload: Dictionary) -> void:
+	if kind == "stats_changed":
+		_check_selling_condition()
+
+func _check_selling_condition() -> void:
+	if phase != "selling" or stats().excess > 0:
+		return
+	phase = "ready"
+	world.finish_day(day, friendly_mode, board_bounds, board_top_margin)
+	changed.emit()
 
 func _notify_stats_changed() -> void:
 	event_occurred.emit("stats_changed", {})

@@ -21,8 +21,7 @@ func configure(catalog, visual_assets) -> void:
 	last_played.clear()
 	source_settings.clear()
 	for player in pool:
-		player.stop()
-		player.stream = null
+		_stop_slot(player)
 		player.queue_free()
 	pool.clear()
 	if music != null:
@@ -33,7 +32,7 @@ func configure(catalog, visual_assets) -> void:
 	for prefab in catalog.data.get("referenced_prefabs", []):
 		for document in prefab.get("documents", []):
 			if document.get("script_class", "") == "AudioManager":
-				source_settings = document.get("fields", {})
+				source_settings = document.get("fields", {}).duplicate(true)
 				break
 	if source_settings.is_empty():
 		return
@@ -85,18 +84,42 @@ func play_event(event_name: String) -> bool:
 	var now: float = Time.get_ticks_msec() / 1000.0
 	if now - float(last_played.get(event_name, -INF)) < cooldown:
 		return false
+	# Source records an admitted request even when the AudioId has no clip.
+	last_played[event_name] = now
 	var stream := stream_for_event(event_name)
 	if stream == null:
 		return false
 	var player: AudioStreamPlayer = pool[next_player]
 	next_player = (next_player + 1) % pool.size()
-	player.stop()
-	player.stream = stream
-	player.volume_db = user_sfx_db
-	player.pitch_scale = randf_range(0.95, 1.05) if bool(source_settings.get("_randomizeSFXPitch", false)) else 1.0
-	player.play()
-	last_played[event_name] = now
+	# Unity PlayOneShot overlaps even when a pooled source wraps. Reassigning a
+	# Godot player's stream would cut off its earlier sound, so keep that voice
+	# and add a temporary child only while this logical source is occupied.
+	var voice := player
+	if player.playing:
+		voice = AudioStreamPlayer.new()
+		player.add_child(voice)
+		voice.finished.connect(voice.queue_free)
+	var pitch: float = randf_range(0.95, 1.05) if bool(source_settings.get("_randomizeSFXPitch", true)) else 1.0
+	# Source pitch is a property of the pooled AudioSource, including sounds
+	# already playing on it. Godot child players do not inherit audio gain/pitch.
+	for active_voice in _slot_voices(player):
+		active_voice.volume_db = user_sfx_db
+		active_voice.pitch_scale = pitch
+	voice.stream = stream
+	voice.play()
 	return true
+
+func _slot_voices(player: AudioStreamPlayer) -> Array[AudioStreamPlayer]:
+	var voices: Array[AudioStreamPlayer] = [player]
+	for child in player.get_children():
+		if child is AudioStreamPlayer:
+			voices.append(child)
+	return voices
+
+func _stop_slot(player: AudioStreamPlayer) -> void:
+	for voice in _slot_voices(player):
+		voice.stop()
+		voice.stream = null
 
 func play_music() -> bool:
 	if not is_inside_tree():
@@ -117,8 +140,7 @@ func _exit_tree() -> void:
 	# Stop playback and release stream references before the audio server shuts down.
 	for player in pool:
 		if is_instance_valid(player):
-			player.stop()
-			player.stream = null
+			_stop_slot(player)
 	if is_instance_valid(music):
 		music.stop()
 		music.stream = null
@@ -135,6 +157,8 @@ func set_user_gains(sfx_db: float, bgm_db: float) -> bool:
 	user_sfx_db = sfx_db
 	user_bgm_db = bgm_db
 	for player in pool:
-		if is_instance_valid(player): player.volume_db = user_sfx_db
+		if is_instance_valid(player):
+			for voice in _slot_voices(player):
+				voice.volume_db = user_sfx_db
 	if is_instance_valid(music): music.volume_linear = music_gain_linear()
 	return true

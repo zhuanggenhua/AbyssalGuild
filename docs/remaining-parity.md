@@ -32,8 +32,9 @@ The full private source and assets now pass the 1327-file source lock.
 ## Presentation and platform acceptance
 
 - Original source UI composition, complete rendering/lighting parity, original fonts,
-  drag/craft/feed/death puff animations, camera smoothing and some source sound
-  timing remain incomplete. Combat jump/projectile/hurt/shake adapters are now
+  drag/craft/feed/death puff animations and some source event/sound timing remain
+  incomplete. Source-parameter camera smoothing, zoom and cycle navigation locks
+  are connected, with hierarchy/pointer acceptance limitations documented. Combat jump/projectile/hurt/shake adapters are now
   connected but use documented interpolation/noise approximations.
 - Original Card/Pack FBX and independently rewritten UV/material composition are
   now bound when complete private inputs exist. This has structural/resource
@@ -77,11 +78,21 @@ exceptions, day locks and unequip-drag position. Its cosmetic RNG is independent
 of gameplay and its Perlin implementation is not Unity-identical. No real pointer,
 rendering or listening acceptance is implied by injected/headless checks.
 
-A further cycle audit found remaining gameplay timing work: source feeding takes
-one initial food snapshot and consumes through real-time phases while in-flight
-combat may continue. Native synchronous feeding currently rescans food and may
-admit new loot into the same meal. Food eligibility, combat interleaving and cycle
-transitions need a coordinated state machine, not only a food animation.
+Feeding now snapshots source-ordered characters/food once, preserves leftover tie
+order, observes selling stats events including first-payout transitions, and lets
+packs open during selling. Full real-time feeding/encounter phases remain pending:
+combat can interleave with their waits, and effect timing cannot be faked with
+post-hoc UI animation. Carried drag completion across a cycle boundary remains.
+
+SFX now preserve overlapping voices when logical source slots wrap, retain source
+cooldown-before-lookup behavior and keep app-local gains without corrupting catalog
+settings during reconfiguration. Godot overflow players differ internally from
+Unity one-shot voices. Hearing and positional/interrupt-BGM acceptance remain.
+
+`tools/test_imported.sh` creates an isolated copied project, imports every complete
+private resource, requires positive completion markers and rejects skipped/error
+branches. It complements, rather than replaces, the source-free/public and domain
+runners; no GPU, pointer or listening acceptance is implied.
 
 Source assets and generated content remain private and ignored. Public CI tests
 only public code/synthetic behavior and explicitly skips licensed-content checks.

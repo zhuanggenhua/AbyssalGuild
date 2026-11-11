@@ -35,3 +35,5 @@ godot --path .
 没有本地导入数据时会明确阻止开始游戏，不以假数据代替原模板。操作说明见 [`docs/board-ui.md`](docs/board-ui.md)。
 
 运行时和视觉验收进度见 [`docs/migration-progress.md`](docs/migration-progress.md)，已确认的剩余差异见 [`docs/remaining-parity.md`](docs/remaining-parity.md)。公开仓库的 GitHub Actions 仅验证不含授权素材的代码与合成测试。
+
+完整私有资源可用时，运行 `bash tools/test_imported.sh`。它复制到临时工程重新导入，在隔离用户目录验证真实 PNG/WAV/FBX 和界面绑定；任何必需分支跳过都会失败，不替代画面、鼠标或听感验收。详见 [私有资源验证](docs/private-validation.md)。

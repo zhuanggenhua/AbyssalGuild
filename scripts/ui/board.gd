@@ -1,4 +1,5 @@
 extends Node3D
+const CameraMotion = preload("res://scripts/ui/camera_motion.gd")
 const CombatPresentation = preload("res://scripts/ui/combat_presentation.gd")
 const EquipmentDisplay = preload("res://scripts/ui/equipment_display_controller.gd")
 const ImpactFeedback = preload("res://scripts/model/impact_feedback.gd")
@@ -27,6 +28,7 @@ var layout_key: String = ""
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
 var combat_rectangles: Dictionary = {}
+var camera_motion = CameraMotion.new()
 var combat_presentation = CombatPresentation.new()
 var equipment_display = EquipmentDisplay.new()
 var pressed_panel: int = -1
@@ -346,6 +348,8 @@ func _enter_game() -> void:
 	_build_shop()
 	visual_assets.apply_scene(camera, board_mesh, session.scene_name)
 	visual_assets.apply_source_camera(camera, session.scene_name)
+	camera_motion.configure(camera.position, CameraMotion.source_settings(catalog.data, session.scene_name))
+	panning = false
 	visual_assets.apply_source_light(source_light, session.scene_name)
 	# Original mesh is optional; validated source vertex bounds remain the fallback.
 	geometry_key = ""
@@ -368,6 +372,7 @@ func _enter_game() -> void:
 func _process(delta: float) -> void:
 	if not running:
 		return
+	_update_camera_motion(delta)
 	combat_presentation.advance(delta)
 	if _ui_pause_active():
 		# Travel/return use real time even under an external menu pause.
@@ -382,13 +387,6 @@ func _process(delta: float) -> void:
 	if refresh_clock >= 0.2:
 		refresh_clock = 0
 		_refresh()
-	var direction := Vector3.ZERO
-	if Input.is_physical_key_pressed(KEY_A): direction.x -= 1
-	if Input.is_physical_key_pressed(KEY_D): direction.x += 1
-	if Input.is_physical_key_pressed(KEY_W): direction.z -= 1
-	if Input.is_physical_key_pressed(KEY_S): direction.z += 1
-	camera.position += direction * delta * 8
-	_clamp_camera()
 
 func _name(guid: String) -> String:
 	var fields: Dictionary = catalog.fields(guid)
@@ -517,7 +515,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 			_zoom_camera(1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0)
 		if event.button_index == MOUSE_BUTTON_MIDDLE:
-			panning = event.pressed
+			panning = event.pressed and _camera_input_enabled()
 		if event.button_index == MOUSE_BUTTON_RIGHT:
 			var right_hit: Dictionary = _pick_target(event.position)
 			if event.pressed:
@@ -529,18 +527,25 @@ func _unhandled_input(event: InputEvent) -> void:
 				right_pressed_panel = -1
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				_begin_card_press(_pick_target(event.position), event.position)
+				var hit: Dictionary = _pick_target(event.position)
+				panning = _camera_input_enabled() and int(hit.card_id) < 0
+				_begin_card_press(hit, event.position)
 			else:
+				panning = false
 				_finish_drag(event.position)
-	if event is InputEventMouseMotion and panning:
-		camera.position += Vector3(-event.relative.x, 0, -event.relative.y) * 0.01 * camera.position.y / 10.0
-		_clamp_camera()
 	if event is InputEventMouseMotion and dragging >= 0:
 		drag_moved = drag_moved or event.position.distance_to(press_position) > 7
 		if drag_moved: drag_delta = _board_point(event.position) - drag_origin
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
+	# Middle-button pan bypasses GUI blocking, matching the source input path.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
+		panning = event.pressed and _camera_input_enabled()
+	if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE] and not event.pressed:
+		panning = false
+	if event is InputEventMouseMotion and panning and _camera_input_enabled():
+		camera_motion.pan(event.relative, camera.position.y)
 	if event is InputEventMouseButton and not event.pressed and get_viewport().gui_get_hovered_control() != null:
 		pressed_panel = -1
 		right_pressed_panel = -1
@@ -1065,23 +1070,37 @@ func _combat_geometry() -> Array:
 	return result
 
 # Model coordinates retain Unity XZ. Only the view reflects source +Z to Godot -Z.
+func _camera_input_enabled() -> bool:
+	return running and session.phase in ["playing", "selling"] and not _ui_pause_active()
+
 func _clamp_camera() -> void:
-	if not session.board_bounds is Rect2: return
-	var bounds: Rect2 = session.board_bounds
-	camera.position.x = clampf(camera.position.x, bounds.position.x - 0.5, bounds.end.x + 0.5)
-	camera.position.z = clampf(camera.position.z, -bounds.end.y - 0.5, -bounds.position.y + 0.5)
+	if session.board_bounds is Rect2: camera_motion.set_bounds(session.board_bounds)
 
 func _zoom_camera(scroll: float) -> void:
-	if camera.projection == Camera3D.PROJECTION_ORTHOGONAL:
-		camera.size = clampf(camera.size - scroll, 12, 34)
-		return
-	var forward: Vector3 = -camera.global_basis.z
-	var candidate: Vector3 = camera.position + forward * scroll
-	var distance: float = candidate.y / maxf(-forward.y, 0.0001)
-	# Original controller rejects, rather than clamps, an out-of-range zoom step.
-	if distance >= 5.0 and distance <= 20.0:
-		camera.position = candidate
-		_clamp_camera()
+	if _camera_input_enabled(): camera_motion.zoom(scroll, -camera.global_basis.z)
+
+func _focus_camera(target: Vector2, duration: float = 0.5) -> void:
+	_focus_camera_position(Vector3(target.x,0,target.y), duration)
+
+func _focus_camera_position(source_position: Vector3, duration: float = 0.5) -> void:
+	panning = false
+	camera_motion.move_to(camera.position, Vector3(source_position.x,source_position.y,-source_position.z), -camera.global_basis.z, duration)
+
+func _update_camera_motion(delta: float) -> void:
+	_clamp_camera()
+	var enabled: bool = _camera_input_enabled()
+	if not enabled: panning = false
+	if enabled:
+		# Explicit native convenience extension; source only supports pointer pan.
+		var direction := Vector3.ZERO
+		if Input.is_physical_key_pressed(KEY_A): direction.x -= 1
+		if Input.is_physical_key_pressed(KEY_D): direction.x += 1
+		if Input.is_physical_key_pressed(KEY_W): direction.z -= 1
+		if Input.is_physical_key_pressed(KEY_S): direction.z += 1
+		if direction != Vector3.ZERO:
+			camera_motion.target += direction * delta * 8
+			camera_motion.clamp_target()
+	camera.position = camera_motion.step(camera.position, delta, enabled)
 
 func _layout_states() -> Array:
 	var result: Array = []
