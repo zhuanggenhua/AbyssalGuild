@@ -120,13 +120,8 @@ rendering acceptance. These are not covered by the completed-slice claims above:
 
 - Pressing a tail in a crafting stack currently delays the split until release,
   so its recipe can consume a held card. Source immediate split, paused-original
-  progress and return-to-original resume need a complete gesture lifecycle.
-- Required Feed / Start Day / Game Over actions are currently inside the default
-  collapsed Market panel. They need an always-visible cycle prompt/action.
-- Recipe cards drawn from packs or reconstructed by a cold save load lose their
-  scene-template ingredient description. The fuller research builder must be shared.
-- Single chest clicks do not yet withdraw coins; the separate Withdraw control
-  works. The visible 3x speed option is inert because the model supports 1x / 2x.
+  progress and return-to-original resume need a complete gesture lifecycle,
+  including retained pointer-up routing through a later menu or Options panel.
 - Source vendor unlocks queue a gameplay pause/input lock, notice, focus and
   highlight sequence; current activation is immediate without that sequence.
 - Explicit title quit confirmation, gamepad cancel, drag-target highlighting,
@@ -134,3 +129,11 @@ rendering acceptance. These are not covered by the completed-slice claims above:
 
 These findings use locked original paths and isolated Godot probes, not Unity
 execution. Subsequent fixes must include interruption and repeated-input checks.
+
+Required day-cycle actions now remain in the persistent header, independent of
+collapsed sidebars. Singleton chest clicks share the existing withdrawal path
+with repeated-release and phase protections. Only supported Normal/Fast pace
+controls remain. Recipe cards now share one pure scene-aware definition builder
+for packs, research, cold saves and traveler restoration; ingredient text and
+all template fields survive fresh-catalog continuation. These corrections have
+focused synthetic/source-data coverage, not manual input/rendered acceptance.

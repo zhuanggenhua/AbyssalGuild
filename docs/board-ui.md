@@ -118,3 +118,11 @@ archive inventory with validated restore-copy to a fresh slot. Restore remains
 on the title and never silently loads/replaces a campaign. Stale confirmation,
 invalid archive and interrupted flows preserve existing data. See
 [slot management UI](slot-management-ui.md).
+
+
+Required Feed / Start Day / Game Over actions are always visible in the top
+summary, even with both sidebars collapsed. Chest singleton clicks withdraw
+one coin; dragged/repeated releases do not. Pace controls expose only source
+Normal (1x) and Fast (2x), with ending-phase/menu guards. See
+[cycle action visibility](cycle-action-visibility.md). Generated recipe-card
+ingredient descriptions now survive pack/research creation and cold Continue.

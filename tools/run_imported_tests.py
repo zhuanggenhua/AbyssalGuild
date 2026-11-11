@@ -33,6 +33,7 @@ SUITES = (
     ("test_combat_presentation", r"Combat presentation checks: [1-9]\d* passed"),
     ("test_combat_feedback_ui", r"Combat feedback UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_ui_smoke", r"UI checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_cycle_action_visibility", r"Cycle action visibility: [1-9]\d* passed / [1-9]\d* total"),
     ("test_cycle_board", r"Cycle board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_puff_board", r"Puff board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_camera_board", r"Camera board checks: [1-9]\d* passed / [1-9]\d* total"),

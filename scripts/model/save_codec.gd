@@ -6,6 +6,7 @@ const MAX_BYTES = 8 * 1024 * 1024
 const MAX_ITEMS = 100000
 const Card = preload("res://scripts/model/card.gd")
 const Stack = preload("res://scripts/model/stack.gd")
+const RecipeCardDefinition = preload("res://scripts/model/recipe_card_definition.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 
 static func capture(session) -> Dictionary:
@@ -48,17 +49,12 @@ static func _int64_string(value: Variant) -> bool:
 	# Round trip rejects overflow, leading zeros, whitespace, and exponent forms.
 	return value is String and value.is_valid_int() and str(value.to_int()) == value
 
-static func _recipe_card(catalog, guid: String) -> bool:
-	if not guid.begins_with("Recipe:"):
+static func _recipe_card(catalog, guid: String, scene_name: String = "Main") -> bool:
+	var definition: Dictionary = RecipeCardDefinition.from_id(catalog, guid, scene_name)
+	if definition.is_empty():
 		return false
-	var recipe_id := guid.trim_prefix("Recipe:")
-	for recipe in catalog.data.get("recipes", []):
-		if str(recipe.fields.get("id", "")) != recipe_id:
-			continue
-		var result: String = catalog.ref_guid(recipe.fields.get("resultingCard", {}))
-		catalog.definitions[guid] = {"guid": guid, "script_class": "CardDefinition", "fields": {"id": guid, "displayName": "Recipe: " + str(catalog.fields(result).get("displayName", "???")), "category": 8, "isSellable": true, "sellPrice": 1, "recipe_guid": str(recipe.guid)}}
-		return true
-	return false
+	catalog.definitions[guid] = definition
+	return true
 
 ## Stage using independent model objects; no live session/catalog mutation on failure.
 static func _stage(session, snapshot: Variant) -> Dictionary:
@@ -113,7 +109,7 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 			if not row.get(key) is String:
 				return _fail("Invalid card definition")
 			var guid: String = row[key]
-			if catalog.get_definition(guid).is_empty() and not _recipe_card(catalog, guid):
+			if catalog.get_definition(guid).is_empty() and not _recipe_card(catalog, guid, session.scene_name):
 				return _fail("Unknown card definition: " + guid)
 			if not catalog.get_definition(guid).get("script_class", "").ends_with("Definition") or not catalog.fields(guid).has("category") and catalog.get_definition(guid).get("script_class") != "PackDefinition":
 				return _fail("Definition is not a card: " + guid)

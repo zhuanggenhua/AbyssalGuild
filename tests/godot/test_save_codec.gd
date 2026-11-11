@@ -15,6 +15,10 @@ func check(condition: bool, label: String) -> void:
 func make_session():
 	var catalog = Catalog.new()
 	catalog.configure({"cards": [{"guid": "card", "script_class": "CardDefinition", "fields": {"id": "wood", "category": 0, "maxHealth": 15}}], "packs": [{"guid": "pack", "script_class": "PackDefinition", "fields": {"id": "pack", "slots": [{}, {}]}}], "recipes": [{"guid": "recipe", "script_class": "RecipeDefinition", "fields": {"id": "recipe-id", "resultingCard": {"guid": "card"}}}], "quests": [{"guid": "quest", "fields": {"id": "quest-id", "targetAmount": 5}}], "scenes": [{"name": "Main", "documents": [{"fields": {"questGroups": [{"Quests": [{"guid": "quest"}]}]}}]}]})
+	# Generated cards require the scene's real template contract, not codec defaults.
+	catalog.data.cards.append({"guid": "recipe-template", "script_class": "CardDefinition", "fields": {"id": "template", "category": 8, "isSellable": true, "sellPrice": 3}})
+	catalog.data.scenes[0].documents.append({"script_class": "CardManager", "fields": {"recipeCardTemplate": {"guid": "recipe-template"}}})
+	catalog.configure(catalog.data)
 	var session = Session.new()
 	session.configure(catalog, 123)
 	return session

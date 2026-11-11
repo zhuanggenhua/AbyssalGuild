@@ -90,6 +90,7 @@ var ledger: RichTextLabel
 var notice: Label
 var day_button: Button
 var pause_button: Button
+var speed_buttons: Dictionary = {}
 var shop: VBoxContainer
 var market_panel: Control
 var detail_panel: Control
@@ -199,7 +200,15 @@ func _build_ui() -> void:
 	layer.add_child(hud)
 	hud.hide()
 	var top := _panel(hud, Rect2(18, 16, 1404, 70))
-	status = _label("", top, 19)
+	var summary := HBoxContainer.new()
+	summary.add_theme_constant_override("separation", 18)
+	top.add_child(summary)
+	status = _label("", summary, 19)
+	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Keep the one day action outside both collapsible sidebars. Critical cycle
+	# confirmations must remain discoverable even with the market closed.
+	day_button = _button("", summary, _advance_day)
+	day_button.custom_minimum_size.x = 300
 	var left := _panel(hud, Rect2(18, 100, 248, 600))
 	market_panel = left.get_parent().get_parent()
 	market_panel.hide()
@@ -207,9 +216,8 @@ func _build_ui() -> void:
 	pause_button = _button("Pause [Space]", left, _toggle_pause)
 	var speeds := HBoxContainer.new()
 	left.add_child(speeds)
-	for speed in [1.0, 2.0, 3.0]:
-		_button("%dx" % speed, speeds, func(): session.set_speed(speed))
-	day_button = _button("", left, _advance_day)
+	for speed in [1.0, 2.0]:
+		speed_buttons[speed] = _button("%dx" % speed, speeds, _set_speed.bind(speed))
 	_button("Save", left, _save_game)
 	_button("Save & title", left, _return_title)
 	_label("MARKET", left, 20)
@@ -679,6 +687,8 @@ func _finish_drag(screen: Vector2) -> void:
 			layout_locks[pack_stack] = true
 			session.open_pack(id, carried_press)
 			layout_locks.erase(pack_stack)
+		elif session.world._is_chest(id):
+			_withdraw_chest(id, carried_press)
 
 	drag_delta = Vector2.ZERO
 	_refresh()
@@ -688,15 +698,17 @@ func _refresh() -> void:
 	_sync_trade_zones()
 	_sync_views()
 	var stats: Dictionary = session.stats()
-	status.text = "Day %d  ·  %.0f / %.0f s  ·  %s  |  Coins %d  ·  Food %d / %d  ·  Cards %d / %d" % [session.day, session.elapsed, session.day_duration, session.phase.to_upper() + (" / PAUSED" if session.paused else " / %.0fx" % session.speed), stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit]
+	status.text = "Day %d  ·  %.0f / %.0f s  ·  %s\nCoins %d  ·  Food %d / %d  ·  Cards %d / %d" % [session.day, session.elapsed, session.day_duration, session.phase.to_upper() + (" / PAUSED" if session.paused else " / %.0fx" % session.speed), stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit]
 	pause_button.text = "Resume [Space]" if session.paused else "Pause [Space]"
-	pause_button.disabled = session.phase != "playing"
+	pause_button.disabled = not running or _ui_pause_active() or session.phase != "playing"
+	for button in speed_buttons.values(): button.disabled = pause_button.disabled
 	day_button.text = {"playing": "End day & feed", "feeding": "Feed villagers", "selling": "Sell %d excess cards" % stats.excess, "ready": "Start next day", "game_over": "Game over · return to title"}.get(session.phase, session.phase)
 	if session.phase == "feeding" and session.cycle.stage != "await_feed":
 		day_button.text = "Feeding · " + str(session.cycle.stage).replace("_", " ")
 	elif session.phase == "encounter":
 		day_button.text = "Encounter · " + str(session.cycle.stage).replace("_", " ")
-	day_button.disabled = session.phase in ["selling", "encounter"] or (session.phase == "feeding" and session.cycle.stage != "await_feed")
+	day_button.tooltip_text = day_button.text
+	day_button.disabled = not running or _ui_pause_active() or session.phase in ["selling", "encounter"] or (session.phase == "feeding" and session.cycle.stage != "await_feed")
 	_refresh_market_labels()
 	inspection.text = "Select a card"
 	if session.cards.has(selected):
@@ -792,7 +804,13 @@ func _toggle_pause() -> void:
 	if session.phase == "playing": session.set_paused(not session.paused)
 	_refresh()
 
+func _set_speed(speed: float) -> void:
+	if not running or _ui_pause_active() or session.phase != "playing": return
+	session.set_speed(speed)
+	_refresh()
+
 func _advance_day() -> void:
+	if not running or _ui_pause_active() or game_over_dialog.visible: return
 	if session.phase == "feeding" and session.cycle.stage != "await_feed": return
 	match session.phase:
 		"playing", "feeding": session.end_day()
@@ -1053,14 +1071,19 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 		notice.text = "Event: " + str(payload.get("message", ""))
 
 func _withdraw_selected() -> void:
-	if not _allows_card_actions() or not session.world.can_click_chest(selected):
+	_withdraw_chest(selected)
+	_refresh()
+
+func _withdraw_chest(id: int, carried_press: bool = false) -> void:
+	if (not _allows_card_actions() and not carried_press) or not session.world.can_click_chest(id):
 		notice.text = "Select an unstacked chest to withdraw a coin."
 		return
-	var position: Vector2 = session.card_target_position(selected) + Vector2(_card_footprint(selected).x, 0)
+	var position: Vector2 = session.card_target_position(id) + Vector2(_card_footprint(id).x, 0)
 	# Source EnforcePlacementRules(spawnPos, null) uses no card footprint.
 	position = BoardLayout.enforce_placement(position, BoardLayout.stack_state(-1, position, Vector2.ZERO, 1), session.board_bounds, session.board_top_margin)
-	notice.text = "Withdrew a coin." if session.world.withdraw_coin(selected, true, position) else "Chest is empty."
-	_refresh()
+	var withdrew: bool = session.world.withdraw_coin(id, true, position)
+	notice.text = "Withdrew a coin." if withdrew else "Chest is empty."
+	if withdrew: feedback.play_event("Coin")
 
 func _stack_step() -> Vector3:
 	var step: Dictionary = catalog.settings("CardSettings").get("stackStep", {})
@@ -1496,6 +1519,7 @@ func _toggle_pause_menu() -> void:
 		drag_grant = -1
 		drag_delta = Vector2.ZERO
 		session.combat.dragged.clear()
+	_refresh()
 
 func _open_options() -> void:
 	if running:
@@ -1506,6 +1530,7 @@ func _open_options() -> void:
 		drag_delta = Vector2.ZERO
 		session.combat.dragged.clear()
 	options_panel.open()
+	if running: _refresh()
 
 func _handle_escape() -> void:
 	# Source PauseMenu never changes external pause during IsEndingCycle.

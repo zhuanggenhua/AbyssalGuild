@@ -3,6 +3,7 @@ extends RefCounted
 const Collection = preload("res://scripts/model/collection.gd")
 const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
+const RecipeCardDefinition = preload("res://scripts/model/recipe_card_definition.gd")
 const SpecialRecipes = preload("res://scripts/model/special_recipes.gd")
 const EquipmentSystem = preload("res://scripts/model/equipment_system.gd")
 const MobAI = preload("res://scripts/model/mob_ai.gd")
@@ -278,6 +279,7 @@ func open_pack(id: int, carried_press: bool = false) -> int:
 		return -1
 	var slot: Dictionary = slots[index]
 	var output: String = ""
+	var selected_recipe: bool = false
 	var recipes: Array = slot.get("PossibleRecipes", [])
 	if not recipes.is_empty() and rng.randf() < float(slot.get("RecipeChance", 0.1)):
 		var undiscovered: Array = []
@@ -290,9 +292,13 @@ func open_pack(id: int, carried_press: bool = false) -> int:
 			var recipe_guid: String = undiscovered[rng.randi_range(0, undiscovered.size() - 1)]
 			var recipe: Dictionary = catalog.fields(recipe_guid)
 			_discover_recipe(str(recipe.id))
-			output = "Recipe:" + str(recipe.id)
-			catalog.definitions[output] = {"guid": output, "script_class": "CardDefinition", "fields": {"id": output, "displayName": "Recipe: " + str(catalog.fields(catalog.ref_guid(recipe.get("resultingCard", {}))).get("displayName", "???")), "category": 8, "isSellable": true, "sellPrice": 1, "recipe_guid": recipe_guid}}
-	if output.is_empty():
+			selected_recipe = true
+			var recipe_card: Dictionary = RecipeCardDefinition.build(catalog, recipe_guid, scene_name)
+			if not recipe_card.is_empty():
+				output = str(recipe_card.guid)
+				catalog.definitions[output] = recipe_card
+	# A selected recipe with a missing template returns no card, not a second draw.
+	if not selected_recipe:
 		output = _weighted(slot.get("Entries", []), true)
 	var spawned: int = spawn_card(output, card.position, -1, {"height": 0.1})
 	card.uses_left -= 1

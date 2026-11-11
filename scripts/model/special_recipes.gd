@@ -1,5 +1,6 @@
 extends RefCounted
 ## Stateless source-specialized actions over the session's sole card/stack state.
+const RecipeCardDefinition = preload("res://scripts/model/recipe_card_definition.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
 const TYPES = ["ExplorationRecipe", "GrowthRecipe", "ResearchRecipe"]
 
@@ -106,43 +107,16 @@ static func _research(session, stack, recipe: Dictionary) -> void:
 	spawn_recipe_card(session, str(chosen.guid), stack.position, stack.id)
 	session._discover_recipe(str(chosen.fields.id))
 
-## Also suitable for the session's pack-recipe path: clone the actual scene template.
+## Research preserves its source spawn-before-discovery ordering.
 static func spawn_recipe_card(session, recipe_guid: String, position: Vector2, ignored_stack_id: int = -1) -> int:
-	var recipe: Dictionary = session.catalog.fields(recipe_guid)
-	var manager: Dictionary = _card_manager(session.catalog, session.scene_name)
-	var template: Dictionary = session.catalog.fields(session.catalog.ref_guid(manager.get("recipeCardTemplate", {})))
-	if template.is_empty():
+	var definition: Dictionary = RecipeCardDefinition.build(session.catalog, recipe_guid, session.scene_name)
+	if definition.is_empty():
 		return -1
-	var fields: Dictionary = template.duplicate(true)
-	var key: String = "Recipe:" + str(recipe.id)
-	fields.id = key
-	var output: String = session.catalog.ref_guid(recipe.get("resultingCard", {}))
-	fields.displayName = "Recipe: " + str(session.catalog.fields(output).get("displayName", "???"))
-	var description: String = ""
-	var ingredients: Array = recipe.get("requiredIngredients", [])
-	for index in range(ingredients.size()):
-		var ingredient: Dictionary = ingredients[index]
-		var ingredient_guid: String = session.catalog.ref_guid(ingredient.card)
-		if ingredient_guid.is_empty():
-			continue
-		description += str(session.catalog.fields(ingredient_guid).get("displayName", "")) + " x" + str(ingredient.count)
-		if index < ingredients.size() - 1:
-			description += ", "
-	if not description.is_empty():
-		description += "."
-	fields.description = description
-	fields.recipe_guid = recipe_guid
-	session.catalog.definitions[key] = {"guid": key, "script_class": "CardDefinition", "fields": fields}
-	return session.spawn_card(key, position, -1, {"ignored_stack_id": ignored_stack_id})
+	session.catalog.definitions[definition.guid] = definition
+	return session.spawn_card(str(definition.guid), position, -1, {"ignored_stack_id": ignored_stack_id})
 
 static func _card_manager(catalog, scene_name: String = "Main") -> Dictionary:
-	for scene in catalog.data.get("scenes", []):
-		if scene.get("name", "") != scene_name:
-			continue
-		for document in scene.get("documents", []):
-			if document.get("script_class", "") == "CardManager":
-				return document.fields
-	return {}
+	return RecipeCardDefinition.card_manager(catalog, scene_name)
 
 static func _card_width(catalog, guid: String, scene_name: String = "Main") -> float:
 	var category: int = int(catalog.fields(guid).get("category", 0))

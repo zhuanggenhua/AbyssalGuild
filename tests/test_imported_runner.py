@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_cycle_action_visibility": "Cycle action visibility: 1 passed / 1 total",
     "test_imported_resources": "Private imported resources: PASS (1 PNG, 1 WAV, 1 FBX)",
     "test_source_board_mesh": "Source board mesh: PASS (2 models, synthetic)",
     "test_card_mesh_binding": "Source card/pack mesh: PASS (3 bindings; actual cached FBX synthetic)",

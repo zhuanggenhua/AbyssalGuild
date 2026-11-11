@@ -159,7 +159,7 @@ func _card_data(card) -> Dictionary:
 func _restore_card(session, original, position: Vector2) -> int:
 	# Dynamic recipe cards may not be in an independently configured catalog.
 	if session.catalog.get_definition(original.definition_guid).is_empty():
-		Codec._recipe_card(session.catalog, original.definition_guid)
+		Codec._recipe_card(session.catalog, original.definition_guid, session.scene_name)
 	var id: int = session.spawn_card(original.definition_guid, position, -1, {"refuse_attach": true})
 	if id < 0 or not session.cards.has(id):
 		return -1

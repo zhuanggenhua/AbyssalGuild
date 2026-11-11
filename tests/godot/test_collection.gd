@@ -27,13 +27,14 @@ func fixture():
 	var cards: Array = []
 	for spec in [["hero", 2], ["wood", 4], ["mob", 9], ["recipe_card", 8], ["gear", 5]]:
 		cards.append({"guid": spec[0], "script_class": "CardDefinition", "fields": {"id": "card-id-" + spec[0], "category": spec[1], "isAggressive": spec[0] == "mob"}})
+	# Dynamic-ID restoration requires each scene's explicit recipe template.
 	var slots := [{"Entries": [{"Card": {"guid": "wood"}, "Weight": 0}, {"Card": {"guid": "mob"}, "Weight": -3}, {"Card": {"guid": "wood"}, "Weight": 5}, {"Card": {"fileID": 0}}, null], "PossibleRecipes": [{"guid": "recipe"}, {"guid": "recipe"}], "RecipeChance": 0}]
 	catalog.configure({"cards": cards, "packs": [{"guid": "pack", "script_class": "PackDefinition", "fields": {"id": "pack-id", "slots": slots}}], "recipes": [
 		{"guid": "recipe", "script_class": "RecipeDefinition", "fields": {"id": "recipe-id", "resultingCard": {"guid": "wood"}}},
 		{"guid": "travel", "script_class": "TravelRecipe", "fields": {"id": "travel-id", "targetScenes": ["Main", "Island"], "requiredIngredients": [{"card": {"guid": "hero"}, "count": 1, "consumptionMode": 1}]}},
 		{"guid": "second_recipe", "script_class": "RecipeDefinition", "fields": {"id": "second-recipe-id", "resultingCard": {"guid": "wood"}}}],
 		"quests": [{"guid": "quest", "fields": {"id": "quest-id"}}],
-		"scenes": [{"name": "Main", "documents": [{"script_class": "CardManager", "fields": {"defaultSpawnCards": []}}]}, {"name": "Island", "documents": [{"script_class": "CardManager", "fields": {"defaultSpawnCards": []}}]}]})
+		"scenes": [{"name": "Main", "documents": [{"script_class": "CardManager", "fields": {"defaultSpawnCards": [], "recipeCardTemplate": {"guid": "recipe_card"}}}]}, {"name": "Island", "documents": [{"script_class": "CardManager", "fields": {"defaultSpawnCards": [], "recipeCardTemplate": {"guid": "recipe_card"}}}]}]})
 	var session = Session.new()
 	session.configure(catalog, 44)
 	return session
