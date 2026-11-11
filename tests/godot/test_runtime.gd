@@ -99,7 +99,9 @@ func test_edge_cases(catalog) -> void:
 			pack_guid = str(entry.guid)
 			break
 	check(not pack_guid.is_empty(), "source has paid vendor")
-	purchase.completed_quests = int(catalog.fields(pack_guid).get("minQuests", 0))
+	# Vendor-only fixture: restore valid completed IDs, not a fabricated gameplay counter.
+	var completed_ids: Array = purchase.quest_tracker.definitions.keys().slice(0, int(catalog.fields(pack_guid).get("minQuests", 0)))
+	purchase.quest_tracker.restore_state({"CompletedQuests": completed_ids})
 	check(purchase.buy_pack(pack_guid) == -1, "insufficient currency rejects without mutation")
 	var coin: String = catalog.find_by_name("Coin")
 	var coin_id: int = purchase.spawn_card(coin)

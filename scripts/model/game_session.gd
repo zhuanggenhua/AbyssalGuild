@@ -2,13 +2,17 @@ extends RefCounted
 ## Engine-independent gameplay slice. No nodes, imported art, or Unity code.
 const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
+const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)
 var catalog
 var cards: Dictionary = {}
 var stacks: Dictionary = {}
 var discovered_recipes: Dictionary = {}
-var completed_quests: int = 0
+var quest_tracker = QuestTracker.new()
+var completed_quests: int:
+	get:
+		return quest_tracker.completed_count()
 var vendor_payments: Dictionary = {}
 var day: int = 1
 var elapsed: float = 0.0
@@ -22,19 +26,22 @@ var _next_id: int = 1
 func configure(source_catalog, random_seed: int = 1) -> void:
 	catalog = source_catalog
 	rng.seed = random_seed
+	quest_tracker.configure(catalog, "Main")
+	if not event_occurred.is_connected(_track_quest_event):
+		event_occurred.connect(_track_quest_event)
 
 func start_new_game() -> int:
 	cards.clear()
 	stacks.clear()
 	discovered_recipes.clear()
 	vendor_payments.clear()
-	completed_quests = 0
 	day = 1
 	elapsed = 0.0
 	phase = "playing"
 	paused = false
 	speed = 1.0
 	_next_id = 1
+	quest_tracker.start_new_game(self)
 	var starter: String = catalog.find_by_name("Starter Pack", "packs")
 	if starter.is_empty():
 		for entry in catalog.data.get("packs", []):
@@ -62,6 +69,10 @@ func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: in
 		target_stack = stack.id
 	card.stack_id = target_stack
 	stacks[target_stack].card_ids.append(card.id)
+	# Source CreatePackInstance does not publish card-created or stats events.
+	if catalog.get_definition(guid).get("script_class", "") != "PackDefinition":
+		_notify_stats_changed()
+		event_occurred.emit("card_created", {"card_id": card.id, "base_definition_guid": card.base_definition_guid})
 	changed.emit()
 	return card.id
 
@@ -75,7 +86,7 @@ func _remove_card(id: int) -> void:
 			stacks.erase(stack.id)
 	cards.erase(id)
 
-## Death differs from destruction by sale, crafting, or consumption.
+## Kill differs from sale/crafting destruction; fully consumed food and packs also Kill.
 ## Source Kill draws one loot entry only for Character/Mob categories.
 func kill_card(id: int) -> bool:
 	if not cards.has(id):
@@ -83,14 +94,14 @@ func kill_card(id: int) -> bool:
 	var card = cards[id]
 	var fields: Dictionary = catalog.fields(card.definition_guid)
 	var category: int = int(fields.get("category", 0))
-	var loot_id: int = -1
+	# Source notifies before loot, equipment cleanup and removal.
+	event_occurred.emit("card_killed", {"card_id": id, "definition_guid": card.definition_guid})
 	if category == 2 or category == 9:
-		loot_id = spawn_card(_roll_loot(fields.get("loot", [])), card.position)
+		spawn_card(_roll_loot(fields.get("loot", [])), card.position)
 	var stack = stacks.get(card.stack_id)
 	_remove_card(id)
 	if stack != null:
 		_validate_craft(stack)
-	event_occurred.emit("card_killed", {"card_id": id, "definition_guid": card.definition_guid, "loot_id": loot_id})
 	changed.emit()
 	return true
 
@@ -156,7 +167,7 @@ func open_pack(id: int) -> int:
 		if not undiscovered.is_empty():
 			var recipe_guid: String = undiscovered[rng.randi_range(0, undiscovered.size() - 1)]
 			var recipe: Dictionary = catalog.fields(recipe_guid)
-			discovered_recipes[str(recipe.id)] = true
+			_discover_recipe(str(recipe.id))
 			output = "Recipe:" + str(recipe.id)
 			catalog.definitions[output] = {"guid": output, "script_class": "CardDefinition", "fields": {"id": output, "displayName": "Recipe: " + str(catalog.fields(catalog.ref_guid(recipe.get("resultingCard", {}))).get("displayName", "???")), "category": 8, "isSellable": true, "sellPrice": 1, "recipe_guid": recipe_guid}}
 	if output.is_empty():
@@ -164,7 +175,7 @@ func open_pack(id: int) -> int:
 	var spawned: int = spawn_card(output, card.position)
 	card.uses_left -= 1
 	if card.uses_left <= 0:
-		_remove_card(id)
+		kill_card(id)
 	event_occurred.emit("pack_opened", {"card_id": spawned, "slot": index})
 	changed.emit()
 	return spawned
@@ -287,7 +298,7 @@ func _check_recipe(stack) -> void:
 				break
 	stack.recipe_guid = str(chosen.guid)
 	stack.progress = 0
-	discovered_recipes[str(chosen.fields.id)] = true
+	_discover_recipe(str(chosen.fields.id))
 
 func tick(delta: float) -> void:
 	if paused or phase != "playing" or delta <= 0:
@@ -301,6 +312,8 @@ func tick(delta: float) -> void:
 			_complete_recipe(stack)
 	elapsed += step
 	if elapsed >= day_duration:
+		# Automatic day-end pause is silent in TimeManager, unlike user cycling.
+		paused = true
 		phase = "feeding"
 	changed.emit()
 
@@ -325,11 +338,13 @@ func _complete_recipe(stack) -> void:
 	var output: String = catalog.ref_guid(recipe.get("resultingCard", {}))
 	# Spawn outside the processing stack, as source spawn excludes that stack.
 	var spawned: int = spawn_card(output, stack.position)
+	if spawned >= 0:
+		event_occurred.emit("crafted", {"card_id": spawned, "definition_guid": output})
 	stack.cancel_craft()
+	_notify_stats_changed()
 	var category: int = int(catalog.fields(output).get("category", 0))
 	if repeatable and category != 2 and category != 9 and stacks.has(stack.id):
 		_check_recipe(stack)
-	event_occurred.emit("crafted", {"card_id": spawned, "definition_guid": output})
 
 func stats() -> Dictionary:
 	var result := {"currency": 0, "nutrition": 0, "characters": 0, "cards_owned": 0, "card_limit": int(catalog.settings("CardSettings").get("baseCardLimit", 24))}
@@ -352,21 +367,36 @@ func stats() -> Dictionary:
 	return result
 
 func sell_card(id: int) -> bool:
-	if not cards.has(id):
-		return false
-	var card = cards[id]
-	var fields: Dictionary = catalog.fields(card.definition_guid)
-	if not fields.get("isSellable", true) or card.stored_coins > 0:
+	return _sell_cards([id])
+
+## Validate and publish the entire transaction before deleting any sold card.
+func _sell_cards(ids: Array) -> bool:
+	if ids.is_empty():
 		return false
 	var coin: String = catalog.find_by_name("Coin")
 	if coin.is_empty():
 		return false
-	var stack = stacks[card.stack_id]
-	var position: Vector2 = card.position
-	_remove_card(id)
-	_validate_craft(stack)
-	for i in range(int(fields.get("sellPrice", 1))):
+	var base_guids: Array = []
+	var total_price: int = 0
+	for id in ids:
+		if not cards.has(id):
+			return false
+		var card = cards[id]
+		var fields: Dictionary = catalog.fields(card.definition_guid)
+		if not fields.get("isSellable", true) or card.stored_coins > 0:
+			return false
+		base_guids.append(card.base_definition_guid)
+		total_price += int(fields.get("sellPrice", 1))
+	var position: Vector2 = cards[ids[0]].position
+	event_occurred.emit("cards_sold", {"base_definition_guids": base_guids})
+	for id in ids:
+		var stack = stacks.get(cards[id].stack_id)
+		_remove_card(id)
+		if stack != null:
+			_validate_craft(stack)
+	for i in range(total_price):
 		spawn_card(coin, position)
+	_notify_stats_changed()
 	if phase == "selling" and stats().excess <= 0:
 		phase = "ready"
 	changed.emit()
@@ -379,6 +409,7 @@ func buy_pack(guid: String) -> int:
 	var price: int = maxi(0, int(definition.fields.get("buyPrice", 3)) - int(vendor_payments.get(guid, 0)))
 	if stats().currency < price:
 		return -1
+	var stats_changed: bool = price > 0
 	for card in cards.values().duplicate():
 		if price <= 0:
 			break
@@ -390,12 +421,19 @@ func buy_pack(guid: String) -> int:
 			card.stored_coins -= amount
 			price -= amount
 	vendor_payments[guid] = 0
-	return spawn_card(guid)
+	var purchased: int = spawn_card(guid)
+	if purchased >= 0:
+		event_occurred.emit("pack_purchased", {"definition_guid": guid})
+	if stats_changed:
+		_notify_stats_changed()
+	changed.emit()
+	return purchased
 
 func end_day() -> Dictionary:
 	if phase != "playing" and phase != "feeding":
 		return stats()
 	phase = "feeding"
+	paused = true
 	var hunger: int = int(catalog.settings("CardSettings").get("hungerPerCharacter", 2))
 	for character in cards.values().duplicate():
 		if int(catalog.fields(character.definition_guid).get("category", 0)) != 2:
@@ -420,7 +458,8 @@ func end_day() -> Dictionary:
 			var maximum: int = int(catalog.fields(character.definition_guid).get("maxHealth", 15))
 			character.health = mini(maximum, character.health + _round_to_even(float(maximum) * 0.5 * eaten / hunger))
 			if nearest.nutrition <= 0:
-				_remove_card(nearest.id)
+				kill_card(nearest.id)
+			_notify_stats_changed()
 	for stack in stacks.values():
 		_validate_craft(stack)
 	var snapshot: Dictionary = stats()
@@ -434,20 +473,17 @@ func start_day() -> bool:
 	day += 1
 	elapsed = 0
 	phase = "playing"
+	# Source StartNewDay resets pace silently; it only publishes day-started.
+	paused = false
+	speed = 1.0
+	event_occurred.emit("day_started", {"day": day})
 	changed.emit()
 	return true
 
 func sell_stack(stack_id: int) -> bool:
 	if not stacks.has(stack_id):
 		return false
-	var ids: Array = stacks[stack_id].card_ids.duplicate()
-	for id in ids:
-		if not catalog.fields(cards[id].definition_guid).get("isSellable", true) or cards[id].stored_coins > 0:
-			return false
-	for id in ids:
-		if not sell_card(id):
-			return false
-	return true
+	return _sell_cards(stacks[stack_id].card_ids.duplicate())
 
 ## Source vendor supports installments. Validates the whole dropped stack first.
 ## Returns {accepted, paid, pack_id}; an accepted partial payment is not a purchase.
@@ -464,6 +500,7 @@ func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
 			return rejected
 	var price: int = int(definition.fields.get("buyPrice", 3))
 	var paid: int = int(vendor_payments.get(pack_guid, 0))
+	var stats_changed := false
 	for id in ids:
 		if paid >= price:
 			break
@@ -471,17 +508,23 @@ func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
 		if int(catalog.fields(card.definition_guid).get("category", 0)) == 7:
 			_remove_card(id)
 			paid += 1
+			stats_changed = true
 		else:
 			var amount: int = mini(price - paid, card.stored_coins)
 			paid += amount
 			card.stored_coins -= amount
+			stats_changed = stats_changed or amount > 0
 			if paid < price:
 				break
 	var pack_id: int = -1
 	if paid >= price:
 		pack_id = spawn_card(pack_guid)
 		paid = 0
+		vendor_payments[pack_guid] = 0
+		event_occurred.emit("pack_purchased", {"definition_guid": pack_guid})
 	vendor_payments[pack_guid] = paid
+	if stats_changed:
+		_notify_stats_changed()
 	changed.emit()
 	return {"accepted": true, "paid": paid, "pack_id": pack_id}
 
@@ -506,3 +549,44 @@ func _prepare_food_for_feeding(food, destination: Vector2) -> void:
 	food.position = destination
 	if stacks.has(food.stack_id):
 		stacks[food.stack_id].position = destination
+
+## Internal connection is installed once by configure, before UI subscribers.
+func _track_quest_event(kind: String, payload: Dictionary) -> void:
+	quest_tracker.process_event(kind, payload, self)
+
+func _notify_stats_changed() -> void:
+	event_occurred.emit("stats_changed", {})
+
+func _discover_recipe(recipe_id: String) -> void:
+	if recipe_id.is_empty() or discovered_recipes.has(recipe_id):
+		return
+	discovered_recipes[recipe_id] = true
+	event_occurred.emit("recipe_discovered", {"recipe_id": recipe_id})
+
+func time_pace() -> int:
+	return 0 if paused else (2 if speed == 2.0 else 1)
+
+## Public UI controls. Only source-supported Normal/Fast speeds are accepted.
+func set_speed(value: float) -> void:
+	if value != 1.0 and value != 2.0:
+		return
+	var previous: int = time_pace()
+	speed = value
+	paused = false
+	if previous != time_pace():
+		event_occurred.emit("time_pace_changed", {"pace": time_pace()})
+	changed.emit()
+
+func set_paused(value: bool) -> void:
+	var previous: int = time_pace()
+	paused = value
+	if previous != time_pace():
+		event_occurred.emit("time_pace_changed", {"pace": time_pace()})
+	changed.emit()
+
+## Matches TimeManager.CycleTimePace: Paused -> Normal -> Fast -> Paused.
+func cycle_time_pace() -> void:
+	match time_pace():
+		0: set_speed(1.0)
+		1: set_speed(2.0)
+		2: set_paused(true)
