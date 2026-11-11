@@ -148,3 +148,12 @@ Title destinations, day-clock bindings, journal groups and source-timed scene/me
 transitions are documented in [title navigation](title-navigation.md),
 [day clock](day-clock-ui.md), [journal groups](journal-groups.md),
 [scene transitions](scene-transitions.md) and [menu slide](menu-slide.md).
+
+
+Explicit time-pace changes animate world grayscale; day boundaries animate the
+source vignette. External menu/transition pauses do not invent pace events. The
+world-only native shader leaves HUD text unfiltered. Source-mapped text controls,
+Friendly Mode, journal tabs/groups and modal actions request Click after their
+callbacks; native convenience actions are not blanket-mapped. See
+[world post-process](world-post-process.md) and [UI feedback](text-button-feedback.md).
+These are headless-verified bindings, not rendered or listening acceptance.

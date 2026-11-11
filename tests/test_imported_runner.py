@@ -24,6 +24,8 @@ MARKERS = {
     "test_day_clock_board": "Day clock private resource bindings: verified\nDay clock board: 1 checks, 0 failures",
     "test_journal_groups": "Journal groups: 1/1 checks passed",
     "test_card_motion_board": "Card motion board: 1/1 passed",
+    "test_world_post_process_board": "World post-process board: 1 checks, 0 failures",
+    "test_text_button_feedback": "Text button feedback: 1 checks, 0 failures",
     "test_menu_slide": "Menu slide: 1/1 checks passed",
     "test_scene_transition_board": "Scene transition board: 1 / 1",
     "test_title_navigation_board": "Title navigation board: 1 checks, 0 failures",

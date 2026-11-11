@@ -3,6 +3,7 @@ extends Control
 const UserOptions = preload("res://scripts/model/user_options.gd")
 signal closed
 var model = UserOptions.new()
+var play_click: Callable
 var adapter: Callable
 var path: String = "user://options.json"
 var dirty: bool = false
@@ -58,15 +59,15 @@ func _ready() -> void:
 	reset_dialog = ConfirmationDialog.new()
 	reset_dialog.title = "Reset application options?"
 	reset_dialog.dialog_text = "Restore audio and graphics preferences to their defaults? Saved games and campaign settings will not be changed."
-	reset_dialog.confirmed.connect(_confirm_reset)
+	preload("res://scripts/ui/text_button_feedback.gd").bind_modal(reset_dialog, _confirm_reset, Callable(), _sound)
 	add_child(reset_dialog)
 	hide()
 
 func _button(parent: Node, label: String, action: Callable) -> Button:
-	var button := Button.new()
+	var button := preload("res://scripts/ui/text_button_feedback.gd").new()
 	button.text = label
 	button.custom_minimum_size.y = 34
-	button.pressed.connect(action)
+	button.configure(action, _sound, func(): return is_visible_in_tree() and not reset_dialog.visible)
 	parent.add_child(button)
 	return button
 
@@ -166,3 +167,6 @@ func _request_reset() -> void:
 func _confirm_reset() -> void:
 	model.reset_defaults()
 	_apply_and_save()
+
+func _sound() -> void:
+	if play_click.is_valid(): play_click.call()

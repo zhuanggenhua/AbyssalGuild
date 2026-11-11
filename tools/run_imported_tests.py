@@ -39,6 +39,8 @@ SUITES = (
     ("test_day_clock_board", r"(?s)Day clock private resource bindings: verified.*Day clock board: [1-9]\d* checks, 0 failures"),
     ("test_journal_groups", r"Journal groups: [1-9]\d*/[1-9]\d* checks passed"),
     ("test_card_motion_board", r"Card motion board: [1-9]\d*/[1-9]\d* passed"),
+    ("test_world_post_process_board", r"World post-process board: [1-9]\d* checks, 0 failures"),
+    ("test_text_button_feedback", r"Text button feedback: [1-9]\d* checks, 0 failures"),
     ("test_menu_slide", r"Menu slide: [1-9]\d*/[1-9]\d* checks passed"),
     ("test_scene_transition_board", r"Scene transition board: [1-9]\d* / [1-9]\d*"),
     ("test_title_navigation_board", r"Title navigation board: [1-9]\d* checks, 0 failures"),

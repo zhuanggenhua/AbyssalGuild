@@ -261,8 +261,10 @@ a proof of engine, visual, physics, RNG or platform equivalence. Rendered/manual
 listening, Windows and export/install acceptance remain explicitly outstanding.
 
 
-The bounded enabled-presentation inventory additionally identified missing source
-manual-pause grayscale/day-end vignette and several TextButton/toggle/menu Click
-sound triggers. These are concrete implementation work for the next slice, not
-merely manual acceptance. Native hover styling and exact canvas geometry remain
-separate adaptation limits.
+The bounded enabled-presentation inventory identified source manual-pause
+grayscale/day-end vignette and TextButton/toggle/menu Click triggers. Those are
+now implemented: [world post-process](world-post-process.md) covers active-scene
+binding, event order and real-time tracks; [UI feedback](text-button-feedback.md)
+covers callback-before-sound, explicit source control mapping, modal cancellation,
+silent row hover and native underline cleanup. This closes the concrete omissions
+from that inventory, without claiming exact GPU/canvas/font/physical-input output.

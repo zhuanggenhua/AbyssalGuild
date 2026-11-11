@@ -1,4 +1,5 @@
 extends Node3D
+const WorldPostProcess = preload("res://scripts/ui/world_post_process.gd")
 const CyclePresentation = preload("res://scripts/ui/cycle_presentation.gd")
 const CameraMotion = preload("res://scripts/ui/camera_motion.gd")
 const CombatPresentation = preload("res://scripts/ui/combat_presentation.gd")
@@ -107,6 +108,7 @@ var drag_delta := Vector2.ZERO
 var drag_moved: bool = false
 var drag_start_position := Vector3.ZERO
 var hud: Control
+var world_post_process = WorldPostProcess.new()
 var scene_transition = SceneTransition.new()
 var scene_shade: ColorRect
 var _transition_pause_frame: bool = false
@@ -161,6 +163,7 @@ func _ready() -> void:
 	add_child(feedback)
 	add_child(vendor_unlock)
 	_build_world()
+	world_post_process.attach(self)
 	_build_ui()
 	_build_scene_fader()
 	for dialog in [archive_dialog, game_over_dialog, quit_dialog, options_panel.reset_dialog]:
@@ -240,15 +243,40 @@ func _label(text: String, parent: Node, size: int = 16) -> Label:
 	parent.add_child(label)
 	return label
 
-func _button(text: String, parent: Node, callback: Callable) -> Button:
-	var button := Button.new()
+func _button(text: String, parent: Node, callback: Callable, source_text: bool = false) -> Button:
+	var button: Button = preload("res://scripts/ui/text_button_feedback.gd").new() if source_text else Button.new()
 	button.text = text
 	button.tooltip_text = text
 	button.clip_text = true
 	button.custom_minimum_size.y = 34
-	button.pressed.connect(callback)
+	if source_text:
+		button.configure(callback, _play_ui_click, _text_button_allowed.bind(button))
+	else:
+		button.pressed.connect(callback)
 	parent.add_child(button)
 	return button
+
+func _play_ui_click() -> void:
+	feedback.play_event("Click")
+
+func _text_button_allowed(button: Button) -> bool:
+	if scene_transition.blocks_input() or quit_dispatched or _navigation_modal_active(): return false
+	if options_panel != null and options_panel.visible: return false
+	if title_panel != null and title_panel.is_ancestor_of(button): return _title_navigation_allowed()
+	if pause_overlay != null and pause_overlay.is_ancestor_of(button): return running and session.phase == "playing"
+	return running and not _ui_pause_active()
+
+func _friendly_changed(enabled: bool) -> void:
+	# Keep programmatic preference synchronization live without inventing a user click.
+	friendly_choice.text = TitleGameplayPrefs.friendly_text(enabled)
+	if not friendly_choice.is_visible_in_tree() or friendly_choice.disabled or not _title_navigation_allowed(): return
+	_play_ui_click()
+
+func _show_journal_tab(tab: String) -> void:
+	if not ledger.is_visible_in_tree() or _ui_pause_active() or _navigation_modal_active(): return
+	active_tab = tab
+	_refresh_ledger()
+	_play_ui_click()
 
 func _panel(parent: Node, rect: Rect2) -> VBoxContainer:
 	var panel := PanelContainer.new()
@@ -283,7 +311,7 @@ func _build_ui() -> void:
 	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Keep the one day action outside both collapsible sidebars. Critical cycle
 	# confirmations must remain discoverable even with the market closed.
-	day_button = _button("", summary, _advance_day)
+	day_button = _button("", summary, _advance_day, true)
 	day_button.custom_minimum_size.x = 300
 	var left := _panel(hud, Rect2(18, 100, 248, 600))
 	market_panel = left.get_parent().get_parent()
@@ -319,8 +347,8 @@ func _build_ui() -> void:
 	_button("Engage selected enemy", right, _engage_selected)
 	var tabs := HBoxContainer.new()
 	right.add_child(tabs)
-	_button("Quests", tabs, func(): active_tab = "quests"; _refresh_ledger())
-	_button("Recipes", tabs, func(): active_tab = "recipes"; _refresh_ledger())
+	_button("Quests", tabs, _show_journal_tab.bind("quests"))
+	_button("Recipes", tabs, _show_journal_tab.bind("recipes"))
 	ledger = RichTextLabel.new()
 	ledger.meta_hover_started.connect(_on_ledger_hover)
 	ledger.custom_minimum_size = Vector2(210, 260)
@@ -369,8 +397,8 @@ func _build_ui() -> void:
 	title_home = VBoxContainer.new()
 	title_home.name = "TitleHome"
 	title.add_child(title_home)
-	title_new_button = _button("New Game", title_home, _open_title_preferences)
-	title_load_button = _button("Load Game", title_home, _open_title_saves)
+	title_new_button = _button("New Game", title_home, _open_title_preferences, true)
+	title_load_button = _button("Load Game", title_home, _open_title_saves, true)
 	title_preferences = VBoxContainer.new()
 	title_preferences.name = "GameplayPreferences"
 	title.add_child(title_preferences)
@@ -382,9 +410,9 @@ func _build_ui() -> void:
 	friendly_choice = CheckBox.new()
 	friendly_choice.text = TitleGameplayPrefs.friendly_text(false)
 	title_preferences.add_child(friendly_choice)
-	friendly_choice.toggled.connect(func(enabled: bool): friendly_choice.text = TitleGameplayPrefs.friendly_text(enabled))
-	title_confirm_button = _button("Confirm · create new slot", title_preferences, _confirm_title_new_game)
-	title_cancel_button = _button("Cancel", title_preferences, _title_back)
+	friendly_choice.toggled.connect(_friendly_changed)
+	title_confirm_button = _button("Confirm · create new slot", title_preferences, _confirm_title_new_game, true)
+	title_cancel_button = _button("Cancel", title_preferences, _title_back, true)
 	title_saves = VBoxContainer.new()
 	title_saves.name = "SavedGames"
 	title.add_child(title_saves)
@@ -392,12 +420,12 @@ func _build_ui() -> void:
 	slot_picker = OptionButton.new()
 	slot_picker.item_selected.connect(_select_slot)
 	title_saves.add_child(slot_picker)
-	continue_button = _button("Continue selected slot", title_saves, _request_continue_game)
+	continue_button = _button("Continue selected slot", title_saves, _request_continue_game, true)
 	continue_button.disabled = true
 	var archive_actions := HBoxContainer.new()
 	title_saves.add_child(archive_actions)
-	archive_selected_button = _button("Archive selected", archive_actions, _request_archive_selected)
-	archive_all_button = _button("Archive all listed slots", archive_actions, _request_archive_all)
+	archive_selected_button = _button("Archive selected", archive_actions, _request_archive_selected, true)
+	archive_all_button = _button("Archive all listed slots", archive_actions, _request_archive_all, true)
 	for button in [archive_selected_button, archive_all_button]: button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_label("Recoverable archives · originals retained", title_saves)
 	archive_picker = OptionButton.new()
@@ -408,29 +436,27 @@ func _build_ui() -> void:
 	archive_dialog = ConfirmationDialog.new()
 	archive_dialog.title = "Archive listed save slots"
 	archive_dialog.ok_button_text = "Archive these slots"
-	archive_dialog.confirmed.connect(_confirm_archive_slots)
-	archive_dialog.canceled.connect(_cancel_archive_slots)
+	preload("res://scripts/ui/text_button_feedback.gd").bind_modal(archive_dialog, _confirm_archive_slots, _cancel_archive_slots, _play_ui_click)
 	add_child(archive_dialog)
 	legacy_picker = OptionButton.new()
 	title_saves.add_child(legacy_picker)
 	legacy_button = _button("Copy legacy save into a new slot", title_saves, _adopt_selected_legacy)
 	legacy_button.hide()
 	legacy_picker.hide()
-	title_back_button = _button("Back", title_saves, _title_back)
+	title_back_button = _button("Back", title_saves, _title_back, true)
 	game_over_dialog = ConfirmationDialog.new()
 	game_over_dialog.title = "Return to Title"
 	game_over_dialog.dialog_text = "This game has ended. Return to Title and move this slot, including backups, into the recoverable local archive?"
 	game_over_dialog.ok_button_text = "Archive slot & return"
-	game_over_dialog.confirmed.connect(_request_game_over_return)
+	preload("res://scripts/ui/text_button_feedback.gd").bind_modal(game_over_dialog, _request_game_over_return, Callable(), _play_ui_click)
 	add_child(game_over_dialog)
 	quit_dialog = ConfirmationDialog.new()
 	quit_dialog.title = "Quit during day-end?"
 	quit_dialog.dialog_text = "Day-end progress is not autosaved on quit. Your last checkpoint stays intact. Quit now?"
-	quit_dialog.confirmed.connect(_confirm_quit)
-	quit_dialog.canceled.connect(_cancel_quit)
+	preload("res://scripts/ui/text_button_feedback.gd").bind_modal(quit_dialog, _confirm_quit, _cancel_quit, _play_ui_click)
 	add_child(quit_dialog)
-	_button("Options", title_home, _open_options)
-	title_quit_button = _button("Quit Game", title_home, _request_title_quit)
+	_button("Options", title_home, _open_options, true)
+	title_quit_button = _button("Quit Game", title_home, _request_title_quit, true)
 	_build_pause_options(layer)
 	_sync_title_destination()
 
@@ -502,6 +528,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	world_post_process.configure(catalog.data, session.scene_name)
 	journal_slide.reset(MenuSlide.initial_state(catalog.data).open)
 	title_navigation.open(TitleNavigation.HOME)
 	_sync_title_destination()
@@ -589,6 +616,7 @@ func _process(delta: float) -> void:
 func _advance_running_frame(delta: float) -> void:
 	if not running:
 		return
+	world_post_process.advance(delta)
 	# Sample ownership before advancing real-time reveals. An expiring reveal
 	# cannot retroactively release the scaled time of this frame.
 	var external_pause: bool = _transition_pause_frame or _ui_pause_active() or vendor_unlock.is_active()
@@ -1085,11 +1113,11 @@ func _refresh_ledger() -> void:
 		if not row.group.is_empty():
 			ledger_visible_groups[row.group] = true
 			# Typed metadata prevents collisions with raw collection IDs.
-			ledger.push_meta({"journal_group": row.group})
+			ledger.push_meta({"journal_group": row.group}, RichTextLabel.META_UNDERLINE_ON_HOVER)
 			ledger.push_color(preload("res://scripts/ui/journal_groups.gd").header_color(catalog, active_tab))
 		elif not row.id.is_empty():
 			ledger_visible_ids[row.id] = true
-			ledger.push_meta(row.id)
+			ledger.push_meta(row.id, RichTextLabel.META_UNDERLINE_ON_HOVER)
 		ledger.add_text(("NEW · " if row.unread else "") + row.text + "\n")
 		if not row.group.is_empty(): ledger.pop()
 		if not row.id.is_empty() or not row.group.is_empty(): ledger.pop()
@@ -1097,10 +1125,11 @@ func _refresh_ledger() -> void:
 
 func _on_ledger_group_clicked(meta: Variant) -> void:
 	if not meta is Dictionary or meta.size() != 1 or not meta.get("journal_group") is String: return
-	if not ledger.is_visible_in_tree() or not ledger_visible_groups.has(meta.journal_group): return
+	if not ledger.is_visible_in_tree() or not ledger_visible_groups.has(meta.journal_group) or _ui_pause_active() or _navigation_modal_active(): return
 	var key: String = meta.journal_group
 	ledger_expansion[key] = not ledger_expansion.get(key, true)
 	_refresh_ledger()
+	_play_ui_click()
 
 func _on_ledger_hover(meta: Variant) -> void:
 	if not meta is String or not ledger.is_visible_in_tree() or not ledger_visible_ids.has(meta): return
@@ -1334,6 +1363,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	world_post_process.cancel()
 	journal_slide.reset(false)
 	_clear_card_feedback()
 	vendor_unlock.cancel()
@@ -1452,6 +1482,7 @@ func _engage_selected() -> void:
 	_refresh()
 
 func _on_session_event(kind: String, payload: Dictionary) -> void:
+	if running: world_post_process.event(kind, payload)
 	if kind == "day_ended":
 		journal_slide.day_ended()
 		day_clock.hide()
@@ -1925,11 +1956,12 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	var box := _panel(pause_overlay, Rect2(500, 270, 440, 330))
 	_label("PAUSED · MENU", box, 26)
 	_label("Your selected time pace is preserved.", box, 15)
-	_button("Continue [Escape]", box, _toggle_pause_menu)
-	_button("Options", box, _open_options)
-	_button("Save & return to title", box, _request_return_title)
+	_button("Continue [Escape]", box, _toggle_pause_menu, true)
+	_button("Options", box, _open_options, true)
+	_button("Save & return to title", box, _request_return_title, true)
 	pause_overlay.hide()
 	options_panel = OptionsPanel.new()
+	options_panel.play_click = _play_ui_click
 	layer.add_child(options_panel)
 
 func _ui_pause_active() -> bool:
@@ -2210,5 +2242,6 @@ func _commit_travel(owner, candidate) -> void:
 	_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	world_post_process.cancel()
 	scene_transition.cancel()
 	session.travel_pending = false

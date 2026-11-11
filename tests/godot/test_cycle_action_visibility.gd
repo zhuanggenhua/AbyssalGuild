@@ -1,6 +1,7 @@
 extends SceneTree
 ## Source-backed UI routing checks, not a claim of rendered or manual acceptance.
 const Board = preload("res://scripts/ui/board.gd")
+const TextButtonFeedback = preload("res://scripts/ui/text_button_feedback.gd")
 class SilentFeedback extends "res://scripts/ui/audio_feedback.gd":
 	var sounds: Array[String] = []
 	func play_event(event_name: String) -> bool: sounds.append(event_name); return false
@@ -36,13 +37,19 @@ func action_count(board) -> int:
 	var count := 0
 	for button in board.hud.find_children("*", "Button", true, false):
 		for connection in button.get_signal_connection_list("pressed"):
-			if connection.callable == board._advance_day: count += 1
+			if connection.callable == board._advance_day:
+				count += 1
+			elif button is TextButtonFeedback and connection.callable == button._activate and button.action == board._advance_day:
+				# Count the installed dispatcher, not merely an assigned callback.
+				# Keep all HUD controls in this topology count, even hidden/disabled
+				# duplicates; reachability is checked independently below.
+				count += 1
 	return count
 func check_panels(board, label: String) -> void:
 	for market in [false, true]:
 		for details in [false, true]:
 			board.market_panel.visible = market; board.detail_panel.visible = details
-			check(board.day_button.is_visible_in_tree(), "%s action visible with market=%s/details=%s" % [label,market,details])
+			check(board.day_button.is_visible_in_tree() and not board.day_button.disabled, "%s action visible with market=%s/details=%s" % [label,market,details])
 func run() -> void:
 	root.size = Vector2i(1440, 900)
 	var board = Board.new()
@@ -181,7 +188,7 @@ func run() -> void:
 	board._return_title()
 	check(not board.day_button.is_visible_in_tree(), "return to title hides single gameplay action")
 	board._continue_game(); board.set_process(false)
-	check(board.day_button.is_visible_in_tree() and action_count(board) == 1, "Continue restores exactly one reachable day action")
+	check(board.day_button.is_visible_in_tree() and not board.day_button.disabled and action_count(board) == 1, "Continue restores exactly one reachable day action")
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
 	print("Cycle action visibility: %d passed / %d total" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)
