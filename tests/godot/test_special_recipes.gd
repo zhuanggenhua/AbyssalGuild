@@ -227,12 +227,12 @@ func test_session_integration() -> void:
 	session.tick(60)
 	check(session.cards.size() == 4 and count_event("recipe_discovered") == 0, "exhausted research no output/discovery")
 	check(stack.recipe_guid == str(research.guid), "source exhausted continuous research repeats")
-	# Even forced unsupported tasks cannot degrade into ordinary recipes.
+	# Invalid forced travel tasks cannot degrade into ordinary recipes.
 	stack.recipe_guid = "unsupported-travel"
 	session.catalog.definitions["unsupported-travel"] = {"script_class": "TravelRecipe", "fields": {"craftingDuration": 1, "requiredIngredients": research.fields.requiredIngredients, "resultingCard": grow.fields.resultingCard}}
 	events.clear()
 	session.tick(1)
-	check(session.cards.size() == 4 and stack.recipe_guid.is_empty(), "Travel execution explicitly guarded")
+	check(session.cards.size() == 4 and stack.recipe_guid.is_empty(), "Travel with invalid destinations is guarded")
 	check(count_event("crafted") == 0, "Travel never emits fake craft")
 
 	# Research completes a real Discover quest for its newly revealed recipe.

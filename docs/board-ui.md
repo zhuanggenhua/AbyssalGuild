@@ -48,3 +48,15 @@ The UI is a new layout, not a reproduction of the Unity Title/Main/Island compos
 ## Latest automated result
 
 Godot 4.6.3: 61/61 real-data UI smoke checks passed after combat/equipment integration. Earlier missing-data branch: 4/4 passed. Main scene launched headlessly without script errors. No display server was available for screenshot capture or human visual/input acceptance. These results are separate from visual parity.
+
+## Subsequent integrated features
+
+Main/Island travel is now connected to actual TravelRecipe completion. Scene
+vendors, quests and persisted clocks change together. Save/Continue uses the
+multi-scene campaign envelope, including validated legacy session adoption.
+Friendly mode filters aggressive encounters. Daily encounters are connected after
+feeding/selling. Currency stacks can be dropped on chests and a selected sole
+chest can withdraw coins. Optional private original card art, prefab colors and
+collider sizes now bind to views; missing media does not create fake source art.
+These updates supersede the earlier Main-only/no-travel limits, but not the
+unverified visual/manual-input acceptance boundary.

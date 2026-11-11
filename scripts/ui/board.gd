@@ -3,8 +3,12 @@ const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
 const SaveCodec = preload("res://scripts/model/save_codec.gd")
+const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
 var catalog = Catalog.new()
+var visual_assets = VisualAssets.new()
+var board_mesh: MeshInstance3D
+var friendly_choice: CheckBox
 var session = Session.new()
 var camera: Camera3D
 var views: Dictionary = {}
@@ -37,10 +41,12 @@ func _ready() -> void:
 	_build_world()
 	_build_ui()
 	data_error = catalog.load_file()
+	visual_assets.load_manifest()
 	if data_error != OK:
 		title_status.text = "Source data is missing or invalid.\nImport your licensed StackCraft copy first:\npython tools/import_stackcraft.py --source /path/to/Assets/StackCraft --output data\nThen restart. See docs/data-import.md.\nNo replacement/mock game is loaded."
 	else:
-		title_status.text = "Original Godot geometry • source-backed rules\nMain scene only. Combat, travel and visual parity are not complete."
+		title_status.text = "Original Godot geometry • source-backed rules\nMain and Island • native saves • optional original assets
+Visual and manual input acceptance are not complete."
 		vendor_guids = SceneConfig.offered_packs(catalog)
 		_build_shop()
 	continue_button.disabled = not _has_save()
@@ -59,6 +65,7 @@ func _build_world() -> void:
 	light.light_energy = 0.8
 	add_child(light)
 	var board := MeshInstance3D.new()
+	board_mesh = board
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(28, 0.2, 22)
 	board.mesh = mesh
@@ -142,6 +149,7 @@ func _build_ui() -> void:
 	inspection.custom_minimum_size.y = 125
 	_button("Sell selected card", right, _sell_selected)
 	_button("Sell selected stack", right, _sell_selected_stack)
+	_button("Withdraw selected chest coin", right, _withdraw_selected)
 	_button("Unequip selected character", right, _unequip_selected)
 	_button("Engage selected enemy", right, _engage_selected)
 	var tabs := HBoxContainer.new()
@@ -178,6 +186,9 @@ func _build_ui() -> void:
 	duration.value = 120
 	duration.step = 10
 	title.add_child(duration)
+	friendly_choice = CheckBox.new()
+	friendly_choice.text = "Friendly mode (skip aggressive encounters)"
+	title.add_child(friendly_choice)
 	_button("New game", title, start_new)
 	continue_button = _button("Continue", title, _continue_game)
 
@@ -196,12 +207,20 @@ func start_new() -> void:
 	session = Session.new()
 	session.configure(catalog, int(Time.get_unix_time_from_system()))
 	session.day_duration = duration.value
+	session.friendly_mode = friendly_choice.button_pressed
 	if session.start_new_game() < 0:
 		title_status.text = "Starter pack is absent from the source data. Reimport and verify data."
 		return
 	_enter_game()
 
 func _enter_game() -> void:
+	if not session.event_occurred.is_connected(_on_session_event):
+		session.event_occurred.connect(_on_session_event)
+	vendor_guids = SceneConfig.offered_packs(catalog, session.scene_name)
+	_build_shop()
+	visual_assets.apply_scene(camera, board_mesh, session.scene_name)
+	# Bounds of this adapter mesh, not a claim about the source FBX morph.
+	session.board_bounds = Rect2(-14, -11, 28, 22)
 	for view in views.values(): view.queue_free()
 	views.clear()
 	running = true
@@ -238,11 +257,16 @@ func _sync_views() -> void:
 			views[id].queue_free()
 			views.erase(id)
 	for id in session.cards:
+		if views.has(id) and views[id].get_meta("definition_guid", "") != session.cards[id].definition_guid:
+			views[id].hide()
+			views[id].queue_free()
+			views.erase(id)
 		if not views.has(id):
 			var card = session.cards[id]
 			var view = CardView.new()
 			add_child(view)
-			view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition")
+			view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition", visual_assets, catalog.fields(card.definition_guid), session.scene_name)
+			view.set_meta("definition_guid", card.definition_guid)
 			views[id] = view
 		views[id].visible = not session.equipment.owners.has(id)
 		for child in views[id].get_children():
@@ -258,7 +282,8 @@ func _sync_views() -> void:
 			if not views.has(id):
 				var view = CardView.new()
 				add_child(view)
-				view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition")
+				view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition", visual_assets, catalog.fields(card.definition_guid), session.scene_name)
+				view.set_meta("definition_guid", card.definition_guid)
 				views[id] = view
 			var offset := Vector2.ZERO
 			if dragging >= 0 and session.cards.has(dragging) and card.stack_id == session.cards[dragging].stack_id and index >= stack.card_ids.find(dragging):
@@ -332,7 +357,14 @@ func _finish_drag(screen: Vector2) -> void:
 					target = other.id
 		if target >= 0:
 			var target_card: int = session.stacks[target].card_ids[0]
-			if int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5 and int(catalog.fields(session.cards[target_card].definition_guid).get("category", 0)) == 2:
+			if catalog.get_definition(session.cards[target_card].base_definition_guid).get("script_class", "") == "ChestDefinition":
+				var dropped: int = session.split_stack(id, stack.position)
+				var result: Dictionary = session.world.deposit_stack(target_card, dropped)
+				if result.handled:
+					notice.text = "Stored %d coins." % result.deposited
+				elif not session.move_to_stack(id, target):
+					notice.text = "Chest accepts currency; this stack cannot join."
+			elif int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5 and int(catalog.fields(session.cards[target_card].definition_guid).get("category", 0)) == 2:
 				if stack.card_ids.back() != id:
 					notice.text = "Split equipment from its tail before equipping."
 				else:
@@ -429,14 +461,14 @@ func _has_save() -> bool:
 	return FileAccess.file_exists("user://session.json") or FileAccess.file_exists("user://session.json.bak")
 
 func _save_game() -> void:
-	var result: Dictionary = SaveCodec.save_file(session)
+	var result: Dictionary = session.campaign.save_file("user://session.json")
 	notice.text = "Saved locally." if result.ok else "Save failed: " + str(result.get("error", "Unknown error"))
 
 func _continue_game() -> void:
 	if data_error != OK: return
 	var candidate = Session.new()
 	candidate.configure(catalog)
-	var result: Dictionary = SaveCodec.load_file(candidate)
+	var result: Dictionary = candidate.campaign.load_file("user://session.json")
 	if not result.ok:
 		title_status.text = "Cannot continue: " + str(result.get("error", "Unknown error"))
 		return
@@ -445,7 +477,7 @@ func _continue_game() -> void:
 	notice.text = "Save restored." + (" Recovered from backup." if result.get("recovered", false) else "")
 
 func _return_title() -> void:
-	var result: Dictionary = SaveCodec.save_file(session)
+	var result: Dictionary = session.campaign.save_file("user://session.json")
 	if not result.ok:
 		notice.text = "Could not save; session kept open: " + str(result.get("error", "Unknown error"))
 		return
@@ -480,4 +512,21 @@ func _engage_selected() -> void:
 		return
 	var result: int = session.combat.start_combat([fighter], [selected])
 	notice.text = "Combat started. Select a fighter to inspect health." if result >= 0 else "Cannot start combat."
+	_refresh()
+
+func _on_session_event(kind: String, payload: Dictionary) -> void:
+	if kind == "scene_changed":
+		_enter_game()
+		notice.text = "Arrived at " + session.scene_name
+	elif kind == "travel_failed":
+		notice.text = "Travel failed: " + str(payload.get("error", ""))
+	if kind == "encounter":
+		notice.text = "Event: " + str(payload.get("message", ""))
+
+func _withdraw_selected() -> void:
+	if session.phase != "playing" or not session.world.can_click_chest(selected):
+		notice.text = "Select an unstacked chest to withdraw a coin."
+		return
+	var position: Vector2 = (session.cards[selected].position + Vector2(1.7, 0)).clamp(Vector2(-12, -9), Vector2(12, 8))
+	notice.text = "Withdrew a coin." if session.world.withdraw_coin(selected, true, position) else "Chest is empty."
 	_refresh()

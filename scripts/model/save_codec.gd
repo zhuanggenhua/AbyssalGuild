@@ -22,10 +22,11 @@ static func capture(session) -> Dictionary:
 	var snapshot := {"format": FORMAT, "version": VERSION, "session": {
 		"day": session.day, "elapsed": session.elapsed, "day_duration": session.day_duration,
 		"phase": session.phase, "paused": session.paused, "speed": session.speed,
+		"scene_name": session.scene_name, "friendly_mode": session.friendly_mode,
 		"next_id": session._next_id, "rng_seed": str(session.rng.seed), "rng_state": str(session.rng.state),
 		"cards": card_rows, "stacks": stack_rows, "discovered_recipes": session.discovered_recipes.duplicate(true),
 		"vendor_payments": session.vendor_payments.duplicate(true), "quests": session.quest_tracker.save_state()}}
-	for key in ["equipment", "combat"]:
+	for key in ["equipment", "combat", "world"]:
 		var helper = session.get(key)
 		if helper != null and helper.has_method("save_state"):
 			snapshot.session[key] = helper.save_state()
@@ -66,6 +67,8 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 	var data = snapshot.get("session")
 	if not data is Dictionary:
 		return _fail("Missing session")
+	if not data.get("scene_name", "Main") is String or data.get("scene_name", "Main") != session.scene_name or not data.get("friendly_mode", false) is bool:
+		return _fail("Invalid scene or gameplay preferences")
 	for key in ["day", "next_id"]:
 		if not _integer(data.get(key), 1):
 			return _fail("Invalid " + key)
@@ -102,7 +105,7 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 		if not row is Dictionary:
 			return _fail("Invalid card row")
 		for key in ["id", "stack_id", "uses_left", "nutrition", "health", "stored_coins"]:
-			if not _integer(row.get(key), 1 if key == "id" else (-1 if key == "stack_id" else 0)):
+			if not _integer(row.get(key), 1 if key == "id" else (-9007199254740991 if key == "uses_left" else (-1 if key == "stack_id" else 0))):
 				return _fail("Invalid card " + key)
 		if all_ids.has(int(row.id)) or row.id >= data.next_id or not _position(row.get("position")):
 			return _fail("Invalid card identity or position")
@@ -143,7 +146,7 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 		stacks[stack.id] = stack
 		all_ids[stack.id] = true
 	var helpers := {}
-	for key in ["equipment", "combat"]:
+	for key in ["equipment", "combat", "world"]:
 		var helper = session.get(key)
 		if data.has(key):
 			if helper == null or not helper.has_method("stage_state"):
@@ -189,10 +192,12 @@ static func restore(session, snapshot: Variant) -> Dictionary:
 		session.set(key, data[key])
 	for guid in session.vendor_payments:
 		session.vendor_payments[guid] = int(session.vendor_payments[guid])
+	session.scene_name = data.get("scene_name", "Main")
+	session.friendly_mode = data.get("friendly_mode", false)
 	session._next_id = int(data.next_id)
 	session.rng.seed = data.rng_seed.to_int()
 	session.rng.state = data.rng_state.to_int()
-	for key in ["equipment", "combat"]:
+	for key in ["equipment", "combat", "world"]:
 		var helper = session.get(key)
 		if helper != null:
 			if staged.helpers.has(key):

@@ -4,6 +4,8 @@ const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
 const SpecialRecipes = preload("res://scripts/model/special_recipes.gd")
 const EquipmentSystem = preload("res://scripts/model/equipment_system.gd")
+const Campaign = preload("res://scripts/model/campaign.gd")
+const WorldRules = preload("res://scripts/model/world_rules.gd")
 const CombatSystem = preload("res://scripts/model/combat_system.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 signal changed
@@ -15,6 +17,12 @@ var discovered_recipes: Dictionary = {}
 var quest_tracker = QuestTracker.new()
 var equipment = EquipmentSystem.new()
 var combat = CombatSystem.new()
+var world = WorldRules.new()
+var campaign = Campaign.new()
+var scene_name: String = "Main"
+var friendly_mode: bool = false
+var board_bounds: Variant = null
+var board_top_margin: float = 1.5
 var completed_quests: int:
 	get:
 		return quest_tracker.completed_count()
@@ -28,16 +36,22 @@ var speed: float = 1.0
 var rng := RandomNumberGenerator.new()
 var _next_id: int = 1
 
-func configure(source_catalog, random_seed: int = 1) -> void:
+func configure(source_catalog, random_seed: int = 1, selected_scene: String = "Main") -> void:
 	catalog = source_catalog
+	scene_name = selected_scene
+	campaign.configure(self, scene_name)
+	world.configure(self, scene_name)
 	equipment.configure(self)
 	combat.configure(self, equipment)
 	rng.seed = random_seed
-	quest_tracker.configure(catalog, "Main")
+	quest_tracker.configure(catalog, scene_name)
 	if not event_occurred.is_connected(_track_quest_event):
 		event_occurred.connect(_track_quest_event)
 
 func start_new_game() -> int:
+	campaign.saved_scenes.clear()
+	campaign.current_scene = scene_name
+	world.reset()
 	equipment.reset()
 	combat.reset()
 	cards.clear()
@@ -292,8 +306,8 @@ func _check_recipe(stack) -> void:
 	var matches: Array = []
 	var total: float = 0.0
 	for entry in catalog.data.get("recipes", []):
-		# Travel remains unsupported; supported specials share selection and timing only.
-		if entry.get("script_class", "") != "RecipeDefinition" and not SpecialRecipes.supports(str(entry.get("script_class", ""))):
+		# Special actions share selection and timing, but execute their own rules.
+		if entry.get("script_class", "") not in ["RecipeDefinition", "TravelRecipe"] and not SpecialRecipes.supports(str(entry.get("script_class", ""))):
 			continue
 		if matches_recipe(stack, entry.fields):
 			matches.append(entry)
@@ -317,6 +331,7 @@ func _check_recipe(stack) -> void:
 func tick(delta: float) -> void:
 	if paused or phase != "playing" or delta <= 0:
 		return
+	var tick_scene: String = scene_name
 	var step: float = delta * speed
 	combat.tick(step)
 	for stack in stacks.values().duplicate():
@@ -325,6 +340,8 @@ func tick(delta: float) -> void:
 		stack.progress += step
 		if stack.progress >= float(catalog.fields(stack.recipe_guid).get("craftingDuration", 5)):
 			_complete_recipe(stack)
+			if scene_name != tick_scene:
+				return # Never advance old-scene stacks or destination time after travel.
 	elapsed += step
 	if elapsed >= day_duration:
 		# Automatic day-end pause is silent in TimeManager, unlike user cycling.
@@ -335,6 +352,12 @@ func tick(delta: float) -> void:
 func _complete_recipe(stack) -> void:
 	var entry: Dictionary = catalog.get_definition(stack.recipe_guid)
 	var recipe: Dictionary = entry.get("fields", {})
+	if entry.get("script_class", "") == "TravelRecipe":
+		var result: Dictionary = campaign.travel(stack.id, stack.recipe_guid)
+		if not result.ok:
+			stack.cancel_craft()
+			event_occurred.emit("travel_failed", {"error": result.error})
+		return
 	var repeatable: bool = bool(recipe.get("isContinuous", false))
 	for ingredient in recipe.get("requiredIngredients", []):
 		if int(ingredient.get("consumptionMode", 0)) != 1:
@@ -420,6 +443,7 @@ func _sell_cards(ids: Array) -> bool:
 	_notify_stats_changed()
 	if phase == "selling" and stats().excess <= 0:
 		phase = "ready"
+		world.finish_day(day, friendly_mode, board_bounds, board_top_margin)
 	changed.emit()
 	return true
 
@@ -485,6 +509,8 @@ func end_day() -> Dictionary:
 		_validate_craft(stack)
 	var snapshot: Dictionary = stats()
 	phase = "game_over" if snapshot.characters <= 0 else ("selling" if snapshot.excess > 0 else "ready")
+	if phase == "ready":
+		world.finish_day(day, friendly_mode, board_bounds, board_top_margin)
 	changed.emit()
 	return snapshot
 
