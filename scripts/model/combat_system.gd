@@ -9,6 +9,10 @@ var dragged: Dictionary = {}
 var advantage_multiplier: float = 1.5
 var disadvantage_multiplier: float = 0.75
 var _next_id: int = 1
+# Scene adapters own exact geometry; selectors must not mutate combat membership.
+var start_overlap_selector: Callable = Callable()
+var resize_overlap_selector: Callable = Callable()
+var _selecting_geometry: bool = false
 
 func configure(session, equipment_system) -> void:
 	_session = weakref(session)
@@ -49,19 +53,57 @@ func resolve_attack(attacker_id: int, defender_id: int, hit_roll: float = -1, cr
 		damage = Equipment.round_even(damage * attacker.criticalMultiplier / 100.0)
 	return {"type": "critical" if critical else "normal", "damage": damage, "advantage": edge}
 
-func start_combat(attackers: Array, defenders: Array, player_is_attacker: bool = true) -> int:
+func _valid_new_sides(attackers: Array, defenders: Array, player_is_attacker: bool) -> bool:
 	var session = _session.get_ref()
 	if attackers.is_empty() or defenders.is_empty():
-		return -1
+		return false
 	var seen: Dictionary = {}
 	for id in attackers + defenders:
-		if not session.cards.has(id) or membership.has(id) or seen.has(id):
-			return -1
-		var fields: Dictionary = session.catalog.fields(session.cards[id].definition_guid)
+		if not Equipment.valid_integer(id, 1) or not session.cards.has(int(id)) or membership.has(int(id)) or seen.has(int(id)):
+			return false
+		var fields: Dictionary = session.catalog.fields(session.cards[int(id)].definition_guid)
 		var expected: int = 1 if ((id in attackers) == player_is_attacker) else 2
 		if int(fields.get("faction", 0)) != expected or int(fields.get("category", 0)) not in [2, 9]:
+			return false
+		seen[int(id)] = true
+	return true
+
+## Validate arbitrary selector output before any merge mutation. Preserve task
+## registration order, not callback order; repeated IDs are harmless.
+func _selected_tasks(raw: Variant, excluded: int = -1) -> Dictionary:
+	if not raw is Array:
+		return {"ok": false, "ids": []}
+	var selected: Dictionary = {}
+	for value in raw:
+		if not Equipment.valid_integer(value, 1) or not tasks.has(int(value)):
+			return {"ok": false, "ids": []}
+		if int(value) != excluded:
+			selected[int(value)] = true
+	var ids: Array = []
+	for id in tasks:
+		if selected.has(id):
+			ids.append(id)
+	return {"ok": true, "ids": ids}
+
+func start_combat(attackers: Array, defenders: Array, player_is_attacker: bool = true) -> int:
+	if _selecting_geometry or not _valid_new_sides(attackers, defenders, player_is_attacker):
+		return -1
+	if start_overlap_selector.is_valid():
+		_selecting_geometry = true
+		var raw = start_overlap_selector.call(attackers.duplicate(), defenders.duplicate())
+		_selecting_geometry = false
+		var selected: Dictionary = _selected_tasks(raw)
+		# The adapter may have observed or removed stale cards; revalidate inputs.
+		if not selected.ok or not _valid_new_sides(attackers, defenders, player_is_attacker):
 			return -1
-		seen[id] = true
+		if not selected.ids.is_empty():
+			return merge_combats(selected.ids, attackers, defenders)
+	return _create_combat(attackers, defenders, player_is_attacker)
+
+## Internal creation never invokes overlap selectors: source merge does not
+## recursively merge again, and pre-start merging must not draw progress twice.
+func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool) -> int:
+	var session = _session.get_ref()
 	var task_id: int = _next_id
 	_next_id += 1
 	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}}
@@ -77,20 +119,28 @@ func _enter(task_id: int, card_id: int) -> void:
 	tasks[task_id].progress[card_id] = session.rng.randf_range(0.0, 0.5)
 
 func add_combatants(task_id: int, card_ids: Array) -> bool:
-	if not tasks.has(task_id):
+	if _selecting_geometry or not tasks.has(task_id):
 		return false
 	var session = _session.get_ref()
 	var added: bool = false
 	for id in card_ids:
-		if not session.cards.has(id) or membership.has(id):
+		if not Equipment.valid_integer(id, 1) or not session.cards.has(id) or membership.has(id):
 			continue
 		var faction: int = int(session.catalog.fields(session.cards[id].definition_guid).get("faction", 0))
-		if faction not in [1, 2]:
+		if faction not in [1, 2] or int(session.catalog.fields(session.cards[id].definition_guid).get("category", 0)) not in [2, 9]:
 			continue
 		var side: String = "attackers" if ((faction == 1) == tasks[task_id].player_is_attacker) else "defenders"
 		tasks[task_id][side].append(id)
 		_enter(task_id, id)
 		added = true
+	if added and resize_overlap_selector.is_valid():
+		_selecting_geometry = true
+		var raw = resize_overlap_selector.call(task_id)
+		_selecting_geometry = false
+		var selected: Dictionary = _selected_tasks(raw, task_id)
+		if tasks.has(task_id) and selected.ok and not selected.ids.is_empty():
+			var source: Dictionary = tasks[task_id]
+			merge_combats(selected.ids + [task_id], source.attackers, source.defenders)
 	return added
 
 func tick(delta: float) -> void:
@@ -175,30 +225,44 @@ func _finish(task_id: int) -> void:
 
 ## Called by a view after bounds overlap is established. Source merges always
 ## designate the player faction as attacker, even if a mob initiated either fight.
-func merge_combats(task_ids: Array) -> int:
+func merge_combats(task_ids: Array, initial_attackers: Array = [], initial_defenders: Array = []) -> int:
+	if _selecting_geometry:
+		return -1
+	var selected: Dictionary = _selected_tasks(task_ids)
+	if not selected.ok or selected.ids.is_empty():
+		return -1
 	var session = _session.get_ref()
 	var players: Array = []
 	var mobs: Array = []
-	for task_id in task_ids:
-		if not tasks.has(task_id):
+	var ordered: Array = initial_attackers + initial_defenders
+	for task_id in selected.ids:
+		ordered.append_array(tasks[task_id].attackers + tasks[task_id].defenders)
+	# Validate the entire replacement before removing any old task or membership.
+	for raw_id in ordered:
+		if not Equipment.valid_integer(raw_id, 1):
 			return -1
-		for id in tasks[task_id].attackers + tasks[task_id].defenders:
-			if id in players or id in mobs:
-				continue
-			var faction: int = int(session.catalog.fields(session.cards[id].definition_guid).get("faction", 0))
-			if faction == 1:
-				players.append(id)
-			elif faction == 2:
-				mobs.append(id)
+		var id: int = int(raw_id)
+		if not session.cards.has(id) or (membership.has(id) and membership[id] not in selected.ids):
+			return -1
+		if id in players or id in mobs:
+			continue
+		var fields: Dictionary = session.catalog.fields(session.cards[id].definition_guid)
+		var faction: int = int(fields.get("faction", 0))
+		if int(fields.get("category", 0)) not in [2, 9] or faction not in [1, 2]:
+			return -1
+		if faction == 1:
+			players.append(id)
+		else:
+			mobs.append(id)
 	if players.is_empty() or mobs.is_empty():
 		return -1
-	for task_id in task_ids:
-		if not tasks.has(task_id):
-			continue
+	for task_id in selected.ids:
 		for id in tasks[task_id].attackers + tasks[task_id].defenders:
 			membership.erase(id)
+			dragged.erase(id)
+		# Do not _finish: source cleanup bypasses survivor stacks and end events.
 		tasks.erase(task_id)
-	return start_combat(players, mobs, true)
+	return _create_combat(players, mobs, true)
 
 func save_state() -> Dictionary:
 	var records: Array = []
