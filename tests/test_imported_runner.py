@@ -33,6 +33,7 @@ for name, prefix in (
     ("test_cycle_board", "Cycle board"), ("test_puff_board", "Puff board"),
     ("test_camera_board", "Camera board"), ("test_board_integration", "Board integration"), ("test_trade_collection_ui", "Trade/collection UI"),
     ("test_options_ui", "Options UI"), ("test_equipment_board", "Equipment board"),
+    ("test_slot_management_ui", "Slot management UI"),
     ("test_slot_ui", "Slot UI"), ("test_combat_board", "Combat board"),
 ):
     MARKERS[name] = prefix + " checks: 1 passed / 1 total"

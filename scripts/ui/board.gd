@@ -55,6 +55,13 @@ var ledger_key: String = ""
 var collection_refresh_pending: bool = false
 var active_slot: int = 0
 var selected_slot: int = 0
+var archive_dialog: ConfirmationDialog
+var archive_selected_button: Button
+var archive_all_button: Button
+var archive_picker: OptionButton
+var restore_archive_button: Button
+var listed_slot_ids: Array[int] = []
+var pending_archive_plan: Dictionary = {}
 var slot_picker: OptionButton
 var legacy_picker: OptionButton
 var legacy_button: Button
@@ -255,7 +262,13 @@ func _build_ui() -> void:
 	title_panel.add_child(margin)
 	var title := VBoxContainer.new()
 	title.add_theme_constant_override("separation", 16)
-	margin.add_child(title)
+	var title_scroll := ScrollContainer.new()
+	title_scroll.name = "TitleScroll"
+	title_scroll.custom_minimum_size.y = 620
+	title_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	margin.add_child(title_scroll)
+	title_scroll.add_child(title)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_label("ABYSSAL GUILD", title, 36)
 	_label("StackCraft · Godot migration", title, 22)
 	title_status = _label("Loading source data…", title)
@@ -277,6 +290,23 @@ func _build_ui() -> void:
 	_button("New game · new slot", title, start_new)
 	continue_button = _button("Continue selected slot", title, _continue_game)
 	continue_button.disabled = true
+	var archive_actions := HBoxContainer.new()
+	title.add_child(archive_actions)
+	archive_selected_button = _button("Archive selected", archive_actions, _request_archive_selected)
+	archive_all_button = _button("Archive all listed slots", archive_actions, _request_archive_all)
+	for button in [archive_selected_button, archive_all_button]: button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_label("Recoverable archives · originals retained", title)
+	archive_picker = OptionButton.new()
+	archive_picker.item_selected.connect(_select_archive)
+	title.add_child(archive_picker)
+	restore_archive_button = _button("Restore copy into a new slot", title, _restore_archive_copy)
+	restore_archive_button.disabled = true
+	archive_dialog = ConfirmationDialog.new()
+	archive_dialog.title = "Archive listed save slots"
+	archive_dialog.ok_button_text = "Archive these slots"
+	archive_dialog.confirmed.connect(_confirm_archive_slots)
+	archive_dialog.canceled.connect(_cancel_archive_slots)
+	add_child(archive_dialog)
 	legacy_picker = OptionButton.new()
 	title.add_child(legacy_picker)
 	legacy_button = _button("Copy legacy save into a new slot", title, _adopt_selected_legacy)
@@ -329,6 +359,8 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	_cancel_archive_slots()
+	archive_dialog.hide()
 	_clear_puffs()
 	drag_grant = -1
 	session.cycle.pose_sampler = _sample_cycle_pose
@@ -795,6 +827,11 @@ func _has_save() -> bool:
 	return selected_slot > 0 and slots._inspect(selected_slot).valid
 
 func _refresh_slots() -> void:
+	slots.configure(session.campaign, slot_root)
+	listed_slot_ids.clear()
+	archive_selected_button.disabled = true
+	archive_all_button.disabled = true
+	restore_archive_button.disabled = true
 	var inventory: Dictionary = slots.list_slots()
 	slot_picker.clear()
 	if not inventory.ok:
@@ -803,6 +840,7 @@ func _refresh_slots() -> void:
 		return
 	var selected_index: int = -1
 	for entry in inventory.slots:
+		listed_slot_ids.append(int(entry.slot))
 		var label: String = "Slot %d · unavailable (files preserved)" % entry.slot
 		if entry.valid:
 			label = "Slot %d · %s · %d%% · %s UTC%s" % [entry.slot, entry.scene, entry.quest_progress, Time.get_datetime_string_from_unix_time(int(entry.modified_unix)).replace("T", " "), " · backup" if entry.recovered else ""]
@@ -831,14 +869,19 @@ func _refresh_slots() -> void:
 			legacy_picker.set_item_metadata(legacy_picker.item_count - 1, path)
 	legacy_picker.visible = legacy_picker.item_count > 0
 	legacy_button.visible = legacy_picker.visible
+	archive_selected_button.disabled = selected_slot <= 0
+	archive_all_button.disabled = listed_slot_ids.is_empty()
+	_refresh_archives()
 
 func _select_slot(index: int) -> void:
 	var entry: Variant = slot_picker.get_item_metadata(index)
 	if not entry is Dictionary:
 		selected_slot = 0
+		archive_selected_button.disabled = true
 		continue_button.disabled = true
 		return
 	selected_slot = int(entry.slot)
+	archive_selected_button.disabled = false
 	continue_button.disabled = not bool(entry.valid)
 	if not entry.valid:
 		title_status.text = "Slot %d is unavailable. Existing files were kept. %s" % [selected_slot, str(entry.errors)]
@@ -923,6 +966,8 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_cancel_archive_slots()
+	archive_dialog.hide()
 	_clear_puffs()
 	drag_grant = -1
 	combat_presentation.reset()
@@ -1529,3 +1574,104 @@ func _clear_puffs() -> void:
 	for node in puffs:
 		if is_instance_valid(node) and not node.is_queued_for_deletion(): node.queue_free()
 	puffs.clear()
+
+func _request_archive_selected() -> void:
+	if running: return
+	_request_archive_slots([selected_slot] if selected_slot > 0 else [])
+
+func _request_archive_all() -> void:
+	if running: return
+	_request_archive_slots(listed_slot_ids.duplicate())
+
+func _request_archive_slots(ids: Array) -> void:
+	if running: return
+	pending_archive_plan.clear()
+	slots.configure(session.campaign, slot_root)
+	var result: Dictionary = slots.prepare_delete_slots(ids)
+	if not result.ok:
+		title_status.text = "Cannot prepare archive: " + str(result.get("error", "Choose at least one listed slot."))
+		return
+	pending_archive_plan = result.plan.duplicate(true)
+	var names: PackedStringArray = []
+	for id in pending_archive_plan.slots: names.append(str(id))
+	archive_dialog.dialog_text = "Archive %d listed slot(s): %s?\n\nIncludes their primary saves, backups and temporary files, including invalid or temp-only listed slots.\n\nOptions, legacy saves and existing archives are excluded. Nothing is permanently deleted. Newly created unlisted slots are not included." % [names.size(), ", ".join(names)]
+	archive_dialog.popup_centered(Vector2i(640,300))
+
+func _cancel_archive_slots() -> void:
+	pending_archive_plan.clear()
+
+func _confirm_archive_slots() -> void:
+	if running:
+		_cancel_archive_slots()
+		return
+	if pending_archive_plan.is_empty():
+		title_status.text = "No pending archive confirmation. Choose the slots again."
+		return
+	var plan: Dictionary = pending_archive_plan.duplicate(true)
+	pending_archive_plan.clear() # Consume authorization once, including failure.
+	slots.configure(session.campaign, slot_root)
+	var result: Dictionary = slots.delete_slots(plan)
+	archive_dialog.hide()
+	_refresh_slots()
+	if not result.ok:
+		title_status.text = "Archive failed: " + str(result.get("error", "Unknown error")) + ". Review the current files and confirm a new plan to retry."
+		if result.has("archive"):
+			title_status.text += " Recovery archive: " + str(result.archive) + "."
+		if not result.get("rollback_errors", []).is_empty():
+			title_status.text += " %d artifact(s) could not be returned; inspect both slots and archive inventory." % result.rollback_errors.size()
+		return
+	title_status.text = "Archived %d slot(s) into a recoverable local archive. Options and legacy saves were kept. Use Restore copy below to recover a save." % result.slots.size()
+
+func _refresh_archives() -> void:
+	var previous: Dictionary = {}
+	if archive_picker.selected >= 0:
+		var metadata: Variant = archive_picker.get_item_metadata(archive_picker.selected)
+		if metadata is Dictionary: previous = metadata
+	archive_picker.clear()
+	restore_archive_button.disabled = true
+	var result: Dictionary = slots.list_archives()
+	if not result.ok:
+		archive_picker.add_item("Archives unavailable: " + str(result.get("error", "Unknown error")))
+		archive_picker.set_item_disabled(0,true)
+		return
+	var selected_index: int = -1
+	var first_valid: int = -1
+	for archive in result.archives:
+		for entry in archive.entries:
+			var row := {"archive_id":str(archive.id),"slot":int(entry.slot),"valid":bool(entry.valid),"errors":entry.get("errors",[])}
+			var caption: String = "%s · slot %d · unavailable (files preserved)" % [archive.id, entry.slot]
+			if row.valid:
+				caption = "%s · slot %d · %s · day %d%s" % [archive.id, entry.slot, entry.scene, entry.day, " · backup recovery" if entry.recovered else ""]
+			archive_picker.add_item(caption)
+			var index: int = archive_picker.item_count-1
+			archive_picker.set_item_metadata(index,row)
+			if row.valid and first_valid < 0: first_valid = index
+			if row.archive_id == previous.get("archive_id", "") and row.slot == previous.get("slot",-1): selected_index = index
+	if archive_picker.item_count == 0:
+		archive_picker.add_item("No recognized archived slots")
+		archive_picker.set_item_disabled(0,true)
+		return
+	if selected_index < 0: selected_index = first_valid if first_valid >= 0 else 0
+	archive_picker.select(selected_index)
+	_select_archive(selected_index)
+
+func _select_archive(index: int) -> void:
+	var row: Variant = archive_picker.get_item_metadata(index)
+	restore_archive_button.disabled = not row is Dictionary or not bool(row.get("valid", false))
+	if row is Dictionary and not row.valid:
+		title_status.text = "Archived slot %d is unavailable. Files were preserved. %s" % [row.slot, str(row.errors)]
+
+func _restore_archive_copy() -> void:
+	if running or archive_picker.selected < 0: return
+	var row: Variant = archive_picker.get_item_metadata(archive_picker.selected)
+	if not row is Dictionary or not bool(row.get("valid", false)):
+		title_status.text = "Choose a valid archived save to restore."
+		return
+	slots.configure(session.campaign, slot_root)
+	var result: Dictionary = slots.restore_archive(str(row.archive_id), int(row.slot))
+	if not result.ok:
+		title_status.text = "Restore failed: " + str(result.get("error", "Unknown error")) + ". The archive and current game were kept."
+		return
+	selected_slot = int(result.slot)
+	_refresh_slots()
+	title_status.text = "Restored a copy into slot %d%s. The archive was kept. Choose Continue to load the copy." % [selected_slot, " using its valid backup" if result.get("recovered",false) else ""]

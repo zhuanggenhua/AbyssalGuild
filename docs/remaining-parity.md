@@ -10,8 +10,9 @@ The full private source and assets now pass the 1327-file source lock.
    copying, new-day/travel checkpoints, quit failure handling and confirmed
    game-over archive have integration coverage. Archive rather than permanent
    removal is an intentional native safety improvement. Normal title archive-selected,
-   archive-all and restore-copy controls are still being finished; platform/manual
-   acceptance and further fault-injection testing remain.
+   archive-all and restore-copy controls are now connected, including stale-file
+   checks, recovery and fresh-slot restoration. Platform/manual acceptance and
+   further fault-injection testing remain.
 2. **Phase action locks are connected.** Playing/selling permit card mutation;
    feeding/encounter/ready/game-over block new presses; a drag granted before the
    boundary may finish, matching source pointer-down behavior. Still requires manual input acceptance.
@@ -110,3 +111,26 @@ curves, separate real/scaled clocks and board cleanup. Event coverage includes
 ordinary recipes, Kill, chests, vendor payment, production and encounter spawning.
 The native renderer uses standard alpha blending as an explicit approximation;
 source built-in shader and exact Unity random/renderer behavior remain unresolved.
+
+
+## Reproduced interaction gaps under repair
+
+A static/source-backed Godot audit identified remaining functionality beyond
+rendering acceptance. These are not covered by the completed-slice claims above:
+
+- Pressing a tail in a crafting stack currently delays the split until release,
+  so its recipe can consume a held card. Source immediate split, paused-original
+  progress and return-to-original resume need a complete gesture lifecycle.
+- Required Feed / Start Day / Game Over actions are currently inside the default
+  collapsed Market panel. They need an always-visible cycle prompt/action.
+- Recipe cards drawn from packs or reconstructed by a cold save load lose their
+  scene-template ingredient description. The fuller research builder must be shared.
+- Single chest clicks do not yet withdraw coins; the separate Withdraw control
+  works. The visible 3x speed option is inert because the model supports 1x / 2x.
+- Source vendor unlocks queue a gameplay pause/input lock, notice, focus and
+  highlight sequence; current activation is immediate without that sequence.
+- Explicit title quit confirmation, gamepad cancel, drag-target highlighting,
+  hover information and per-stack craft progress affordances need further work.
+
+These findings use locked original paths and isolated Godot probes, not Unity
+execution. Subsequent fixes must include interruption and repeated-input checks.

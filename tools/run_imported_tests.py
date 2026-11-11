@@ -40,6 +40,7 @@ SUITES = (
     ("test_trade_collection_ui", r"Trade/collection UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_options_ui", r"Options UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_equipment_board", r"Equipment board checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_slot_management_ui", r"Slot management UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_slot_ui", r"Slot UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_combat_board", r"Combat board checks: [1-9]\d* passed / [1-9]\d* total"),
 )

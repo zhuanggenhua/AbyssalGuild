@@ -111,3 +111,10 @@ Realtime cycle details and carried-input boundaries are in
 private-texture emitters with independent cosmetic randomness and separate real
 particle/scaled emitter clocks. See [Puff lifecycle](puff-board-lifecycle.md).
 Standard alpha blending approximates the unavailable source built-in shader.
+
+
+The title screen now offers confirmed selected/all-listed slot archiving and an
+archive inventory with validated restore-copy to a fresh slot. Restore remains
+on the title and never silently loads/replaces a campaign. Stale confirmation,
+invalid archive and interrupted flows preserve existing data. See
+[slot management UI](slot-management-ui.md).
