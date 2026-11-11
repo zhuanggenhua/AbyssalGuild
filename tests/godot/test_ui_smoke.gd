@@ -39,6 +39,13 @@ func run() -> void:
 		board.drag_moved = false
 		board._finish_drag(Vector2.ZERO)
 	check(board.session.cards.size() == 4 and board.views.size() == 4, "clicking starter creates all four real cards and views")
+	# Source pack spawning may already attach compatible outputs. Isolate the
+	# four real cards so this subsequent explicit drag scenario is deterministic.
+	var starter_positions: Array[Vector2] = [Vector2(-4, 0), Vector2(0, 0), Vector2(4, 0), Vector2(-2, -2)]
+	var starter_ids: Array = board.session.cards.keys()
+	for index in range(starter_ids.size()):
+		board.session.split_stack(starter_ids[index], starter_positions[index])
+	board._refresh()
 	var villager: int = -1
 	var bush: int = -1
 	var wood: int = -1

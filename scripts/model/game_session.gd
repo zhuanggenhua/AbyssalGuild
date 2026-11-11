@@ -69,15 +69,20 @@ func start_new_game() -> int:
 	speed = 1.0
 	_next_id = 1
 	quest_tracker.start_new_game(self)
-	var starter: String = catalog.find_by_name("Starter Pack", "packs")
-	if starter.is_empty():
-		for entry in catalog.data.get("packs", []):
-			if "00_Pack_Starter" in entry.get("source_path", ""):
-				starter = str(entry.guid)
-	var offset := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1))
-	while offset.length_squared() > 1:
-		offset = Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1))
-	return spawn_card(starter, Vector2(-3.5, 0.6) + Vector2(offset.x, offset.z) * 1.2)
+	var defaults: Dictionary = campaign._defaults(scene_name)
+	var center: Dictionary = defaults.get("defaultSpawnPosition", {})
+	var position := Vector2(float(center.get("x", 0)), float(center.get("z", 0)))
+	var radius := float(defaults.get("defaultSpawnRadius", 1))
+	var first_id := -1
+	for reference in defaults.get("defaultSpawnCards", []):
+		# Retain the existing sphere rejection sampler and its RNG draw order.
+		var offset := Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1))
+		while offset.length_squared() > 1:
+			offset = Vector3(rng.randf_range(-1, 1), rng.randf_range(-1, 1), rng.randf_range(-1, 1))
+		var spawned: int = spawn_card(catalog.ref_guid(reference), position + Vector2(offset.x, offset.z) * radius)
+		if first_id < 0:
+			first_id = spawned
+	return first_id
 
 func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: int = -1) -> int:
 	if catalog.get_definition(guid).is_empty():
@@ -213,37 +218,63 @@ func open_pack(id: int) -> int:
 	return spawned
 
 func can_stack(bottom_guid: String, top_guid: String) -> bool:
+	if catalog.get_definition(bottom_guid).is_empty() or catalog.get_definition(top_guid).is_empty():
+		return false
 	var rules: Array = catalog.stacking_rules()
 	var bottom: int = int(catalog.fields(bottom_guid).get("category", 0))
 	var top: int = int(catalog.fields(top_guid).get("category", 0))
+	if bottom < 0 or bottom >= 12 or top < 0 or top >= 12:
+		return false
 	var index: int = bottom * 12 + top
 	if index >= rules.size():
 		return false
 	return int(rules[index]) == 1 or (int(rules[index]) == 2 and bottom_guid == top_guid)
 
-func move_to_stack(card_id: int, target_id: int) -> bool:
+## Pure candidate filter. Source array naming is counterintuitive: TopCard is
+## first, BottomCard is last. The lifted card is the first matrix argument.
+## Equipment/combat terminal drop actions are separate, before regular stacking.
+func can_move_to_stack(card_id: int, target_id: int, original_crafting_stack_id: int = -1) -> bool:
 	if not cards.has(card_id) or not stacks.has(target_id) or not stacks.has(cards[card_id].stack_id):
 		return false
 	var card = cards[card_id]
 	var source = stacks[card.stack_id]
 	var target = stacks[target_id]
-	if source == target or target.card_ids.is_empty():
+	if source == target or target.card_ids.is_empty() or card_id not in source.card_ids:
 		return false
-	var moving: Array = source.card_ids.slice(source.card_ids.find(card_id))
-	# Source uses incoming bottom vs target bottom, not target top.
-	if not can_stack(card.definition_guid, cards[target.card_ids[0]].definition_guid):
+	if not can_stack(card.definition_guid, cards[target.card_ids.back()].definition_guid):
 		return false
-	if not target.recipe_guid.is_empty():
+	if not target.recipe_guid.is_empty() and target_id != original_crafting_stack_id:
 		var recipe: Dictionary = catalog.fields(target.recipe_guid)
 		if not recipe.get("allowExcessIngredients", false):
 			return false
-		for moving_id in moving:
-			var allowed: bool = false
-			for ingredient in recipe.get("requiredIngredients", []):
-				if catalog.ref_guid(ingredient.card) == cards[moving_id].base_definition_guid:
-					allowed = true
-			if not allowed:
-				return false
+		# CanJoinActiveCraft checks only the incoming effective definition.
+		for ingredient in recipe.get("requiredIngredients", []):
+			if catalog.ref_guid(ingredient.card) == card.definition_guid:
+				return true
+		return false
+	return true
+
+func move_to_stack(card_id: int, target_id: int, original_crafting_stack_id: int = -1) -> bool:
+	if not can_move_to_stack(card_id, target_id, original_crafting_stack_id):
+		return false
+	var source = stacks[cards[card_id].stack_id]
+	var target = stacks[target_id]
+	var moving: Array = source.card_ids.slice(source.card_ids.find(card_id))
+	if target_id == original_crafting_stack_id:
+		target.paused = false
+	elif moving.size() == source.card_ids.size():
+		source.cancel_craft()
+	# MergeWith invokes only the last target card's IOnStackable before append.
+	# A full chest still handles a valid currency drop and leaves it untouched.
+	var last_id: int = target.card_ids.back()
+	if world._is_chest(last_id) and not world.currency_guid.is_empty() and cards[moving.front()].base_definition_guid == world.currency_guid:
+		if moving.size() != source.card_ids.size():
+			var detached_id: int = split_stack(card_id, cards[card_id].position)
+			source = stacks[detached_id]
+		world.deposit_stack(last_id, source.id)
+		_check_recipe(target)
+		changed.emit()
+		return true
 	for moving_id in moving:
 		source.card_ids.erase(moving_id)
 		target.card_ids.append(moving_id)
@@ -471,7 +502,8 @@ func buy_pack(guid: String) -> int:
 			card.stored_coins -= amount
 			price -= amount
 	vendor_payments[guid] = 0
-	var purchased: int = spawn_card(guid)
+	var spawn: Variant = preload("res://scripts/model/scene_spawn.gd").vendor_position(catalog, scene_name, guid, board_bounds, board_top_margin)
+	var purchased: int = spawn_card(guid, spawn if spawn is Vector2 else Vector2.ZERO)
 	if purchased >= 0:
 		event_occurred.emit("pack_purchased", {"definition_guid": guid})
 	if stats_changed:
@@ -570,7 +602,8 @@ func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
 				break
 	var pack_id: int = -1
 	if paid >= price:
-		pack_id = spawn_card(pack_guid)
+		var spawn: Variant = preload("res://scripts/model/scene_spawn.gd").vendor_position(catalog, scene_name, pack_guid, board_bounds, board_top_margin)
+		pack_id = spawn_card(pack_guid, spawn if spawn is Vector2 else Vector2.ZERO)
 		paid = 0
 		vendor_payments[pack_guid] = 0
 		event_occurred.emit("pack_purchased", {"definition_guid": pack_guid})

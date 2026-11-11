@@ -1,4 +1,5 @@
 extends Node3D
+const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
@@ -11,6 +12,8 @@ var visual_assets = VisualAssets.new()
 var board_mesh: MeshInstance3D
 var original_board: Node3D
 var geometry_key: String = ""
+var layout_key: String = ""
+var layout_locks: Dictionary = {}
 var feedback = AudioFeedback.new()
 var friendly_choice: CheckBox
 var session = Session.new()
@@ -35,6 +38,8 @@ var notice: Label
 var day_button: Button
 var pause_button: Button
 var shop: VBoxContainer
+var market_panel: Control
+var detail_panel: Control
 var duration: HSlider
 var continue_button: Button
 var vendor_guids: Array[String] = []
@@ -134,6 +139,8 @@ func _build_ui() -> void:
 	var top := _panel(hud, Rect2(18, 16, 1404, 70))
 	status = _label("", top, 19)
 	var left := _panel(hud, Rect2(18, 100, 248, 600))
+	market_panel = left.get_parent().get_parent()
+	market_panel.hide()
 	_label("STACKCRAFT / MAIN", left, 22)
 	pause_button = _button("Pause [Space]", left, _toggle_pause)
 	var speeds := HBoxContainer.new()
@@ -153,6 +160,8 @@ func _build_ui() -> void:
 	market_scroll.add_child(shop)
 	_label("Select a card to inspect.\nClick a pack to draw.\nDrag a card and its tail.\nDrop on another stack to craft.\nDrop on empty board to split.\nRight-click to inspect a pack.\nWheel: zoom · WASD: pan", left, 13)
 	var right := _panel(hud, Rect2(1174, 100, 248, 710))
+	detail_panel = right.get_parent().get_parent()
+	detail_panel.hide()
 	_label("INSPECT", right, 20)
 	inspection = _label("Select a card", right)
 	inspection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -170,6 +179,12 @@ func _build_ui() -> void:
 	ledger.custom_minimum_size = Vector2(210, 260)
 	ledger.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	right.add_child(ledger)
+	var market_toggle := _button("Market & controls", hud, func(): market_panel.visible = not market_panel.visible)
+	market_toggle.position = Vector2(18, 835)
+	market_toggle.size = Vector2(248, 40)
+	var detail_toggle := _button("Inspect & journal", hud, func(): detail_panel.visible = not detail_panel.visible)
+	detail_toggle.position = Vector2(1174, 835)
+	detail_toggle.size = Vector2(248, 40)
 	notice = _label("", hud, 16)
 	notice.position = Vector2(285, 835)
 	notice.size = Vector2(865, 50)
@@ -236,6 +251,9 @@ func _enter_game() -> void:
 	_update_board_geometry()
 	session.ai.point_validator = _ai_point_valid
 	session.ai.combat_geometry = _combat_geometry
+	session.ai.produce_spawner = _spawn_with_layout
+	layout_locks.clear()
+	layout_key = ""
 	for view in views.values(): view.queue_free()
 	views.clear()
 	running = true
@@ -266,6 +284,7 @@ func _name(guid: String) -> String:
 	return str(fields.get("displayName", fields.get("id", guid)))
 
 func _sync_views() -> void:
+	_ensure_layout()
 	for id in views.keys():
 		if not session.cards.has(id):
 			views[id].queue_free()
@@ -279,7 +298,7 @@ func _sync_views() -> void:
 			var card = session.cards[id]
 			var view = CardView.new()
 			add_child(view)
-			view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition", visual_assets, catalog.fields(card.definition_guid), session.scene_name)
+			view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition", visual_assets, catalog.fields(card.definition_guid), session.scene_name, _card_collider_size(id))
 			view.set_meta("definition_guid", card.definition_guid)
 			views[id] = view
 		views[id].visible = not session.equipment.owners.has(id)
@@ -296,7 +315,7 @@ func _sync_views() -> void:
 			if not views.has(id):
 				var view = CardView.new()
 				add_child(view)
-				view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition", visual_assets, catalog.fields(card.definition_guid), session.scene_name)
+				view.configure(id, _name(card.definition_guid), int(catalog.fields(card.definition_guid).get("category", 0)), catalog.get_definition(card.definition_guid).get("script_class", "") == "PackDefinition", visual_assets, catalog.fields(card.definition_guid), session.scene_name, _card_collider_size(id))
 				view.set_meta("definition_guid", card.definition_guid)
 				views[id] = view
 			var offset := Vector2.ZERO
@@ -369,40 +388,33 @@ func _finish_drag(screen: Vector2) -> void:
 	if drag_moved:
 		var stack = session.stacks[session.cards[id].stack_id]
 		var destination: Vector2 = stack.position + drag_delta
-		var target: int = -1
-		var best: float = 1.15
-		# Explicit stack footprint hit test avoids picking our own dragged collider.
-		var drop: Vector2 = _board_point(screen)
-		for other in session.stacks.values():
-			if other.id == stack.id: continue
-			for index in range(other.card_ids.size()):
-				var distance: float = drop.distance_to(other.position + Vector2(0, index * _stack_step().z))
-				if distance < best:
-					best = distance
-					target = other.id
+		var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true)
 		if target >= 0:
-			var target_card: int = session.stacks[target].card_ids[0]
-			if catalog.get_definition(session.cards[target_card].base_definition_guid).get("script_class", "") == "ChestDefinition":
-				var dropped: int = session.split_stack(id, stack.position)
-				var result: Dictionary = session.world.deposit_stack(target_card, dropped)
-				if result.handled:
-					notice.text = "Stored %d coins." % result.deposited
-				elif not session.move_to_stack(id, target):
-					notice.text = "Chest accepts currency; this stack cannot join."
-			elif int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5 and int(catalog.fields(session.cards[target_card].definition_guid).get("category", 0)) == 2:
+			var target_card: int = session.stacks[target].card_ids.back()
+			if int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5 and int(catalog.fields(session.cards[target_card].definition_guid).get("category", 0)) == 2:
 				if stack.card_ids.back() != id:
 					notice.text = "Split equipment from its tail before equipping."
 				else:
 					notice.text = "Equipped." if session.equipment.equip(target_card, id) else "Cannot equip this item."
-			elif not session.move_to_stack(id, target): notice.text = "These cards cannot stack, or the current recipe rejects extra ingredients."
+			else:
+				var stored_before: int = session.cards[target_card].stored_coins
+				if not session.move_to_stack(id, target):
+					notice.text = "These cards cannot stack, or the current recipe rejects extra ingredients."
+				elif session.world._is_chest(target_card):
+					notice.text = "Stored %d coins." % (session.cards[target_card].stored_coins - stored_before)
 		else:
 			destination = _clamp_stack_position(id, destination)
 			session.split_stack(id, destination)
 	else:
 		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
+			var pack_stack: int = session.cards[id].stack_id
+			layout_locks[pack_stack] = true
 			var spawned: int = session.open_pack(id)
-			# Separate each drawn card so the pack remains clickable.
-			if spawned >= 0: session.split_stack(spawned, session.cards[spawned].position + Vector2(1.7, float(spawned % 4) * 0.5))
+			if spawned >= 0:
+				_attach_spawned(spawned, -1, 0.1)
+			_resolve_layout()
+			layout_locks.erase(pack_stack)
+
 	drag_delta = Vector2.ZERO
 	_refresh()
 
@@ -470,7 +482,9 @@ func _buy(guid: String) -> void:
 	if session.phase != "playing" or not vendor_guids.has(guid): return
 	var id: int = session.buy_pack(guid)
 	notice.text = "Purchased " + _name(guid) if id >= 0 else "Pack unavailable: check currency and completed quests."
-	if id >= 0: session.split_stack(id, Vector2(-4 + vendor_guids.find(guid) * 1.8, -4))
+	if id >= 0:
+		_attach_spawned(id)
+		_resolve_layout()
 	_refresh()
 
 func _sell_selected() -> void:
@@ -569,12 +583,38 @@ func _stack_step() -> Vector3:
 	var step: Dictionary = catalog.settings("CardSettings").get("stackStep", {})
 	return Vector3(float(step.get("x", 0)), float(step.get("y", 0.002)), float(step.get("z", -0.18)))
 
-func _card_footprint(id: int) -> Vector2:
-	if not session.cards.has(id): return Vector2.ZERO
+func _card_collider_size(id: int) -> Vector3:
+	if not session.cards.has(id): return Vector3.ZERO
 	var fields: Dictionary = catalog.fields(session.cards[id].definition_guid)
-	var appearance: Dictionary = visual_assets.appearance(int(fields.get("category", 0)), catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition", fields, session.scene_name)
+	var is_pack: bool = catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition"
+	var appearance: Dictionary = visual_assets.appearance(int(fields.get("category", 0)), is_pack, fields, session.scene_name)
 	var size: Dictionary = appearance.get("prefab", {}).get("size", {})
-	return Vector2(float(size.get("x", 1.4)), float(size.get("z", 1.95)))
+	if size.has("x") and size.has("z"):
+		return Vector3(float(size.x), float(size.get("y", 0)), float(size.z))
+	# Gameplay import contains colliders even when optional private media is absent.
+	var config: Dictionary = session.campaign._defaults(session.scene_name)
+	var prefab_guid: String = ""
+	if is_pack:
+		prefab_guid = catalog.ref_guid(config.get("packPrefab", {}))
+	elif int(fields.get("category", 0)) == 9 and bool(fields.get("isAggressive", false)):
+		prefab_guid = catalog.ref_guid(config.get("aggressiveMobPrefab", {}))
+	else:
+		for entry in config.get("cardPrefabs", []):
+			if int(entry.get("category", -1)) == int(fields.get("category", 0)):
+				prefab_guid = catalog.ref_guid(entry.get("prefab", {}))
+	for prefab in catalog.data.get("referenced_prefabs", []):
+		if str(prefab.get("guid", "")) != prefab_guid: continue
+		for document in prefab.get("documents", []):
+			if document.get("object_type", "") == "BoxCollider":
+				size = document.get("fields", {}).get("m_Size", {})
+				return Vector3(float(size.get("x", 0)), float(size.get("y", 0)), float(size.get("z", 0)))
+	return Vector3.ZERO
+
+func _card_footprint(id: int) -> Vector2:
+	var size := _card_collider_size(id)
+	if size == Vector3.ZERO: return Vector2.ZERO
+	var margin: Dictionary = catalog.settings("CardSettings").get("margin", {})
+	return BoardLayout.card_size(size, Vector2(float(margin.get("x", 0.1)), float(margin.get("y", 0.1))))
 
 func _update_board_geometry() -> void:
 	if session.catalog == null: return
@@ -603,21 +643,15 @@ func _update_board_geometry() -> void:
 		board_mesh.mesh.size = Vector3(bounds.size.x, 0.2, bounds.size.y)
 		visual_assets.apply_scene(camera, board_mesh, session.scene_name)
 	if old_bounds is Rect2 and bounds.get_area() < old_bounds.get_area():
-		for stack in session.stacks.values():
-			stack.position = _clamp_stack_position(stack.card_ids[0], stack.position)
-			for id in stack.card_ids: session.cards[id].position = stack.position
+		_apply_layout(BoardLayout.enforce_board_limits(_layout_states(), [], bounds, session.board_top_margin, int(catalog.settings("CardSettings").get("maxIterations", 8))))
+	_clamp_camera()
 
 func _clamp_stack_position(card_id: int, point: Vector2) -> Vector2:
-	if not session.board_bounds is Rect2: return point
-	var bounds: Rect2 = session.board_bounds
-	var footprint: Vector2 = _card_footprint(card_id)
+	if not session.board_bounds is Rect2 or not session.cards.has(card_id): return point
 	var stack = session.stacks.get(session.cards[card_id].stack_id)
 	var count: int = 1 if stack == null else stack.card_ids.size() - stack.card_ids.find(card_id)
-	var min_x: float = bounds.position.x + footprint.x * 0.5
-	var max_x: float = bounds.end.x - footprint.x * 0.5
-	var min_z: float = bounds.position.y + footprint.y * 0.5 + (count - 1) * absf(_stack_step().z)
-	var max_z: float = bounds.end.y - session.board_top_margin - footprint.y * 0.5
-	return Vector2(clampf(point.x, min_x, max_x), clampf(point.y, min_z, max_z))
+	var state: Dictionary = BoardLayout.stack_state(-1, point, _card_footprint(card_id), count, false, _stack_step())
+	return BoardLayout.enforce_placement(point, state, session.board_bounds, session.board_top_margin)
 
 func _ai_point_valid(point: Vector2, stack_id: int) -> bool:
 	if not session.board_bounds is Rect2 or not session.stacks.has(stack_id): return false
@@ -656,3 +690,67 @@ func _zoom_camera(scroll: float) -> void:
 	if distance >= 5.0 and distance <= 20.0:
 		camera.position = candidate
 		_clamp_camera()
+
+func _layout_states() -> Array:
+	var result: Array = []
+	for stack in session.stacks.values():
+		if stack.card_ids.is_empty(): continue
+		var locked: bool = layout_locks.has(stack.id) or (session.cards.has(dragging) and session.cards[dragging].stack_id == stack.id)
+		result.append(BoardLayout.stack_state(stack.id, stack.position, _card_footprint(stack.card_ids[0]), stack.card_ids.size(), locked, _stack_step()))
+	return result
+
+func _layout_signature() -> String:
+	var entries: Array = []
+	for stack in session.stacks.values(): entries.append([stack.id, stack.position, stack.card_ids])
+	return str(entries)
+
+func _apply_layout(result: Dictionary) -> void:
+	for state in result.stacks:
+		if not session.stacks.has(state.id): continue
+		var stack = session.stacks[state.id]
+		stack.position = state.position
+		for id in stack.card_ids: session.cards[id].position = stack.position
+	layout_key = _layout_signature()
+
+func _resolve_layout() -> void:
+	if not session.board_bounds is Rect2: return
+	# Combat rectangles are not fabricated from point-only combat presentation.
+	_apply_layout(BoardLayout.resolve_overlaps(_layout_states(), [], session.board_bounds, session.board_top_margin, int(catalog.settings("CardSettings").get("maxIterations", 8))))
+
+func _ensure_layout() -> void:
+	if session.catalog != null and _layout_signature() != layout_key:
+		_resolve_layout()
+
+func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -1, equipment_drop: bool = false) -> int:
+	if not session.cards.has(card_id): return -1
+	var candidates: Array = []
+	for stack in session.stacks.values():
+		if stack.id == session.cards[card_id].stack_id or stack.id == ignored: continue
+		var positions: Array[Vector3] = []
+		var intersects: bool = false
+		for index in range(stack.card_ids.size()):
+			var center := Vector3(stack.position.x, 0, stack.position.y) + _stack_step() * index
+			positions.append(center)
+			var raw: Vector3 = _card_collider_size(stack.card_ids[index])
+			intersects = intersects or BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - raw * 0.5, raw))
+		if intersects:
+			var eligible: bool = session.can_move_to_stack(card_id, stack.id)
+			# Equipment drops are a separate source action ahead of ordinary attachment.
+			var incoming: Dictionary = catalog.fields(session.cards[card_id].definition_guid)
+			var receiver: Dictionary = catalog.fields(session.cards[stack.card_ids.back()].definition_guid)
+			if equipment_drop and int(incoming.get("category", 0)) == 5 and int(receiver.get("category", 0)) == 2: eligible = true
+			candidates.append({"id": stack.id, "eligible": eligible, "card_positions": positions})
+	return BoardLayout.choose_attach_candidate(point, candidates, session.cards[card_id].stack_id, ignored)
+
+func _attach_spawned(card_id: int, ignored: int = -1, height: float = 0.0) -> void:
+	if not session.cards.has(card_id): return
+	var position: Vector2 = session.cards[card_id].position
+	var target: int = _nearby_stack(card_id, Vector3(position.x, height, position.y), float(catalog.settings("CardSettings").get("spawnAttachRadius", 1)), ignored)
+	if target >= 0: session.move_to_stack(card_id, target)
+
+func _spawn_with_layout(guid: String, position: Vector2, ignored: int = -1) -> int:
+	var id: int = session.spawn_card(guid, position)
+	if id >= 0:
+		_attach_spawned(id, ignored)
+		_resolve_layout()
+	return id

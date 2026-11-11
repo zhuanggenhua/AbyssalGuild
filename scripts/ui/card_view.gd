@@ -5,11 +5,13 @@ var caption: Label3D
 var body: MeshInstance3D
 var material: StandardMaterial3D
 
-func configure(id: int, title: String, category: int, is_pack: bool, visual_assets = null, fields: Dictionary = {}, scene_name: String = "Main") -> void:
+func configure(id: int, title: String, category: int, is_pack: bool, visual_assets = null, fields: Dictionary = {}, scene_name: String = "Main", collider_size: Vector3 = Vector3.ZERO) -> void:
 	card_id = id
 	body = MeshInstance3D.new()
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(1.4, 0.06, 1.95)
+	if collider_size != Vector3.ZERO:
+		mesh.size = Vector3(collider_size.x, maxf(collider_size.y, 0.02), collider_size.z)
 	body.mesh = mesh
 	material = StandardMaterial3D.new()
 	material.albedo_color = Color.from_hsv(fposmod(category * 0.091 + 0.07, 1.0), 0.28, 0.86)

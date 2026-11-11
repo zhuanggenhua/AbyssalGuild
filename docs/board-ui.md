@@ -1,78 +1,73 @@
-# Runnable 3D board shell
+# Runnable Godot board
 
-This is an independently implemented Godot 4.6 UI over the audited runtime model. It is a functional migration slice, **not visual parity or final gameplay acceptance**. It uses generated box meshes, flat colors and system/default fonts. No original template textures, models, audio, screenshots, or copied third-party artwork are included.
+This is an independently implemented Godot 4.6 UI over source-audited gameplay.
+It is a functional migration slice, not visual parity or final manual acceptance.
+The public repository includes no original third-party assets or exported content.
 
 ## Run
 
-1. Follow `docs/data-import.md` to generate local `data/stackcraft.json` from a licensed original source copy. Generated content remains ignored and must not be publicly committed.
+1. Follow `data-import.md` to generate local `data/stackcraft.json` from a licensed
+   source copy. Optional private media import is described in `visual-import.md`.
 2. Open `project.godot` in Godot 4.6, or run `godot --path .`.
-3. Choose a 60–180 second day duration and New game. Continue reads the Godot-native save at `user://session.json`, falling back to its validated backup where supported by the codec.
+3. Choose day duration/friendly mode and New game, or Continue a native save.
 
-Without valid data, the title shows an import command and refuses to start. There is no substituted mock game.
+Missing data blocks starting and displays an import command. No mock replacement
+is loaded. Save/Continue uses `user://session.json`, a multi-scene campaign file
+with staged validation and healthy backup recovery. Unity saves are not supported.
 
-## Controls
+## Controls and features
 
-- Left-click a pack to draw one slot. Right-click selects without opening.
-- Drag a card to carry that card and all cards above it. Drop on a stack to attempt the model's stacking rules; drop on empty board to split/move the tail. A rejected merge stays in its original location. Releasing over a UI panel cancels the drag.
-- Drop a single equipment card onto a character to equip it. Unequip returns its items to the board. Select an enemy and choose Engage selected enemy to start combat with the nearest available friendly. Combatants remain visible when detached from stacks; their health and combat stats are shown in inspection.
-- Select a card to inspect its source description and runtime health/food/durability. Sell card and sell stack are separate commands.
-- Space toggles pause. Buttons set speed. WASD pans the camera; mouse wheel zooms.
-- Main's shop is resolved from its `TradeManager.offeredPacks`, including supported prefab overrides. It does not sell every pack in the catalog. Locks use completed quest count; buying uses available coins.
-- End day feeds villagers; at automatic day-end choose Feed villagers. Sell excess cards before Start next day. Starvation can end the game.
-- Quests displays active Main quests and completion count. Recipes only displays discovered recipes.
-- Save writes the current game; Save & title refuses to close on save failure. New game does not immediately overwrite an existing disk save. Continue does not advance time while on the title.
+- Click a pack to draw. Right-click selects without opening. Drag a card and its
+  trailing cards to another eligible stack, or onto open space to split/move.
+  Releasing over a UI panel cancels dragging.
+- Bottom buttons open Market & controls and Inspect & journal. Sidebars start
+  collapsed so the source perspective camera's starter area is not covered.
+- Select a card to inspect source text and state. Sell card and sell stack are
+  separate commands. Currency can be dropped onto a chest; a sole selected chest
+  can withdraw a coin. Source matrix and active-crafting eligibility apply.
+- Drop a single equipment card onto a character to equip. Unequip returns gear.
+  Select an enemy and Engage to start combat with the nearest available friendly.
+  Autonomous mobs also move, produce items and engage using imported AI settings.
+- Space pauses. Buttons select speed. WASD or middle-drag pans; the wheel zooms.
+  Imported camera metadata supplies perspective FOV, clip planes and source pose.
+- Scene-specific shops expose their configured packs, quest locks and prices.
+  Buying is a whole-price button, not the source drag-to-vendor installment UI.
+- End day feeds villagers, then requires selling excess cards before advancing.
+  Daily encounters and friendly-mode filtering are connected. Starvation can end
+  a session. Quests and discovered recipes have separate ledgers.
+- Completing actual TravelRecipes changes Main/Island, vendors, quests and clock;
+  scene contents and timers persist. Save & title stays open if saving fails.
 
-## Automated checks
+## Geometry and placement
 
-```sh
-bash tools/test_godot.sh res://tests/godot/test_ui_smoke.gd
-```
+The model retains source X/Z. The view reflects Z consistently for cards, board,
+lighting, camera and pointer rays. The original imported FBX board uses its real
+vertex/morph bounds; without media a generated surface uses verified source
+12x8-to-24x16 bounds. Card geometry uses source colliders even without textures.
+Original shaders, fonts, frame/slot artwork and card meshes are not reproduced.
 
-The runner uses temporary HOME/XDG directories, avoiding the player's saves. With data, this checks title/new/continue, source starter opening, generated card nodes, stack/craft/split integration, inspection, pause, sale, recipe ledger, save/restore, repeated new-game view cleanup, day feeding/capacity/continuation, equipment drops, combat engagement, equipment/combat restoration and failed Continue preservation and failed-save refusal to leave the live board. Without data it explicitly checks the blocked/missing-data path instead. The output distinguishes these runs. This headless test is not mouse/visual acceptance.
+Stack footprints include the source margin, trailing step and first-card size.
+The source iteration-limited separation solver handles stack overlap and board
+shrink. Pack draws keep the pack locked and remove the former artificial sideways
+spawn. Draws, purchases and passive production attempt eligible nearby attachment.
+See `board-layout.md` for the boundary between exact target math and approximate
+broad phase. Combat rectangles and source animation timing remain separate work.
 
-## Manual acceptance still required
+Source sound mappings play pickup/drop, purchases, sales, normal craft and combat
+feedback when the private WAV files exist. Missing background music stays silent.
+No listening-level validation has been performed.
 
-- Launch at 1440×900 and 1280×800: text legibility, clipping, scrollable eight-vendor shop, orthographic card labels, exposed stack headers.
-- Open all starter slots. Drag Villager onto Berry Bush, observe recipe progress, pause/resume, wait for food, then split the villager tail.
-- Try disallowed stack pairs. Release a dragged card over each UI panel, then drag again; there should be no stuck mouse state.
-- Pan and zoom, then drag near the board edge. Verify all created cards remain accessible.
-- Save, return to title, Continue twice, and New game. Verify no stale card titles or invisible reused card nodes. Check corrupt-primary backup recovery separately with disposable saves.
-- Feed with enough and insufficient food; exceed capacity and sell down; verify next-day and game-over flows.
-- Equip and unequip an item; check class-change labels and combat stats. Engage an enemy, pause, save/continue mid-fight, and verify deaths and returned survivors.
-- Check vendor locks, insufficient funds, repeated buys, all quest text and discovered recipe scrolling against source data.
+## Checks and remaining acceptance
 
-## Known scope limits
+Run `bash tools/test_all.sh`. Tests use temporary HOME/XDG directories and do not
+write player saves. Missing-data, synthetic, source-data and cached-FBX checks are
+reported separately. `migration-progress.md` records the latest verified counts.
 
-The UI is a new layout, not a reproduction of the Unity Title/Main/Island composition. Only Main starts here; Island/travel, encounter presentation, original animations, audio, cursor effects and original art are not implemented in this shell. Combat uses an explicit engagement button, not source-equivalent automatic overlap detection or animated battle presentation. Equipment has basic drop/unequip controls, not source-equivalent equipment slot artwork. Buying currently provides a whole-price button, not a drag-to-vendor installment UI. Selling is through explicit controls, not a 3D buyer drop zone. No Unity runtime was launched.
+Still required: rendered legibility/clipping at 1440x900 and 1280x800; manual
+mouse/keyboard/touch acceptance; source animation/combat presentation; listening
+checks; Windows native execution and export packaging. There is no display server
+in the current cloud environment. Unity was not launched, per the user's request.
 
-## Latest automated result
-
-Godot 4.6.3: 61/61 real-data UI smoke checks passed after combat/equipment integration. Earlier missing-data branch: 4/4 passed. Main scene launched headlessly without script errors. No display server was available for screenshot capture or human visual/input acceptance. These results are separate from visual parity.
-
-## Subsequent integrated features
-
-Main/Island travel is now connected to actual TravelRecipe completion. Scene
-vendors, quests and persisted clocks change together. Save/Continue uses the
-multi-scene campaign envelope, including validated legacy session adoption.
-Friendly mode filters aggressive encounters. Daily encounters are connected after
-feeding/selling. Currency stacks can be dropped on chests and a selected sole
-chest can withdraw coins. Optional private original card art, prefab colors and
-collider sizes now bind to views; missing media does not create fake source art.
-These updates supersede the earlier Main-only/no-travel limits, but not the
-unverified visual/manual-input acceptance boundary.
-
-## AI, mesh and sound checkpoint
-
-The board now wires source-enabled mob AI and passive production with saved timer
-state. Board footprints use the source stack step and imported dimensions; bounds
-come from actual FBX vertices/morphs (12×8 base, 24×16 full Scale target), not the
-misleading union AABB. When the private import cache exists the original board
-FBX and its material slots render; otherwise an explicitly generated surface
-uses those verified bounds. Board shrink clamps stacks. Current battle-position
-adapter averages fighters rather than reproducing the original combat rectangle.
-
-Imported source SFX now play for pickup/drop, purchases, sales, normal crafts and
-combat results. Missing background music remains silent. Source animation delays,
-listening-level validation and exact mixer/presentation timing remain unverified.
-UI smoke now passes 120 checks both with temporary fallback assets and the real
-project import cache. Resource teardown drains queued audio commands in tests.
+The HUD is an original functional layout, not the original Title/Main/Island UI.
+Camera pan is immediate rather than Unity SmoothDamp. No claim of exact physics
+query ordering, shader parity, screenshots or final playability acceptance is made.
