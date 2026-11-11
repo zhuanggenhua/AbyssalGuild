@@ -36,6 +36,8 @@ SUITES = (
     ("test_ai_placement_board", r"AI placement board: [1-9]\d*/[1-9]\d* passed"),
     ("test_crafting_order_board", r"Crafting order board clock: [1-9]\d*/[1-9]\d* passed"),
     ("test_card_feedback_board", r"Card feedback board checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_day_clock_board", r"(?s)Day clock private resource bindings: verified.*Day clock board: [1-9]\d* checks, 0 failures"),
+    ("test_journal_groups", r"Journal groups: [1-9]\d*/[1-9]\d* checks passed"),
     ("test_card_motion_board", r"Card motion board: [1-9]\d*/[1-9]\d* passed"),
     ("test_title_gameplay_prefs_board", r"Title gameplay prefs board: [1-9]\d* checks, 0 failures"),
     ("test_chest_click_lifecycle", r"Chest click lifecycle: [1-9]\d* checks, 0 failures"),

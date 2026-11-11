@@ -215,3 +215,22 @@ Successful chest clicks return to the original press position after raw offset
 coin creation, and picking up an interpolating singleton now aligns its held
 root with its visible pose. [Chest lifecycle](chest-click-lifecycle.md) includes
 actual headless pointer routing and rejects duplicate or newly phase-locked input.
+
+
+## Source clock and grouped journal
+
+The persistent day clock now binds the scene's source progress tint and private
+pace icons, with Normal/Fast/Paused cycling and explicit text fallback when art
+is absent. Actual day-end transitions hide source clock/stats and close the
+journal once while retaining the separate required day action. Current scene
+headings follow Main/Island. See [day clock](day-clock-ui.md).
+
+Recipe categories and source quest groups now have clickable collapse, source
+header tint, discovery filtering and stable completion/activation row order.
+Scene changes reset this transient UI state; group metadata cannot mark content
+read or activate stale/hidden rows. See [journal groups](journal-groups.md).
+
+Native layout and inline journal detail still differ from the source Canvas and
+hover panel. Journal closure is immediate rather than its source slide; the
+referenced TMP font is absent from the locked source subtree. Rendered/platform
+acceptance and the other cross-engine approximations above remain unresolved.

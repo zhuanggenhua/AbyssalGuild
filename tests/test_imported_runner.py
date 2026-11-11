@@ -21,6 +21,8 @@ MARKERS = {
     "test_card_feedback_board": "Card feedback board checks: 1 passed / 1 total",
     "test_vendor_unlock_board": "Vendor unlock board checks: 1 passed / 1 total",
     "test_navigation_ui": "Navigation UI checks: 1 passed / 1 total",
+    "test_day_clock_board": "Day clock private resource bindings: verified\nDay clock board: 1 checks, 0 failures",
+    "test_journal_groups": "Journal groups: 1/1 checks passed",
     "test_card_motion_board": "Card motion board: 1/1 passed",
     "test_title_gameplay_prefs_board": "Title gameplay prefs board: 1 checks, 0 failures",
     "test_chest_click_lifecycle": "Chest click lifecycle: 1 checks, 0 failures",
@@ -142,13 +144,16 @@ class ImportedRunnerTests(unittest.TestCase):
         (self.root / "assets/imported/manifest.json").write_bytes(canonical(self.manifest))
 
     def run_fixture(self, **extra):
+        # Leave process startup headroom under parallel import/test load. The
+        # intentional hangs still sleep 30s and must be killed after 2s; these
+        # fixture-only budgets do not change the real engine watchdog defaults.
         before = {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
-        environment = dict(os.environ, GODOT=str(self.engine), TMPDIR=str(self.base), GODOT_IMPORT_TIMEOUT="5",
-                           GODOT_TEST_TIMEOUT="5", FIXTURE_ROOT=str(self.root), CALL_LOG=str(self.log),
+        environment = dict(os.environ, GODOT=str(self.engine), TMPDIR=str(self.base), GODOT_IMPORT_TIMEOUT="15",
+                           GODOT_TEST_TIMEOUT="15", FIXTURE_ROOT=str(self.root), CALL_LOG=str(self.log),
                            FAKE_MARKERS=json.dumps(MARKERS))
         environment.update(extra)
         result = subprocess.run(["bash", str(self.root / "tools/test_imported.sh")], env=environment,
-                                capture_output=True, text=True, timeout=15)
+                                capture_output=True, text=True, timeout=90)
         after = {str(p.relative_to(self.root)): p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
         self.assertEqual(before, after, "checkout files/caches/sidecars stay byte-identical")
         self.assertEqual([], list(self.base.glob("abyssal-imported-*")), "disposable project is removed")
@@ -222,7 +227,7 @@ class ImportedRunnerTests(unittest.TestCase):
         for mode, code in (("error", 1), ("nonzero", 17), ("timeout", 124)):
             with self.subTest(mode=mode):
                 self.log.unlink(missing_ok=True)
-                result, calls = self.run_fixture(FAKE_MODE=mode, GODOT_IMPORT_TIMEOUT="0.2")
+                result, calls = self.run_fixture(FAKE_MODE=mode, GODOT_IMPORT_TIMEOUT="2")
                 self.assertEqual(code, result.returncode, result.stdout + result.stderr)
                 self.assertEqual(["import"], [c["phase"] for c in calls])
 
@@ -248,13 +253,13 @@ class ImportedRunnerTests(unittest.TestCase):
         self.assertEqual([], calls)
 
     def test_sigterm_stops_import_and_cleans_disposable_project(self):
-        environment = dict(os.environ, GODOT=str(self.engine), TMPDIR=str(self.base), GODOT_IMPORT_TIMEOUT="5",
-                           GODOT_TEST_TIMEOUT="5", FIXTURE_ROOT=str(self.root), CALL_LOG=str(self.log),
+        environment = dict(os.environ, GODOT=str(self.engine), TMPDIR=str(self.base), GODOT_IMPORT_TIMEOUT="15",
+                           GODOT_TEST_TIMEOUT="15", FIXTURE_ROOT=str(self.root), CALL_LOG=str(self.log),
                            FAKE_MARKERS=json.dumps(MARKERS), FAKE_MODE="timeout")
         process = subprocess.Popen(["bash", str(self.root / "tools/test_imported.sh")], env=environment,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 15
             while not self.log.exists() and time.monotonic() < deadline:
                 time.sleep(0.02)
             self.assertTrue(self.log.exists(), "synthetic import started")
@@ -277,7 +282,7 @@ class ImportedRunnerTests(unittest.TestCase):
         for mode, code in (("error", 1), ("timeout", 124)):
             with self.subTest(mode=mode):
                 self.log.unlink(missing_ok=True)
-                result, calls = self.run_fixture(FAKE_MODE=mode, FAIL_PHASE="test_imported_resources", GODOT_TEST_TIMEOUT="0.2")
+                result, calls = self.run_fixture(FAKE_MODE=mode, FAIL_PHASE="test_imported_resources", GODOT_TEST_TIMEOUT="2")
                 self.assertEqual(code, result.returncode)
                 self.assertEqual("test_imported_resources", calls[-1]["phase"])
 

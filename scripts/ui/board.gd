@@ -18,6 +18,7 @@ const CardHoverView = preload("res://scripts/ui/card_hover_view.gd")
 const CraftProgressView = preload("res://scripts/ui/craft_progress_view.gd")
 const NavigationInput = preload("res://scripts/ui/navigation_input.gd")
 const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
+const DayClock = preload("res://scripts/ui/day_clock.gd")
 const TitleGameplayPrefs = preload("res://scripts/ui/title_gameplay_prefs.gd")
 const OptionsAdapter = preload("res://scripts/ui/options_adapter.gd")
 const TradeLayout = preload("res://scripts/model/trade_layout.gd")
@@ -62,6 +63,11 @@ var trade_activated: Dictionary = {}
 var vendor_unlock = VendorUnlockPresenter.new()
 var ledger_visible_ids: Dictionary = {}
 var ledger_key: String = ""
+var ledger_expansion: Dictionary = {}
+var ledger_visible_groups: Dictionary = {}
+var ledger_session_id: int = 0
+var ledger_scene_name: String = ""
+var ledger_quest_order: Array = []
 var collection_refresh_pending: bool = false
 var active_slot: int = 0
 var selected_slot: int = 0
@@ -100,6 +106,8 @@ var drag_start_position := Vector3.ZERO
 var hud: Control
 var title_panel: PanelContainer
 var title_status: Label
+var day_clock
+var market_heading: Label
 var status: Label
 var inspection: Label
 var ledger: RichTextLabel
@@ -250,6 +258,9 @@ func _build_ui() -> void:
 	var summary := HBoxContainer.new()
 	summary.add_theme_constant_override("separation", 18)
 	top.add_child(summary)
+	day_clock = DayClock.new()
+	summary.add_child(day_clock)
+	day_clock.pressed.connect(_cycle_clock_pace)
 	status = _label("", summary, 19)
 	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# Keep the one day action outside both collapsible sidebars. Critical cycle
@@ -259,7 +270,7 @@ func _build_ui() -> void:
 	var left := _panel(hud, Rect2(18, 100, 248, 600))
 	market_panel = left.get_parent().get_parent()
 	market_panel.hide()
-	_label("STACKCRAFT / MAIN", left, 22)
+	market_heading = _label("STACKCRAFT", left, 22)
 	pause_button = _button("Pause [Space]", left, _toggle_pause)
 	var speeds := HBoxContainer.new()
 	left.add_child(speeds)
@@ -422,6 +433,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	day_clock.configure(catalog.data, session.scene_name, visual_assets)
 	_clear_card_feedback()
 	vendor_unlock.cancel()
 	_cancel_archive_slots()
@@ -505,6 +517,7 @@ func _process(delta: float) -> void:
 		_sync_views(delta)
 		return
 	session.tick(delta)
+	day_clock.sync(session, running, _ui_pause_active())
 	equipment_display.advance(scaled_delta)
 	_sync_views(delta)
 	refresh_clock += delta
@@ -924,7 +937,10 @@ func _refresh() -> void:
 	_sync_trade_zones()
 	_sync_views()
 	var stats: Dictionary = session.stats()
-	status.text = "Day %d  ·  %.0f / %.0f s  ·  %s\nCoins %d  ·  Food %d / %d  ·  Cards %d / %d" % [session.day, session.elapsed, session.day_duration, session.phase.to_upper() + (" / PAUSED" if session.paused else " / %.0fx" % session.speed), stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit]
+	day_clock.sync(session, running, _ui_pause_active())
+	market_heading.text = "STACKCRAFT / " + session.scene_name.to_upper()
+	status.text = "Coins %d  ·  Food %d / %d  ·  Cards %d / %d\n%s" % [stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit, "PAUSED" if session.paused else "%.0fx" % session.speed]
+	status.visible = running and session.phase == "playing"
 	pause_button.text = "Resume [Space]" if session.paused else "Pause [Space]"
 	pause_button.disabled = not running or _ui_pause_active() or session.phase != "playing"
 	for button in speed_buttons.values(): button.disabled = pause_button.disabled
@@ -953,40 +969,43 @@ func _refresh() -> void:
 	_refresh_ledger()
 
 func _refresh_ledger() -> void:
-	var rows: Array = []
-	if active_tab == "quests":
-		rows.append({"id": "", "text": "Active quests\n"})
-		for instance in session.quest_tracker.active_quests:
-			var fields: Dictionary = session.quest_tracker.definitions.get(instance.id, {})
-			rows.append({"id": str(instance.id), "text": "%s  (%d/%d)\n%s\n" % [fields.get("title", instance.id), instance.current_amount, int(fields.get("targetAmount", 1)), fields.get("description", "")]})
-		rows.append({"id": "", "text": "Completed: %d\n" % session.completed_quests})
-		for instance in session.quest_tracker.completed_quests:
-			var fields: Dictionary = session.quest_tracker.definitions.get(instance.id, {})
-			rows.append({"id": str(instance.id), "text": "✓ %s\n%s\n" % [fields.get("title", instance.id), fields.get("description", "")]})
-	else:
-		for recipe in catalog.data.get("recipes", []):
-			var id: String = str(recipe.fields.get("id", ""))
-			if not session.discovered_recipes.has(id): continue
-			var ingredients: Array[String] = []
-			for ingredient in recipe.fields.get("requiredIngredients", []):
-				ingredients.append("%d %s" % [int(ingredient.get("count", 1)), _name(catalog.ref_guid(ingredient.get("card", {})))])
-			rows.append({"id": id, "text": "%s → %s\n" % [" + ".join(ingredients), _name(catalog.ref_guid(recipe.fields.get("resultingCard", {})))]})
-		if rows.is_empty(): rows.append({"id": "", "text": "Discover recipes by combining cards or opening packs."})
-	for row in rows:
-		row["unread"] = not row.id.is_empty() and session.collection.is_unread(row.id)
+	if not ledger.meta_clicked.is_connected(_on_ledger_group_clicked):
+		ledger.meta_clicked.connect(_on_ledger_group_clicked)
+	if ledger_session_id != session.get_instance_id() or ledger_scene_name != session.scene_name:
+		ledger_session_id = session.get_instance_id()
+		ledger_scene_name = session.scene_name
+		ledger_expansion.clear()
+		ledger_quest_order.clear()
+		ledger_key = ""
+	ledger_quest_order = preload("res://scripts/ui/journal_groups.gd").reconcile_quest_order(session.quest_tracker, ledger_quest_order)
+	var rows: Array = preload("res://scripts/ui/journal_groups.gd").describe(catalog, session, active_tab, ledger_expansion, ledger_quest_order)
 	var signature: String = active_tab + str(rows)
 	if signature == ledger_key: return
 	ledger_key = signature
 	var scroll: float = ledger.get_v_scroll_bar().value
 	ledger.clear()
 	ledger_visible_ids.clear()
+	ledger_visible_groups.clear()
 	for row in rows:
-		if not row.id.is_empty():
+		if not row.group.is_empty():
+			ledger_visible_groups[row.group] = true
+			# Typed metadata prevents collisions with raw collection IDs.
+			ledger.push_meta({"journal_group": row.group})
+			ledger.push_color(preload("res://scripts/ui/journal_groups.gd").header_color(catalog, active_tab))
+		elif not row.id.is_empty():
 			ledger_visible_ids[row.id] = true
 			ledger.push_meta(row.id)
 		ledger.add_text(("NEW · " if row.unread else "") + row.text + "\n")
-		if not row.id.is_empty(): ledger.pop()
+		if not row.group.is_empty(): ledger.pop()
+		if not row.id.is_empty() or not row.group.is_empty(): ledger.pop()
 	ledger.get_v_scroll_bar().value = scroll
+
+func _on_ledger_group_clicked(meta: Variant) -> void:
+	if not meta is Dictionary or meta.size() != 1 or not meta.get("journal_group") is String: return
+	if not ledger.is_visible_in_tree() or not ledger_visible_groups.has(meta.journal_group): return
+	var key: String = meta.journal_group
+	ledger_expansion[key] = not ledger_expansion.get(key, true)
+	_refresh_ledger()
 
 func _on_ledger_hover(meta: Variant) -> void:
 	if not meta is String or not ledger.is_visible_in_tree() or not ledger_visible_ids.has(meta): return
@@ -1024,6 +1043,12 @@ func _refresh_market_labels() -> void:
 		vendor_buttons[guid].text = "%s · %d coins%s%s" % [_name(guid), price, " · locked" if session.completed_quests < minimum else "", " · " + tracker if not tracker.is_empty() else ""]
 		vendor_buttons[guid].tooltip_text = vendor_buttons[guid].text
 		vendor_buttons[guid].disabled = not _allows_card_actions() or session.completed_quests < minimum or currency < price
+
+func _cycle_clock_pace() -> void:
+	if not running or title_panel.visible or _ui_pause_active() or session.phase != "playing": return
+	session.cycle_time_pace()
+	feedback.play_event("Click")
+	_refresh()
 
 func _toggle_pause() -> void:
 	if _ui_pause_active(): return
@@ -1325,6 +1350,11 @@ func _engage_selected() -> void:
 	_refresh()
 
 func _on_session_event(kind: String, payload: Dictionary) -> void:
+	if kind == "day_ended":
+		detail_panel.hide()
+		day_clock.hide()
+		status.hide()
+		call_deferred("_refresh")
 	if kind == "cycle_focus_requested":
 		_focus_camera_position(payload.target_position, float(payload.duration))
 	elif kind == "cycle_sound":

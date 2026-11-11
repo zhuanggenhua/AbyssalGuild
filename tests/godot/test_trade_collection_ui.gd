@@ -130,7 +130,7 @@ func run() -> void:
 	instance.current_amount = int(board.session.quest_tracker.definitions[quest_id].targetAmount)
 	board.session.quest_tracker._check(instance, board.session)
 	board._refresh()
-	check(board.ledger_visible_ids.has(quest_id) and board.ledger.get_parsed_text().contains("✓"), "completed quest remains individually hoverable in history")
+	check(board.ledger_visible_ids.has(quest_id) and board.ledger.get_parsed_text().contains("√"), "completed quest remains individually hoverable in history")
 	check(board.session.collection.is_unread(quest_id), "quest completion does not mark its row read")
 	var signature: String = board._layout_signature()
 	var rng_state: int = board.session.rng.state
@@ -143,7 +143,11 @@ func run() -> void:
 	board.ledger.meta_hover_started.emit("Completed")
 	board.ledger.meta_hover_started.emit("unknown-row")
 	check(board.session.collection.seen_items.size() == seen_after, "repeat hover headers and unknown rows do not create read markers")
-	var recipe: Dictionary = board.catalog.data.recipes[0]
+	var recipe: Dictionary = {}
+	for candidate in board.catalog.data.recipes:
+		if not board.catalog.ref_guid(candidate.fields.get("resultingCard", {})).is_empty():
+			recipe = candidate
+			break
 	var recipe_id: String = str(recipe.fields.id)
 	board.session._discover_recipe(recipe_id)
 	board.active_tab = "recipes"
