@@ -8,6 +8,8 @@ var source_material: ShaderMaterial
 var stat_labels: Dictionary = {}
 var equipment_panel: Node3D
 var _default_state: Dictionary = {}
+var _unflashed_color: Color = Color.WHITE
+var hurt_flash: float = 0.0
 
 func configure(id: int, title: String, category: int, is_pack: bool, visual_assets = null, fields: Dictionary = {}, scene_name: String = "Main", collider_size: Vector3 = Vector3.ZERO) -> void:
 	card_id = id
@@ -97,6 +99,7 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 		equipment_panel = visual_assets.create_equipment_panel(appearance.get("prefab", {}).get("equipment_panel", {}))
 		if equipment_panel != null:
 			add_child(equipment_panel)
+	_unflashed_color = material.albedo_color
 	update_state({})
 
 func update_state(state: Dictionary) -> void:
@@ -119,3 +122,15 @@ func highlight(value: bool) -> void:
 	material.emission_energy_multiplier = 0.25
 	if source_material != null:
 		source_material.set_shader_parameter("selection_emission", Vector3(0.192, 0.4, 0.42) * (0.25 if value else 0.0))
+
+func set_hurt_flash(amount: float) -> void:
+	# A presentation-only input. Selection emission and root/pick pose are untouched.
+	if not is_finite(amount):
+		return
+	hurt_flash = clampf(amount, 0.0, 1.0)
+	if source_material != null:
+		source_material.set_shader_parameter("flash_amount", hurt_flash)
+	elif material != null:
+		# Generated fallback has no original texture composite to flash.
+		material.albedo_color = _unflashed_color.lerp(Color.WHITE, hurt_flash) * (1.0 + hurt_flash * 0.5)
+		material.albedo_color.a = _unflashed_color.a

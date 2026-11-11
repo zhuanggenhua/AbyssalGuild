@@ -1,4 +1,5 @@
 extends Node3D
+const CombatPresentation = preload("res://scripts/ui/combat_presentation.gd")
 const EquipmentDisplay = preload("res://scripts/ui/equipment_display_controller.gd")
 const ImpactFeedback = preload("res://scripts/model/impact_feedback.gd")
 const ImpactView = preload("res://scripts/ui/impact_view.gd")
@@ -26,6 +27,7 @@ var layout_key: String = ""
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
 var combat_rectangles: Dictionary = {}
+var combat_presentation = CombatPresentation.new()
 var equipment_display = EquipmentDisplay.new()
 var pressed_panel: int = -1
 var right_pressed_panel: int = -1
@@ -319,6 +321,9 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	combat_presentation.reset()
+	camera.h_offset = 0
+	camera.v_offset = 0
 	equipment_display.reset()
 	pause_overlay.hide()
 	for zone in trade_views.values(): zone.queue_free()
@@ -363,6 +368,7 @@ func _enter_game() -> void:
 func _process(delta: float) -> void:
 	if not running:
 		return
+	combat_presentation.advance(delta)
 	if _ui_pause_active():
 		# Travel/return use real time even under an external menu pause.
 		session.combat.tick(0.0, delta)
@@ -435,6 +441,13 @@ func _sync_views() -> void:
 				offset = drag_delta
 			views[id].position = Vector3(stack.position.x + offset.x, 0.06 + index * _stack_step().y, -(stack.position.y + offset.y + index * _stack_step().z))
 			views[id].highlight(id == selected)
+	var durations := {0: 0.3, 1: 0.3, 2: session.combat.projectile_duration(2), 3: session.combat.projectile_duration(3)}
+	combat_presentation.visual_assets = visual_assets
+	combat_presentation.scene_name = session.scene_name
+	combat_presentation.sync(session.combat.tasks, views, durations, self)
+	var shake: Vector2 = combat_presentation.camera_offset()
+	camera.h_offset = shake.x
+	camera.v_offset = shake.y
 	_sync_equipment_display()
 
 func _pick_target(screen: Vector2) -> Dictionary:
@@ -880,6 +893,9 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	combat_presentation.reset()
+	camera.h_offset = 0
+	camera.v_offset = 0
 	equipment_display.reset()
 	pressed_panel = -1
 	right_pressed_panel = -1
@@ -1404,9 +1420,10 @@ func _present_impact(payload: Dictionary) -> void:
 	if descriptor.is_empty(): return
 	for sound in descriptor.sounds: feedback.play_event(sound)
 	var defender: int = int(payload.get("defender_id", -1))
+	combat_presentation.hit(defender, descriptor)
 	if not session.cards.has(defender): return
 	# Snapshot before the model can delete a lethal target. No gameplay awaits/RNG.
 	var target: Vector2 = session.card_target_position(defender)
 	var popup = ImpactView.new()
 	add_child(popup)
-	popup.configure(descriptor, Vector3(target.x, 0.12, -target.y), str(payload.result.get("type", "")))
+	popup.configure(descriptor, Vector3(target.x, 0.12, -target.y), str(payload.result.get("type", "")), visual_assets, session.scene_name, int(payload.result.get("advantage", 0)))

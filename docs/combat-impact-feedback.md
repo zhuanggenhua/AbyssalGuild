@@ -81,9 +81,11 @@ save/restore are tested. `combat-feedback-ui.md` documents the live hookup.
 Attack audio occurs at start and hit plus Critical occur at impact. Generated
 one-second damage popups survive card deletion, and source stat labels show health.
 
-Original jumps/projectiles, HitUI image/layout, hurt flash/punch, camera shake and
-puff rendering are still separate work. These descriptors contain audited explicit
-source parameters, not completed GPU animation or DOTween-curve equivalence.
+Jump/projectile presentation, private HitUI images, hurt flash/punch and camera
+shake are now connected in `combat-presentation.md` and `combat-sprite-binding.md`.
+Puff is still separate work. Adapters use audited explicit source parameters but
+retain documented native interpolation/noise/font differences, not GPU acceptance
+or DOTween-curve equivalence.
 Never introduce gameplay waits from UI tweens or hit listeners; the model owns
 its two clocks and saveable phase transitions.
 

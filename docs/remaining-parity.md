@@ -32,8 +32,9 @@ The full private source and assets now pass the 1327-file source lock.
 ## Presentation and platform acceptance
 
 - Original source UI composition, complete rendering/lighting parity, original fonts,
-  drag/craft/feed/death/projectile animations, camera
-  smoothing/shake and source sound timing remain incomplete.
+  drag/craft/feed/death puff animations, camera smoothing and some source sound
+  timing remain incomplete. Combat jump/projectile/hurt/shake adapters are now
+  connected but use documented interpolation/noise approximations.
 - Original Card/Pack FBX and independently rewritten UV/material composition are
   now bound when complete private inputs exist. This has structural/resource
   coverage, not pixel/GPU acceptance. Source-referenced price/health/nutrition labels
@@ -67,7 +68,9 @@ zero-health merge behavior is retained. Native removal safely cancels invalid
 pending references instead of following source dangling-coroutine failures.
 The UI advances real combat time while its menu pauses scaled gameplay, emits
 attack and additive hit/critical sounds separately, and creates generated damage
-popups. Original attack/projectile/hurt/shake/puff animation remains incomplete.
+popups. Attack/return motion, private Arrow/Magic and HitUI art, hurt flash/punch and
+camera shake are now connected through a read-only presentation adapter. Native
+fonts, easing/noise and current-target approximations remain; puff is incomplete.
 
 Expanded equipment interaction preserves panel toggles, outside-click equipment
 exceptions, day locks and unequip-drag position. Its cosmetic RNG is independent

@@ -245,3 +245,11 @@ func create_card_mesh(appearance_data: Dictionary) -> MeshInstance3D:
 
 func create_equipment_panel(metadata: Dictionary) -> Node3D:
 	return preload("res://scripts/ui/equipment_panel_view.gd").create(self, metadata)
+
+func create_projectile(combat_type: int, scene_name: String = "Main") -> Sprite3D:
+	var record: Dictionary = scene_configuration(scene_name).get("combat", {}).get("projectiles", {}).get(str(combat_type), {})
+	return preload("res://scripts/ui/combat_sprite_binding.gd").projectile(self, record)
+
+func create_hit_popup(kind: String, damage_text: String, advantage: int, scene_name: String = "Main") -> Node3D:
+	var record: Dictionary = scene_configuration(scene_name).get("combat", {}).get("hit_ui", {})
+	return preload("res://scripts/ui/combat_sprite_binding.gd").hit_popup(self, record, kind, damage_text, advantage)

@@ -5,9 +5,11 @@ import argparse
 import json
 from pathlib import Path
 import shutil
-from import_stackcraft import parse_unity, json_bytes, sha256
+import yaml
+from import_stackcraft import parse_unity, json_bytes, sha256, UnityLoader
 from visual_scene_metadata import apply_overrides, camera_records, light_records, transform_chain
 from card_visual_metadata import annotations
+from combat_visual_metadata import combat_metadata, sprite_metadata
 
 SUPPORTED = {'.png', '.wav', '.fbx'}
 
@@ -48,6 +50,13 @@ def build(source, catalog, output):
             digest = sha256(path)
             result['assets'][guid] = {'source_path': relative, 'path': relative, 'sha256': digest, 'kind': path.suffix.lower()[1:], 'conversion': 'byte-identical copy'}
             result['inputs'][relative] = digest
+            meta = path.with_name(path.name + '.meta')
+            if path.suffix.lower() == '.png' and meta.is_file():
+                document = yaml.load(meta.read_text(encoding='utf-8-sig'), Loader=UnityLoader)
+                sprite = sprite_metadata(document.get('TextureImporter', {}), path.read_bytes())
+                if sprite:
+                    result['assets'][guid]['sprite'] = sprite
+                    result['inputs'][relative + '.meta'] = sha256(meta)
         elif path.suffix.lower() == '.mat':
             for doc in read(guid):
                 if doc['object_type'] != 'Material':
@@ -96,6 +105,8 @@ def build(source, catalog, output):
         config = {'categories': {}, 'boards': [], 'cameras': camera_records(docs), 'lights': light_records(docs)}
         for doc in docs:
             f = doc['fields']
+            if any(key in f for key in ('arrowProjectile', 'magicProjectile', 'hitUIPrefab')):
+                config['combat'] = combat_metadata(f, read)
             if 'cardPrefabs' in f:
                 config['categories'] = {str(e['category']): prefab(e['prefab']['guid']) for e in f['cardPrefabs']}
                 for field in ('packPrefab', 'aggressiveMobPrefab'):

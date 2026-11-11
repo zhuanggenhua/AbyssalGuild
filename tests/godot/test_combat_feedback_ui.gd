@@ -61,7 +61,11 @@ func run() -> void:
 	var elapsed: float = board.session.elapsed
 	var progress: Dictionary = task.progress.duplicate()
 	board.pause_overlay.show()
+	var actor_model_position: Vector2 = board.session.cards[tail].position
+	var camera_position: Vector3 = board.camera.position
 	board._process(0.1)
+	check(board.views[tail].position.y > 0.12 and board.session.cards[tail].position == actor_model_position, "travel animates view without writing saved model pose")
+	check(board.camera.position == camera_position, "presentation leaves navigation camera position unchanged")
 	check(board.session.elapsed == elapsed and task.progress == progress, "menu pause advances no day/progress clock")
 	check(is_equal_approx(task.execution.remaining, 0.2), "menu pause advances real travel once")
 	board._process(0.25)
@@ -73,8 +77,14 @@ func run() -> void:
 	var popup
 	for child in board.get_children():
 		if child is ImpactView: popup = child
-	check(popup != null and popup.caption.text == "7!", "generated critical damage popup")
+	check(popup != null and popup.caption.text == "7!", "semantic critical damage popup remains available")
+	if not board.visual_assets.scene_configuration(board.session.scene_name).get("combat", {}).get("hit_ui", {}).is_empty():
+		check(popup.source_popup != null and not popup.caption.visible, "audited private HitUI replaces generated fallback")
+		check(popup.source_popup.get_node("Damage").text == "7" and popup.source_popup.has_node("Effectiveness"), "private damage/effectiveness semantics preserved")
 	var position: Vector3 = popup.position
+	board.combat_presentation.advance(0.1)
+	board._sync_views()
+	check(is_equal_approx(board.views[enemy].hurt_flash, 0.5), "impact drives CardView flash without replacing selection emission")
 	board.session._remove_card(enemy)
 	check(is_instance_valid(popup) and popup.position == position, "popup owns position after lethal target removal")
 	popup._process(0.4)
