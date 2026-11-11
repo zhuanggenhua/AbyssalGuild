@@ -127,3 +127,14 @@ new-game reset. Eleven optional checks verify real source pack totals.
 
 Also verified: save codec 381, travel 35, factory 29, scene spawn 28, runtime 76,
 special recipes 445, quest integration 70, quests 322, slots 40 and AI 55 checks.
+
+## Board presentation integration
+
+The generated trade-zone labels and market-button tooltips now display
+`pack_progress` counts or COMPLETED. Quest and recipe journal rows use raw-ID
+RichTextLabel metadata; only a visible individual row hover calls `mark_seen`.
+Completed quest history is included. Opening tabs and completing quests do not
+mark rows read. Collection signals defer label-only refresh to avoid reentering
+world mutations during factory events. See `trade-collection-ui.md` and the
+source-backed `test_trade_collection_ui.gd` for the UI checks and remaining
+rendered/manual acceptance limits.

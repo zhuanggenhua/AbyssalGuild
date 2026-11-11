@@ -5,6 +5,8 @@ const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
+const TradeLayout = preload("res://scripts/model/trade_layout.gd")
+const TradeZoneView = preload("res://scripts/ui/trade_zone_view.gd")
 const SaveSlots = preload("res://scripts/model/save_slots.gd")
 const SaveCodec = preload("res://scripts/model/save_codec.gd")
 const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
@@ -23,6 +25,12 @@ var feedback = AudioFeedback.new()
 var slot_root: String = "user://slots"
 var legacy_paths: Array[String] = ["user://session.json", "user://campaign.json"]
 var slots = SaveSlots.new()
+var trade_zones: Array = []
+var trade_views: Dictionary = {}
+var trade_activated: Dictionary = {}
+var ledger_visible_ids: Dictionary = {}
+var ledger_key: String = ""
+var collection_refresh_pending: bool = false
 var active_slot: int = 0
 var selected_slot: int = 0
 var slot_picker: OptionButton
@@ -195,6 +203,7 @@ func _build_ui() -> void:
 	_button("Quests", tabs, func(): active_tab = "quests"; _refresh_ledger())
 	_button("Recipes", tabs, func(): active_tab = "recipes"; _refresh_ledger())
 	ledger = RichTextLabel.new()
+	ledger.meta_hover_started.connect(_on_ledger_hover)
 	ledger.custom_minimum_size = Vector2(210, 260)
 	ledger.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	right.add_child(ledger)
@@ -290,6 +299,13 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	for zone in trade_views.values(): zone.queue_free()
+	trade_views.clear()
+	trade_zones.clear()
+	trade_activated.clear()
+	ledger_key = ""
+	if not session.collection.changed.is_connected(_collection_changed):
+		session.collection.changed.connect(_collection_changed)
 	slots.configure(session.campaign, slot_root)
 	session.campaign.before_travel = _departure_checkpoint
 	session.combat.start_overlap_selector = _combat_start_overlaps
@@ -465,6 +481,17 @@ func _finish_drag(screen: Vector2) -> void:
 	if drag_moved:
 		var stack = session.stacks[session.cards[id].stack_id]
 		var destination: Vector2 = stack.position + drag_delta
+		var trade: Dictionary = _try_trade_drop(id, destination)
+		if trade.terminal:
+			drag_delta = Vector2.ZERO
+			_refresh()
+			return
+		id = int(trade.card_id)
+		if not session.cards.has(id):
+			drag_delta = Vector2.ZERO
+			_refresh()
+			return
+		stack = session.stacks[session.cards[id].stack_id]
 		var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true)
 		if _try_equip_drop(id, destination) or _try_combat_drop(id, destination, target):
 			drag_delta = Vector2.ZERO
@@ -498,6 +525,7 @@ func _finish_drag(screen: Vector2) -> void:
 
 func _refresh() -> void:
 	_update_board_geometry()
+	_sync_trade_zones()
 	_sync_views()
 	var stats: Dictionary = session.stats()
 	status.text = "Day %d  ·  %.0f / %.0f s  ·  %s  |  Coins %d  ·  Food %d / %d  ·  Cards %d / %d" % [session.day, session.elapsed, session.day_duration, session.phase.to_upper() + (" / PAUSED" if session.paused else " / %.0fx" % session.speed), stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit]
@@ -505,12 +533,7 @@ func _refresh() -> void:
 	pause_button.disabled = session.phase != "playing"
 	day_button.text = {"playing": "End day & feed", "feeding": "Feed villagers", "selling": "Sell %d excess cards" % stats.excess, "ready": "Start next day", "game_over": "Game over · return to title"}.get(session.phase, session.phase)
 	day_button.disabled = session.phase == "selling"
-	for guid in vendor_buttons:
-		var fields: Dictionary = catalog.fields(guid)
-		var minimum: int = int(fields.get("minQuests", 0))
-		var price: int = maxi(0, int(fields.get("buyPrice", 3)) - int(session.vendor_payments.get(guid, 0)))
-		vendor_buttons[guid].text = "%s · %d coins%s" % [_name(guid), price, " · locked" if session.completed_quests < minimum else ""]
-		vendor_buttons[guid].disabled = not _allows_card_actions() or session.completed_quests < minimum or stats.currency < price
+	_refresh_market_labels()
 	inspection.text = "Select a card"
 	if session.cards.has(selected):
 		var card = session.cards[selected]
@@ -528,22 +551,77 @@ func _refresh() -> void:
 	_refresh_ledger()
 
 func _refresh_ledger() -> void:
-	var lines: Array[String] = []
+	var rows: Array = []
 	if active_tab == "quests":
-		lines.append("Completed: %d\n" % session.completed_quests)
+		rows.append({"id": "", "text": "Active quests\n"})
 		for instance in session.quest_tracker.active_quests:
 			var fields: Dictionary = session.quest_tracker.definitions.get(instance.id, {})
-			lines.append("%s  (%d/%d)\n%s\n" % [fields.get("title", instance.id), instance.current_amount, int(fields.get("targetAmount", 1)), fields.get("description", "")])
-		if session.quest_tracker.active_quests.is_empty(): lines.append("No active quests. Check scene import if this is unexpected.")
+			rows.append({"id": str(instance.id), "text": "%s  (%d/%d)\n%s\n" % [fields.get("title", instance.id), instance.current_amount, int(fields.get("targetAmount", 1)), fields.get("description", "")]})
+		rows.append({"id": "", "text": "Completed: %d\n" % session.completed_quests})
+		for instance in session.quest_tracker.completed_quests:
+			var fields: Dictionary = session.quest_tracker.definitions.get(instance.id, {})
+			rows.append({"id": str(instance.id), "text": "✓ %s\n%s\n" % [fields.get("title", instance.id), fields.get("description", "")]})
 	else:
 		for recipe in catalog.data.get("recipes", []):
-			if not session.discovered_recipes.has(str(recipe.fields.get("id", ""))): continue
+			var id: String = str(recipe.fields.get("id", ""))
+			if not session.discovered_recipes.has(id): continue
 			var ingredients: Array[String] = []
 			for ingredient in recipe.fields.get("requiredIngredients", []):
 				ingredients.append("%d %s" % [int(ingredient.get("count", 1)), _name(catalog.ref_guid(ingredient.get("card", {})))])
-			lines.append("%s → %s\n" % [" + ".join(ingredients), _name(catalog.ref_guid(recipe.fields.get("resultingCard", {})))])
-		if lines.is_empty(): lines.append("Discover recipes by combining cards or opening packs.")
-	ledger.text = "\n".join(lines)
+			rows.append({"id": id, "text": "%s → %s\n" % [" + ".join(ingredients), _name(catalog.ref_guid(recipe.fields.get("resultingCard", {})))]})
+		if rows.is_empty(): rows.append({"id": "", "text": "Discover recipes by combining cards or opening packs."})
+	for row in rows:
+		row["unread"] = not row.id.is_empty() and session.collection.is_unread(row.id)
+	var signature: String = active_tab + str(rows)
+	if signature == ledger_key: return
+	ledger_key = signature
+	var scroll: float = ledger.get_v_scroll_bar().value
+	ledger.clear()
+	ledger_visible_ids.clear()
+	for row in rows:
+		if not row.id.is_empty():
+			ledger_visible_ids[row.id] = true
+			ledger.push_meta(row.id)
+		ledger.add_text(("NEW · " if row.unread else "") + row.text + "\n")
+		if not row.id.is_empty(): ledger.pop()
+	ledger.get_v_scroll_bar().value = scroll
+
+func _on_ledger_hover(meta: Variant) -> void:
+	if not meta is String or not ledger.is_visible_in_tree() or not ledger_visible_ids.has(meta): return
+	session.collection.mark_seen(meta)
+
+func _collection_changed() -> void:
+	# A discovery may occur halfway through a factory/transaction. Only defer
+	# presentation updates; never reenter geometry, gameplay or save here.
+	if collection_refresh_pending: return
+	collection_refresh_pending = true
+	call_deferred("_refresh_collection_presentation")
+
+func _refresh_collection_presentation() -> void:
+	collection_refresh_pending = false
+	if not running: return
+	_refresh_market_labels()
+	for zone in trade_zones:
+		if trade_views.has(int(zone.index)):
+			trade_views[int(zone.index)].update_caption(zone, _pack_tracker(str(zone.pack_guid)))
+	_refresh_ledger()
+
+func _pack_tracker(guid: String) -> String:
+	if guid.is_empty(): return ""
+	var progress: Dictionary = session.collection.pack_progress(guid, session.discovered_recipes)
+	if int(progress.total) <= 0: return ""
+	return "COMPLETED" if progress.complete else "%d / %d found" % [progress.found, progress.total]
+
+func _refresh_market_labels() -> void:
+	var currency: int = int(session.stats().currency)
+	for guid in vendor_buttons:
+		var fields: Dictionary = catalog.fields(guid)
+		var minimum: int = int(fields.get("minQuests", 0))
+		var price: int = maxi(0, int(fields.get("buyPrice", 3)) - int(session.vendor_payments.get(guid, 0)))
+		var tracker: String = _pack_tracker(guid)
+		vendor_buttons[guid].text = "%s · %d coins%s%s" % [_name(guid), price, " · locked" if session.completed_quests < minimum else "", " · " + tracker if not tracker.is_empty() else ""]
+		vendor_buttons[guid].tooltip_text = vendor_buttons[guid].text
+		vendor_buttons[guid].disabled = not _allows_card_actions() or session.completed_quests < minimum or currency < price
 
 func _toggle_pause() -> void:
 	if session.phase == "playing": session.set_paused(not session.paused)
@@ -718,6 +796,7 @@ func _show_title() -> void:
 	_refresh_slots()
 	for view in views.values(): view.hide()
 	for rectangle in combat_rectangles.values(): rectangle.hide()
+	for zone in trade_views.values(): zone.hide()
 
 func _prepare_quit() -> bool:
 	# Source IsEndingCycle stays set from feeding through ready/game-over.
@@ -1112,3 +1191,56 @@ func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 func _combat_resize_overlaps(task_id: int) -> Array:
 	_sync_combat_layouts()
 	return CombatMergeGeometry.after_resize(task_id, combat_layouts)
+
+func _sync_trade_zones() -> void:
+	var result: Dictionary = TradeLayout.zones(catalog, session.scene_name, session.board_bounds, session.board_top_margin, session.completed_quests, session.vendor_payments, trade_activated)
+	trade_zones = result.zones
+	var present: Dictionary = {}
+	for zone in trade_zones:
+		var index: int = int(zone.index)
+		present[index] = true
+		if zone.kind == "vendor" and zone.active: trade_activated[str(zone.pack_guid)] = true
+		if not trade_views.has(index):
+			var view = TradeZoneView.new()
+			add_child(view)
+			trade_views[index] = view
+		trade_views[index].configure(zone, _pack_tracker(str(zone.pack_guid)))
+	for index in trade_views.keys():
+		if not present.has(index):
+			trade_views[index].queue_free()
+			trade_views.erase(index)
+	if not result.errors.is_empty(): notice.text = "Trade geometry unavailable: " + "; ".join(result.errors)
+
+func _try_trade_drop(card_id: int, destination: Vector2) -> Dictionary:
+	var outcome := {"terminal": false, "accepted": false, "card_id": card_id}
+	if not _allows_card_actions() or not session.cards.has(card_id): return outcome
+	_sync_trade_zones()
+	var zone: Dictionary = TradeLayout.nearest_zone(trade_zones, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
+	if zone.is_empty(): return outcome
+	# Select nearest physical zone BEFORE checking whether it can trade. Never
+	# retry a farther accepting zone when this one rejects the dropped tail.
+	var source = session.stacks.get(session.cards[card_id].stack_id)
+	if source == null: return outcome
+	var ids: Array = source.card_ids.slice(source.card_ids.find(card_id))
+	var snapshot: Dictionary = TradeLayout.card_snapshots(session, ids)
+	if not snapshot.ok or not TradeLayout.can_trade(zone, snapshot.cards):
+		notice.text = "This trade zone cannot accept these cards."
+		return outcome
+	var stack_id: int = session.split_stack(card_id, destination)
+	var dropped = session.stacks[stack_id]
+	if zone.kind == "buyer":
+		outcome.accepted = session.sell_stack(stack_id)
+		outcome.terminal = outcome.accepted and dropped.card_ids.is_empty()
+		notice.text = "Stack sold." if outcome.accepted else "Buyer rejected this stack."
+	else:
+		var result: Dictionary = session.pay_vendor(str(zone.pack_guid), stack_id)
+		outcome.accepted = result.accepted
+		outcome.terminal = result.get("terminal", false)
+		if result.accepted:
+			notice.text = "Pack purchased." if int(result.pack_id) >= 0 else "Vendor payment saved: %d coins." % int(result.paid)
+		else:
+			notice.text = "Vendor rejected this payment."
+	# Accepted chest/excess-coin payments are NOT terminal: resolve remaining
+	# cards through equipment/combat/ordinary placement exactly once.
+	if not outcome.terminal and not dropped.card_ids.is_empty(): outcome.card_id = int(dropped.card_ids[0])
+	return outcome

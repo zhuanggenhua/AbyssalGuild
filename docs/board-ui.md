@@ -33,10 +33,13 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
 - Space pauses. Buttons select speed. WASD or middle-drag pans; the wheel zooms.
   Imported camera metadata supplies perspective FOV, clip planes and source pose.
 - Scene-specific shops expose their configured packs, quest locks and prices.
-  Buying is a whole-price button, not the source drag-to-vendor installment UI.
+  Source-positioned buyer/vendor plates now accept dropped card tails, including
+  partial coin and chest payments. Whole-price buy buttons remain available.
+  Vendor labels show collection counts or COMPLETED.
 - End day feeds villagers, then requires selling excess cards before advancing.
   Daily encounters and friendly-mode filtering are connected. Starvation can end
-  a session. Quests and discovered recipes have separate ledgers.
+  a session. Active/completed quests and discovered recipes have separate ledgers;
+  hovering an individual row marks its raw item ID read. Opening tabs marks nothing.
 - Completing actual TravelRecipes changes Main/Island, vendors, quests and clock;
   scene contents and timers persist. Save & title stays open if saving fails.
 - New commits a fresh slot without overwriting existing games. Confirmed Start Day
@@ -88,3 +91,6 @@ query ordering, shader parity, screenshots or final playability acceptance is ma
 ## Slot and combat-merge regression suites
 
 `test_slot_ui.gd` covers the new picker/checkpoint/phase workflow. `test_combat_board.gd` additionally covers automatic pre-start and post-resize rectangle overlap merging through pure geometry callbacks, replacing old task rectangles without returning still-fighting units to the board. This uses target-pose rectangle/collider geometry and registration order, not a claim of Unity physics hit order or animated combat parity.
+
+Trade-zone geometry, drop order, nonterminal payments and per-item collection
+presentation are documented in `trade-collection-ui.md`.

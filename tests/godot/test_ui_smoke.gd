@@ -83,7 +83,7 @@ func run() -> void:
 	check(not board.session.cards.has(wood), "sell control removes card")
 	board.active_tab = "recipes"
 	board._refresh_ledger()
-	check(not board.ledger.text.is_empty(), "discovery ledger renders")
+	check(not board.ledger.get_parsed_text().is_empty(), "discovery ledger renders")
 	# Exercise day controls with actual source cards, not a substituted catalog.
 	while board.session.stats().nutrition < board.session.stats().nutrition_need:
 		board.session.spawn_card(board.catalog.find_by_name("Berry"), Vector2(4, 4))
@@ -200,6 +200,7 @@ func _check_scene_ui(board, scene_name: String, vendor_count: int) -> void:
 	var vendors: Array = board.SceneConfig.offered_packs(board.catalog, scene_name)
 	check(board.vendor_guids == vendors and vendors.size() == vendor_count, scene_name + " uses only its source vendors")
 	check(board.vendor_buttons.keys() == vendors, scene_name + " vendor buttons rebuilt without stale vendors")
+	check(board.trade_zones.size() == vendor_count + 1 and board.trade_views.size() == vendor_count + 1, scene_name + " source trade zones rebuild without stale scene nodes")
 	var actual_quests: Array = board.session.quest_tracker.definitions.keys()
 	actual_quests.sort()
 	check(actual_quests == _scene_quest_ids(board, scene_name), scene_name + " exact source quest set configured")

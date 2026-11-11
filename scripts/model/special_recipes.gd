@@ -72,7 +72,7 @@ static func _grow(session, stack, recipe: Dictionary) -> void:
 	if index > 0:
 		var separate = StackModel.new(session._next_id)
 		session._next_id += 1
-		separate.position = session.cards[seed].position + Vector2(_card_width(session.catalog, output), 0)
+		separate.position = session.cards[seed].position + Vector2(_card_width(session.catalog, output, session.scene_name), 0)
 		separate.card_ids = stack.card_ids.slice(index)
 		stack.card_ids.resize(index)
 		session.stacks[separate.id] = separate
@@ -106,7 +106,7 @@ static func _research(session, stack, recipe: Dictionary) -> void:
 ## Also suitable for the session's pack-recipe path: clone the actual scene template.
 static func spawn_recipe_card(session, recipe_guid: String, position: Vector2, ignored_stack_id: int = -1) -> int:
 	var recipe: Dictionary = session.catalog.fields(recipe_guid)
-	var manager: Dictionary = _card_manager(session.catalog)
+	var manager: Dictionary = _card_manager(session.catalog, session.scene_name)
 	var template: Dictionary = session.catalog.fields(session.catalog.ref_guid(manager.get("recipeCardTemplate", {})))
 	if template.is_empty():
 		return -1
@@ -132,23 +132,29 @@ static func spawn_recipe_card(session, recipe_guid: String, position: Vector2, i
 	session.catalog.definitions[key] = {"guid": key, "script_class": "CardDefinition", "fields": fields}
 	return session.spawn_card(key, position, -1, {"ignored_stack_id": ignored_stack_id})
 
-static func _card_manager(catalog) -> Dictionary:
+static func _card_manager(catalog, scene_name: String = "Main") -> Dictionary:
 	for scene in catalog.data.get("scenes", []):
+		if scene.get("name", "") != scene_name:
+			continue
 		for document in scene.get("documents", []):
 			if document.get("script_class", "") == "CardManager":
 				return document.fields
 	return {}
 
-static func _card_width(catalog, guid: String) -> float:
+static func _card_width(catalog, guid: String, scene_name: String = "Main") -> float:
 	var category: int = int(catalog.fields(guid).get("category", 0))
 	var prefab_guid: String = ""
-	for binding in _card_manager(catalog).get("cardPrefabs", []):
+	var manager: Dictionary = _card_manager(catalog, scene_name)
+	for binding in manager.get("cardPrefabs", []):
 		if int(binding.category) == category:
 			prefab_guid = catalog.ref_guid(binding.prefab)
+			if not prefab_guid.is_empty():
+				break
+	var settings: Dictionary = catalog.fields(catalog.ref_guid(manager.get("cardSettings", {})))
 	for prefab in catalog.data.get("referenced_prefabs", []):
 		if str(prefab.guid) == prefab_guid:
 			for document in prefab.get("documents", []):
 				if document.get("object_type", "") == "BoxCollider":
-					return float(document.fields.m_Size.x) + float(catalog.settings("CardSettings").get("margin", {}).get("x", 0))
+					return float(document.fields.m_Size.x) + float(settings.get("margin", {}).get("x", 0))
 	# Missing geometry: no invented displacement. Source assets contain the size.
 	return 0.0
