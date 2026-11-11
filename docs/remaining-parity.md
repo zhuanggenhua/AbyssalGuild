@@ -96,3 +96,8 @@ runners; no GPU, pointer or listening acceptance is implied.
 
 Source assets and generated content remain private and ignored. Public CI tests
 only public code/synthetic behavior and explicitly skips licensed-content checks.
+
+Puff metadata and standalone CPU simulation now cover active-scene references,
+birth ranges, weighted size curves and separate real/scaled clocks. This is not
+a visible effect yet: model event sites and native rendering remain pending; the
+source built-in shader and exact Unity random/renderer behavior are unresolved.

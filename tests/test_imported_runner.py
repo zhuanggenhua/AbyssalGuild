@@ -20,6 +20,7 @@ MARKERS = {
     "test_source_board_mesh": "Source board mesh: PASS (2 models, synthetic)",
     "test_card_mesh_binding": "Source card/pack mesh: PASS (3 bindings; actual cached FBX synthetic)",
     "test_card_overlays": "Private card overlays: PASS (2 labels, 1 panels; actual cached FBX)",
+    "test_puff_simulation": "Private Puff simulation: PASS (synthetic)",
     "test_equipment_display": "Private equipment interaction: PASS",
     "test_audio_feedback": "Private source audio: 1 SFX decoded and playback-start checked",
     "test_visual_assets": "Visual source bindings: PASS",

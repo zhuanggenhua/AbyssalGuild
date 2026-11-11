@@ -60,7 +60,7 @@ After headless import, a mandatory probe checks **every declared resource**:
 
 The same imported copy then runs the board mesh, card/pack mesh, card overlays,
 equipment interaction, audio mapping, visual bindings, combat sprite/flash,
-combat presentation, combat feedback, and UI/board integration suites listed in
+combat presentation, combat feedback, Puff metadata/math, and UI/board integration suites listed in
 `tools/run_imported_tests.py`. These include the real imported mesh/texture and
 shader-material binding branches. Every suite must emit its own completion
 marker. Any `SKIP`, missing completion marker, unavailable-cache fallback,

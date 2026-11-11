@@ -253,3 +253,10 @@ func create_projectile(combat_type: int, scene_name: String = "Main") -> Sprite3
 func create_hit_popup(kind: String, damage_text: String, advantage: int, scene_name: String = "Main") -> Node3D:
 	var record: Dictionary = scene_configuration(scene_name).get("combat", {}).get("hit_ui", {})
 	return preload("res://scripts/ui/combat_sprite_binding.gd").hit_popup(self, record, kind, damage_text, advantage)
+
+func puff_configuration(scene_name: String = "Main") -> Dictionary:
+	# The importer resolves this scene's CardManager -> CardSettings -> Puff.
+	var record: Dictionary = scene_configuration(scene_name).get("puff", {})
+	if not preload("res://scripts/ui/puff_simulation.gd").is_supported(record):
+		return {}
+	return record.duplicate(true)

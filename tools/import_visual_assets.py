@@ -10,6 +10,7 @@ from import_stackcraft import parse_unity, json_bytes, sha256, UnityLoader
 from visual_scene_metadata import apply_overrides, camera_records, light_records, transform_chain
 from card_visual_metadata import annotations
 from combat_visual_metadata import combat_metadata, sprite_metadata
+from puff_visual_metadata import scene_puff_metadata
 
 SUPPORTED = {'.png', '.wav', '.fbx'}
 
@@ -53,7 +54,13 @@ def build(source, catalog, output):
             meta = path.with_name(path.name + '.meta')
             if path.suffix.lower() == '.png' and meta.is_file():
                 document = yaml.load(meta.read_text(encoding='utf-8-sig'), Loader=UnityLoader)
-                sprite = sprite_metadata(document.get('TextureImporter', {}), path.read_bytes())
+                importer = document.get('TextureImporter', {})
+                result['assets'][guid]['texture_importer'] = {'filter_mode': importer.get('textureSettings', {}).get('filterMode'),
+                    'wrap_u': importer.get('textureSettings', {}).get('wrapU'), 'wrap_v': importer.get('textureSettings', {}).get('wrapV'),
+                    'mipmaps': importer.get('mipmaps', {}).get('enableMipMap'), 'srgb': importer.get('mipmaps', {}).get('sRGBTexture'),
+                    'alpha_is_transparency': importer.get('alphaIsTransparency')}
+                result['inputs'][relative + '.meta'] = sha256(meta)
+                sprite = sprite_metadata(importer, path.read_bytes())
                 if sprite:
                     result['assets'][guid]['sprite'] = sprite
                     result['inputs'][relative + '.meta'] = sha256(meta)
@@ -64,6 +71,7 @@ def build(source, catalog, output):
                 fields = doc['fields']; saved = fields.get('m_SavedProperties', {})
                 result['materials'][guid] = {'source_path': relative, 'name': fields.get('m_Name'),
                     'shader_source_path': index.get(fields.get('m_Shader', {}).get('guid', ''), {}).get('source_path', ''),
+                    'shader_reference': fields.get('m_Shader', {}),
                     'colors': {k: v for item in saved.get('m_Colors', []) for k, v in item.items()},
                     'textures': {k: v for item in saved.get('m_TexEnvs', []) for k, v in item.items()},
                     'floats': {k: v for item in saved.get('m_Floats', []) for k, v in item.items()}}
@@ -108,6 +116,7 @@ def build(source, catalog, output):
             if any(key in f for key in ('arrowProjectile', 'magicProjectile', 'hitUIPrefab')):
                 config['combat'] = combat_metadata(f, read)
             if 'cardPrefabs' in f:
+                config['puff'] = scene_puff_metadata(f, read)
                 config['categories'] = {str(e['category']): prefab(e['prefab']['guid']) for e in f['cardPrefabs']}
                 for field in ('packPrefab', 'aggressiveMobPrefab'):
                     if f.get(field, {}).get('guid'):

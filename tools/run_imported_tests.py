@@ -24,6 +24,7 @@ SUITES = (
     ("test_source_board_mesh", r"Source board mesh: PASS \([1-9]\d* models,"),
     ("test_card_mesh_binding", r"Source card/pack mesh: PASS \([1-9]\d* bindings; actual cached FBX"),
     ("test_card_overlays", r"Private card overlays: PASS \([1-9]\d* labels, [1-9]\d* panels; actual cached FBX\)"),
+    ("test_puff_simulation", r"Private Puff simulation: PASS"),
     ("test_equipment_display", r"Private equipment interaction: PASS"),
     ("test_audio_feedback", r"Private source audio: [1-9]\d* SFX decoded and playback-start checked"),
     ("test_visual_assets", r"Visual source bindings: PASS"),
