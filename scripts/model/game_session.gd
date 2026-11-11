@@ -10,6 +10,7 @@ const Campaign = preload("res://scripts/model/campaign.gd")
 const WorldRules = preload("res://scripts/model/world_rules.gd")
 const CombatSystem = preload("res://scripts/model/combat_system.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
+const CycleController = preload("res://scripts/model/cycle_controller.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)
 var catalog
@@ -23,6 +24,7 @@ var combat = CombatSystem.new()
 var world = WorldRules.new()
 var campaign = Campaign.new()
 var ai = MobAI.new()
+var cycle = CycleController.new()
 var scene_name: String = "Main"
 var friendly_mode: bool = false
 var board_bounds: Variant = null
@@ -53,6 +55,7 @@ func configure(source_catalog, random_seed: int = 1, selected_scene: String = "M
 	world.configure(self, scene_name)
 	equipment.configure(self)
 	combat.configure(self, equipment)
+	cycle.configure(self)
 	rng.seed = random_seed
 	quest_tracker.configure(catalog, scene_name)
 	if not event_occurred.is_connected(_track_quest_event):
@@ -103,6 +106,7 @@ func start_new_game() -> int:
 	world.reset()
 	equipment.reset()
 	combat.reset()
+	cycle.reset()
 	cards.clear()
 	stacks.clear()
 	discovered_recipes.clear()
@@ -177,6 +181,14 @@ func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: in
 	changed.emit()
 	return card.id
 
+## Presentation-only request at a source PlayPuffParticle call site. Capture the
+## individual source-coordinate pose while the card exists, without drawing RNG.
+func request_puff(id: int, sampled_position: Variant = null) -> void:
+	if not cards.has(id):
+		return
+	var position: Vector3 = sampled_position if sampled_position is Vector3 and sampled_position.is_finite() else cycle.pose(id)
+	event_occurred.emit("puff_requested", {"card_id": id, "position": position})
+
 func _remove_card(id: int) -> void:
 	if not cards.has(id):
 		return
@@ -191,12 +203,13 @@ func _remove_card(id: int) -> void:
 
 ## Kill differs from sale/crafting destruction; fully consumed food and packs also Kill.
 ## Source Kill draws one loot entry only for Character/Mob categories.
-func kill_card(id: int) -> bool:
+func kill_card(id: int, sampled_position: Variant = null) -> bool:
 	if not cards.has(id):
 		return false
 	var card = cards[id]
 	# Preserve the individual pose before cleanup/notifications can change membership.
-	var death_position := card_target_position(id)
+	var death_pose: Vector3 = sampled_position if sampled_position is Vector3 else card_target_position_3d(id)
+	var death_position := Vector2(death_pose.x, death_pose.z)
 	var fields: Dictionary = catalog.fields(card.definition_guid)
 	# Source notifies before loot, equipment cleanup and removal.
 	event_occurred.emit("card_killed", {"card_id": id, "definition_guid": card.definition_guid})
@@ -207,6 +220,7 @@ func kill_card(id: int) -> bool:
 	if category == 2 or category == 9:
 		spawn_card(_roll_loot(fields.get("loot", [])), death_position)
 	var stack = stacks.get(card.stack_id)
+	request_puff(id, death_pose)
 	_remove_card(id)
 	if stack != null:
 		_validate_craft(stack)
@@ -251,8 +265,8 @@ func _weighted(entries: Array, minimum_one: bool) -> String:
 			return guid
 	return ""
 
-func open_pack(id: int) -> int:
-	if phase not in ["playing", "selling"] or not cards.has(id):
+func open_pack(id: int, carried_press: bool = false) -> int:
+	if (phase not in ["playing", "selling"] and not carried_press) or not cards.has(id):
 		return -1
 	var card = cards[id]
 	var definition: Dictionary = catalog.get_definition(card.definition_guid)
@@ -440,6 +454,7 @@ func tick(delta: float) -> void:
 	# Source real-time combat travel/return continues while scaled gameplay pauses.
 	if paused or phase != "playing":
 		combat.tick(0.0, delta)
+		cycle.advance(delta)
 		return
 	var tick_scene: String = scene_name
 	var step: float = delta * speed
@@ -458,8 +473,7 @@ func tick(delta: float) -> void:
 	elapsed += step
 	if elapsed >= day_duration:
 		# Automatic day-end pause is silent in TimeManager, unlike user cycling.
-		paused = true
-		phase = "feeding"
+		cycle.request_end_day()
 	changed.emit()
 
 func _complete_recipe(stack) -> void:
@@ -479,6 +493,12 @@ func _complete_recipe(stack) -> void:
 	if SpecialRecipes.supports(str(entry.get("script_class", ""))):
 		SpecialRecipes.execute(self, stack, entry)
 	elif entry.get("script_class", "RecipeDefinition") == "RecipeDefinition":
+		# Source TopCard is index zero, not the last visible member. Both cues
+		# precede input destruction and occur even without a resulting card.
+		var top_id: int = stack.card_ids.front() if not stack.card_ids.is_empty() else -1
+		var effect_position: Vector3 = cycle.pose(top_id)
+		request_puff(top_id, effect_position)
+		event_occurred.emit("recipe_pop_requested", {"card_id": top_id, "position": effect_position, "recipe_guid": str(entry.get("guid", stack.recipe_guid))})
 		SpecialRecipes.consume(self, stack, recipe)
 		# Spawn excludes the processing stack, as in the source.
 		var spawned: int = spawn_card(output, stack.position, -1, {"ignored_stack_id": stack.id})
@@ -580,7 +600,9 @@ func buy_pack(guid: String) -> int:
 			price -= 1
 		else:
 			var amount: int = mini(price, card.stored_coins)
-			card.stored_coins -= amount
+			for _coin in range(amount):
+				card.stored_coins -= 1
+				request_puff(card.id)
 			price -= amount
 	vendor_payments[guid] = 0
 	var spawn: Variant = preload("res://scripts/model/scene_spawn.gd").vendor_position(catalog, scene_name, guid, board_bounds, board_top_margin)
@@ -607,64 +629,17 @@ func _feeding_card_ids() -> Array:
 				result.append(id)
 	return result
 
+## Live feeding is nonblocking. The automatic timeout waits for this explicit
+## request; the manual early-end button remains a native convenience.
 func end_day() -> Dictionary:
-	if phase != "playing" and phase != "feeding":
-		return stats()
-	phase = "feeding"
-	paused = true
-	var hunger: int = int(catalog.settings("CardSettings").get("hungerPerCharacter", 2))
-	var characters: Array = []
-	var foods: Array = []
-	# Snapshot eligibility once. New loot/characters created during feeding must
-	# not join this cycle's queue. A leftover returns at the tail for stable ties.
-	for id in _feeding_card_ids():
-		var category: int = int(catalog.fields(cards[id].definition_guid).get("category", 0))
-		if category == 2:
-			characters.append(id)
-		elif category == 3 and cards[id].nutrition > 0:
-			foods.append(id)
-	for character_id in characters:
-		if not cards.has(character_id):
-			continue
-		var character = cards[character_id]
-		var need: int = hunger
-		while need > 0 and cards.has(character_id):
-			var nearest = null
-			var distance: float = INF
-			for food_id in foods:
-				# Native safety: external callbacks may have removed a snapshot card.
-				if not cards.has(food_id) or cards[food_id].nutrition <= 0:
-					continue
-				var candidate: float = card_target_position_3d(character.id).distance_squared_to(card_target_position_3d(food_id))
-				if candidate < distance:
-					distance = candidate
-					nearest = cards[food_id]
-			if nearest == null:
-				kill_card(character.id)
-				break
-			foods.erase(nearest.id)
-			_prepare_food_for_feeding(nearest, card_target_position(character.id))
-			var eaten: int = mini(need, nearest.nutrition)
-			nearest.nutrition -= eaten
-			need -= eaten
-			var maximum: int = int(equipment.stats(character.id).get("maxHealth", 15))
-			character.health = mini(maximum, character.health + _round_to_even(float(maximum) * 0.5 * eaten / hunger))
-			if nearest.nutrition <= 0:
-				kill_card(nearest.id)
-			elif cards.has(nearest.id):
-				foods.append(nearest.id)
-			_notify_stats_changed()
-	for stack in stacks.values():
-		_validate_craft(stack)
-	var snapshot: Dictionary = stats()
-	phase = "game_over" if snapshot.characters <= 0 else "selling"
-	_check_selling_condition()
-	changed.emit()
-	return snapshot
+	if phase == "playing": cycle.request_end_day()
+	if phase == "feeding": cycle.begin_feeding()
+	return stats()
 
 func start_day() -> bool:
 	if phase != "ready":
 		return false
+	cycle.reset()
 	day += 1
 	elapsed = 0
 	phase = "playing"
@@ -717,7 +692,11 @@ func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
 				break
 			var amount: int = mini(price - paid, card.stored_coins)
 			paid += amount
-			card.stored_coins -= amount
+			# Source invokes TryWithdrawCoin(false) once per paid coin. Do not
+			# insert WorldRules' native stats notification between these puffs.
+			for _coin in range(amount):
+				card.stored_coins -= 1
+				request_puff(id)
 			stats_changed = stats_changed or amount > 0
 			# Chest remains BottomCard, so once empty it blocks earlier payment cards.
 			break
@@ -762,18 +741,14 @@ func _track_quest_event(kind: String, payload: Dictionary) -> void:
 
 ## Source subscribes to stats changes while selling, rather than only checking
 ## after sales. In particular, the first payout coin can start the encounter
-## before the remaining coins are created. Ready claims the transition before
+## before the remaining coins are created. Encounter claims the transition before
 ## encounter spawns publish their own stats changes, preventing reentry.
 func _track_cycle_event(kind: String, _payload: Dictionary) -> void:
 	if kind == "stats_changed":
 		_check_selling_condition()
 
 func _check_selling_condition() -> void:
-	if phase != "selling" or stats().excess > 0:
-		return
-	phase = "ready"
-	world.finish_day(day, friendly_mode, board_bounds, board_top_margin)
-	changed.emit()
+	cycle.check_selling()
 
 func _notify_stats_changed() -> void:
 	event_occurred.emit("stats_changed", {})

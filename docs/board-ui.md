@@ -32,14 +32,15 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
   Autonomous mobs also move, produce items and engage using imported AI settings.
 - Escape opens the pause menu during play; its Options panel preserves the
   selected pace, applies supported preferences and reports unsupported mappings.
-  Ending-cycle locks prevent opening it during feeding/selling/ready/game-over.
+  Ending-cycle locks prevent opening it during feeding/selling/encounter/ready/game-over.
   See `options-ui.md`. Space pauses. Buttons select speed. WASD or middle-drag pans; the wheel zooms.
   Imported camera metadata supplies perspective FOV, clip planes and source pose.
 - Scene-specific shops expose their configured packs, quest locks and prices.
   Source-positioned buyer/vendor plates now accept dropped card tails, including
   partial coin and chest payments. Whole-price buy buttons remain available.
   Vendor labels show collection counts or COMPLETED.
-- End day feeds villagers, then requires selling excess cards before advancing.
+- End day advances real-time focus, food travel/consumption and encounter waits,
+  then requires selling excess cards before advancing.
   Daily encounters and friendly-mode filtering are connected. Starvation can end
   a session. Active/completed quests and discovered recipes have separate ledgers;
   hovering an individual row marks its raw item ID read. Opening tabs marks nothing.
@@ -49,8 +50,9 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
   and travel checkpoint automatically. Game-over Return asks before archiving the
   ended slot; no deletion happens merely on death. The title picker reports scene,
   quest percentage, UTC file time and backup recovery.
-- Card drag/sale/trade allow playing and selling only. Feeding, ready and game-over
-  block those mutations. Manual pause retains playing-phase card interaction.
+- New card drag/sale/trade presses allow playing and selling only. Feeding,
+  encounter, ready and game-over lock new presses; a previously granted held drag
+  may finish across the boundary. Manual pause retains playing-phase card interaction.
 
 ## Geometry and placement
 
@@ -72,7 +74,8 @@ withdrawal. Friendly mode applies to every ordinary factory output.
 See `board-layout.md` for the boundary between exact target math and approximate
 broad phase. Combat rectangles, fighter rows, drag-to-join/start and attacker-only flee are
 now connected. Initial center/cell spacing persists through native saves; the
-AI uses that actual center. Source animation timing remains separate work.
+AI uses that actual center. Saved combat phases now drive source-timed hit/return/death behavior and native
+attack/projectile/hurt views; interpolation and rendered acceptance remain separate.
 
 Source sound mappings play pickup/drop, purchases, sales, normal craft and combat
 feedback when the private WAV files exist. The restored background music is
@@ -86,12 +89,13 @@ write player saves. Missing-data, synthetic, source-data and cached-FBX checks a
 reported separately. `migration-progress.md` records the latest verified counts.
 
 Still required: rendered legibility/clipping at 1440x900 and 1280x800; manual
-mouse/keyboard/touch acceptance; source animation/combat presentation; listening
+mouse/keyboard/touch acceptance; remaining source animation/presentation fidelity; listening
 checks; Windows native execution and export packaging. There is no display server
 in the current cloud environment. Unity was not launched, per the user's request.
 
 The HUD is an original functional layout, not the original Title/Main/Island UI.
-Camera pan is immediate rather than Unity SmoothDamp. No claim of exact physics
+Camera pan uses the source SmoothDamp parameters; focus/zoom and cycle navigation
+locks are covered headlessly. No claim of exact physics
 query ordering, shader parity, screenshots or final playability acceptance is made.
 
 ## Slot and combat-merge regression suites
@@ -100,3 +104,10 @@ query ordering, shader parity, screenshots or final playability acceptance is ma
 
 Trade-zone geometry, drop order, nonterminal payments and per-item collection
 presentation are documented in `trade-collection-ui.md`.
+
+
+Realtime cycle details and carried-input boundaries are in
+[cycle board UI](cycle-board-ui.md). Source-event Puff requests now use native
+private-texture emitters with independent cosmetic randomness and separate real
+particle/scaled emitter clocks. See [Puff lifecycle](puff-board-lifecycle.md).
+Standard alpha blending approximates the unavailable source built-in shader.

@@ -48,7 +48,7 @@ Unity's GameData includes multiple saved scenes, slot metadata, gameplay prefere
 
 Run `godot --headless --path . --script res://tests/godot/test_save_codec.gd` with writable Godot user/cache directories. Tests use a synthetic catalog and do not require redistribution of template data. They cover JSON round trips, stack order/craft state, recipe cards, partial packs/vendor payments, quests, all phases, exact RNG continuation, malformed states, no mutation/signals on failure, three sequential writes, backup replacement/recovery, corrupt-primary preservation of backup, failed reads and unwritable targets. Helper subsystem tests are additionally required for their schema and invariants.
 
-Combined subsystem verification: 381 save-codec assertions passed on Godot 4.6.3, including a class-changed character with two equipped items inside an active battle; exact helper state/RNG JSON and disk round trips; malformed helper scalars; duplicate items/fighters; missing-helper orphan rejection; and loading an earlier base-only v1 snapshot over a live battle. Combat timers/progress may legitimately be negative after large time steps or stat modifiers, so those fields require finite numbers rather than an invented nonnegative restriction. The separate combat/equipment suite also passed (60 checks at this checkpoint). UI save/continue integration is reviewed separately in the board UI tests.
+Combined subsystem verification: 534 save-codec assertions passed on Godot 4.6.3, including a class-changed character with two equipped items inside an active battle; exact helper state/RNG JSON and disk round trips; malformed helper scalars; duplicate items/fighters; missing-helper orphan rejection; and loading an earlier base-only v1 snapshot over a live battle. Combat timers/progress may legitimately be negative after large time steps or stat modifiers, so those fields require finite numbers rather than an invented nonnegative restriction. The separate combat/equipment suite also passed (60 checks at this checkpoint). UI save/continue integration is reviewed separately in the board UI tests.
 
 
 ## AI checkpoint validation and legacy behavior
@@ -65,4 +65,21 @@ A combat task may include `layout: {center: [x, z], cell: [width, depth]}`. Only
 
 The serialized layout must contain exactly these two keys. Both values must be two-element numeric arrays with finite axes bounded to absolute value `1e20`, matching the existing card-coordinate cap. Cell axes must be positive and remain positive when converted to the engine's Vector2 representation. Invalid layout shapes, extra fields, strings, booleans, nonfinite values, excessive coordinates and nonpositive/underflowed cell axes fail the whole restore before any live-state or RNG change. Saving also leaves runtime layout data untouched.
 
-Legacy tasks without a layout remain without one after restore and re-save; the board initializes their geometry from the current scene when needed. This preserves compatibility without inventing historical placement metadata. The codec suite now passes 381 checks, including midcombat disk round trips and transactional malformed-layout rejection. Visual placement reconstruction is checked separately by the combat-layout/board suites.
+Legacy tasks without a layout remain without one after restore and re-save; the board initializes their geometry from the current scene when needed. This preserves compatibility without inventing historical placement metadata. The codec suite now passes 534 checks, including midcombat disk round trips and transactional malformed-layout rejection. Visual placement reconstruction is checked separately by the combat-layout/board suites.
+
+
+## Active day-cycle checkpoints
+
+The optional `cycle` helper is staged after cards, stacks, world and phase are
+validated. It persists ordered eligibility queues, current character/food, hunger,
+real-time wait/stage, motion and focus poses, and pending encounter selection/spawn
+progress. Food stays owned by a registered stack. Capture during a reentrant
+effect transition is rejected rather than producing a half-applied snapshot.
+
+Malformed references, stage/phase pairs, consumed/leftover hunger and encounter
+progress fail before changing the live campaign. Legacy feeding without a cycle
+cursor resumes at `await_feed`; a legacy encounter without a cursor is rejected
+rather than replayed. These native checkpoints extend the source format and do
+not claim Unity save compatibility. The independent cycle validation suite adds
+144 checks, including active and inactive campaign scenes and no-mutation failures.
+See [cycle timeline](cycle-timeline.md) for clock and continuation semantics.

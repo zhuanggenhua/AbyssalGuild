@@ -121,7 +121,7 @@ func select_encounter(day: int, friendly: bool = false, roll: Callable = Callabl
 
 ## Call once after feeding/selling succeeds, BEFORE incrementing the day.
 ## null bounds reproduces the source's no-Board fallback at the origin.
-func finish_day(day: int, friendly: bool = false, bounds: Variant = null, top_margin: float = 1.5) -> Dictionary:
+func claim_day(day: int, friendly: bool = false) -> Dictionary:
 	if processed_days.has(day):
 		return {}
 	processed_days[day] = true
@@ -132,15 +132,27 @@ func finish_day(day: int, friendly: bool = false, bounds: Variant = null, top_ma
 	var fields: Dictionary = session.catalog.fields(guid)
 	if fields.get("oneTimeOnly", false):
 		completed_encounters[str(fields.get("id", ""))] = true
-	var spawned: Array = []
-	for index in range(int(fields.get("count", 1))):
-		var position := Vector2.ZERO
-		if bounds is Rect2:
-			position = Vector2(session.rng.randf_range(bounds.position.x + spawn_edge_padding, bounds.end.x - spawn_edge_padding), session.rng.randf_range(bounds.position.y + spawn_edge_padding, bounds.end.y - spawn_edge_padding))
-			position.y = minf(position.y, bounds.end.y - top_margin - 1.0)
-		# Every event card gets its own stack (source RefuseAll).
-		spawned.append(session.spawn_card(session.catalog.ref_guid(fields.get("cardToSpawn", {})), position, -1, {"refuse_attach": true}))
-	var result := {"encounter_guid": guid, "id": str(fields.get("id", "")), "message": str(fields.get("notificationMessage", "")), "spawned": spawned}
+	return {"encounter_guid": guid, "id": str(fields.get("id", "")), "message": str(fields.get("notificationMessage", "")), "spawned": []}
+
+## A timed cycle calls this once per spawn boundary, never pre-rolls later poses.
+func spawn_encounter_card(guid: String, bounds: Variant = null, top_margin: float = 1.5) -> Dictionary:
+	var session = _session.get_ref()
+	var fields: Dictionary = session.catalog.fields(guid)
+	var position := Vector2.ZERO
+	if bounds is Rect2:
+		position = Vector2(session.rng.randf_range(bounds.position.x + spawn_edge_padding, bounds.end.x - spawn_edge_padding), session.rng.randf_range(bounds.position.y + spawn_edge_padding, bounds.end.y - spawn_edge_padding))
+		position.y = minf(position.y, bounds.end.y - top_margin - 1.0)
+	return {"card_id": session.spawn_card(session.catalog.ref_guid(fields.get("cardToSpawn", {})), position, -1, {"refuse_attach": true}), "position": position}
+
+## Explicit synchronous utility retained for isolated rule callers/tests. Live
+## GameSession uses claim_day plus timed spawn_encounter_card calls instead.
+func finish_day(day: int, friendly: bool = false, bounds: Variant = null, top_margin: float = 1.5) -> Dictionary:
+	var result := claim_day(day, friendly)
+	if result.is_empty():
+		return result
+	var session = _session.get_ref()
+	for index in range(int(session.catalog.fields(result.encounter_guid).get("count", 1))):
+		result.spawned.append(spawn_encounter_card(result.encounter_guid, bounds, top_margin).card_id)
 	session.event_occurred.emit("encounter", result)
 	return result
 
@@ -159,6 +171,8 @@ func deposit_stack(chest_id: int, stack_id: int) -> Dictionary:
 		return result
 	result.handled = true
 	var chest = session.cards[chest_id]
+	# OnStack puffs before DepositCoinStack checks capacity, including full chests.
+	session.request_puff(chest_id)
 	var capacity: int = int(session.catalog.fields(chest.base_definition_guid).get("capacity", 50))
 	for id in ids:
 		if chest.stored_coins >= capacity:
@@ -184,6 +198,8 @@ func withdraw_coin(chest_id: int, spawn_on_board: bool = false, spawn_position: 
 	if not _is_chest(chest_id) or currency_guid.is_empty() or session.cards[chest_id].stored_coins <= 0:
 		return false
 	session.cards[chest_id].stored_coins -= 1
+	# TryWithdrawCoin puffs after decrement, before optional board spawning.
+	session.request_puff(chest_id)
 	if spawn_on_board:
 		session.spawn_card(currency_guid, spawn_position, -1, {"ignored_stack_id": session.cards[chest_id].stack_id})
 	session._notify_stats_changed()
@@ -243,6 +259,7 @@ func tick_production(delta: float) -> Array:
 		var produce: String = session.catalog.ref_guid(fields.get("produceCard", {}))
 		if not fields.get("isAggressive", false) and can_act(id) and not produce.is_empty():
 			spawned.append(session.spawn_card(produce, session.card_target_position(id)))
+			session.request_puff(id)
 	return spawned
 
 ## Combat snapshots: {id, ongoing, position: Vector2, has_player}. Omit rectless tasks.

@@ -1,4 +1,5 @@
 extends SceneTree
+const CycleDriver = preload("res://tests/godot/cycle_test_driver.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const Equipment = preload("res://scripts/model/equipment_system.gd")
@@ -63,7 +64,7 @@ func _init() -> void:
 	ids = group(session, Vector2.ZERO, ["base", "base", "base", "base", "hero"])
 	var near_visible: int = session.spawn_card("food", Vector2(0, -0.7))
 	var near_root: int = session.spawn_card("food", Vector2(0, 0.1))
-	session.end_day()
+	CycleDriver.finish(session)
 	check(not session.cards.has(near_visible) and session.cards.has(near_root), "Feeding chooses food nearest actual stack member, not root")
 	check(session.cards.has(ids[4]) and session.phase == "ready", "Feeding completes without changing phase semantics")
 

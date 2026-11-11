@@ -26,7 +26,7 @@ static func capture(session) -> Dictionary:
 		"next_id": session._next_id, "rng_seed": str(session.rng.seed), "rng_state": str(session.rng.state),
 		"cards": card_rows, "stacks": stack_rows, "discovered_recipes": session.discovered_recipes.duplicate(true),
 		"vendor_payments": session.vendor_payments.duplicate(true), "quests": session.quest_tracker.save_state()}}
-	for key in ["equipment", "combat", "world", "ai", "collection"]:
+	for key in ["equipment", "combat", "world", "ai", "collection", "cycle"]:
 		var helper = session.get(key)
 		if helper != null and helper.has_method("save_state"):
 			snapshot.session[key] = helper.save_state()
@@ -75,7 +75,7 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 	for key in ["elapsed", "day_duration", "speed"]:
 		if not _number(data.get(key)):
 			return _fail("Invalid " + key)
-	if data.day_duration <= 0 or not float(data.speed) in [1.0, 2.0] or not data.get("phase") in ["playing", "feeding", "selling", "ready", "game_over"] or not data.get("paused") is bool:
+	if data.day_duration <= 0 or not float(data.speed) in [1.0, 2.0] or not data.get("phase") in ["playing", "feeding", "selling", "encounter", "ready", "game_over"] or not data.get("paused") is bool:
 		return _fail("Invalid clock or phase")
 	if not _int64_string(data.get("rng_seed")) or not _int64_string(data.get("rng_state")):
 		return _fail("Invalid RNG state")
@@ -165,6 +165,19 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 		return _fail("AI state conflicts with active combat")
 	if membership.size() != cards.size():
 		return _fail("Orphan card")
+	# Cycle queues can reference historically removed cards, but selected live food
+	# remains a registered stack member in source, never an orphan exemption.
+	if not data.has("cycle") and data.phase == "encounter":
+		return _fail("Encounter phase requires saved cycle state")
+	var cycle_raw: Variant = data.get("cycle", session.cycle.legacy_state(data.phase))
+	var cycle_context := {"phase": data.phase, "paused": data.paused, "day": data.day, "next_id": data.next_id, "stacks": stacks, "world": helpers.get("world", {})}
+	var staged_cycle: Dictionary = session.cycle.stage_state(cycle_raw, cards, cycle_context)
+	if not staged_cycle.ok:
+		return _fail("cycle: " + str(staged_cycle.error))
+	helpers.cycle = staged_cycle
+	var held_food: int = int(staged_cycle.state.food_id)
+	if cards.has(held_food) and (cards[held_food].stack_id < 1 or not stacks.has(cards[held_food].stack_id)):
+		return _fail("Cycle food must belong to a registered stack")
 	var quests = data.get("quests")
 	if not quests is Dictionary or not quests.get("CompletedQuests") is Array or not quests.get("ActiveQuests") is Array or not _integer(quests.get("QuestProgress")):
 		return _fail("Invalid quest state")
@@ -201,7 +214,7 @@ static func restore(session, snapshot: Variant) -> Dictionary:
 	session._next_id = int(data.next_id)
 	session.rng.seed = data.rng_seed.to_int()
 	session.rng.state = data.rng_state.to_int()
-	for key in ["equipment", "combat", "world", "ai", "collection"]:
+	for key in ["equipment", "combat", "world", "ai", "collection", "cycle"]:
 		var helper = session.get(key)
 		if helper != null:
 			if staged.helpers.has(key):

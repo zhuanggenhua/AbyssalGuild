@@ -1,4 +1,5 @@
 extends SceneTree
+const CycleDriver = preload("res://tests/godot/cycle_test_driver.gd")
 ## Headless scene/model integration smoke. This is NOT a visual/input acceptance test.
 const Board = preload("res://scripts/ui/board.gd")
 var failures: int = 0
@@ -91,12 +92,16 @@ func run() -> void:
 	while board.session.stats().excess < 3:
 		excess_cards.append(board.session.spawn_card(board.catalog.find_by_name("Wood"), Vector2(5, 5)))
 	board._advance_day()
+	CycleDriver.drain(board.session)
+	board._refresh()
 	check(board.session.phase == "selling" and board.day_button.disabled, "day feeding requires selling excess before continuing")
 	for id in excess_cards:
 		if board.session.phase != "selling": break
 		board.selected = id
 		board._sell_selected()
-	check(board.session.phase == "ready", "selling excess enables next day")
+	CycleDriver.drain(board.session)
+	board._refresh()
+	check(board.session.phase == "ready", "selling excess enables next day after encounter timeline")
 	board._advance_day()
 	check(board.session.day == 2 and board.session.phase == "playing", "day button starts next day")
 	board.session.set_speed(2.0)

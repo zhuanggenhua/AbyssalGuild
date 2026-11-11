@@ -1,4 +1,5 @@
 extends SceneTree
+const CycleDriver = preload("res://tests/godot/cycle_test_driver.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const Equipment = preload("res://scripts/model/equipment_system.gd")
@@ -169,7 +170,7 @@ func _test_session(catalog) -> void:
 	var armor: int = session.spawn_card("armor")
 	session.equipment.equip(hero, armor)
 	session.cards[hero].health = 1
-	session.end_day()
+	CycleDriver.finish(session)
 	check(session.cards[hero].health == 16, "feeding uses equipped maximum health")
 	session.start_new_game()
 	check(session.equipment.equipped.is_empty() and session.combat.tasks.is_empty() and session.equipment.owners.is_empty(), "new game resets helpers")

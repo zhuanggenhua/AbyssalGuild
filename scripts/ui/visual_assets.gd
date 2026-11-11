@@ -260,3 +260,10 @@ func puff_configuration(scene_name: String = "Main") -> Dictionary:
 	if not preload("res://scripts/ui/puff_simulation.gd").is_supported(record):
 		return {}
 	return record.duplicate(true)
+
+func create_puff(scene_name: String, presentation_seed: int) -> Node3D:
+	var view = preload("res://scripts/ui/puff_view.gd").new()
+	if not view.configure(self, puff_configuration(scene_name), presentation_seed):
+		view.free()
+		return null
+	return view

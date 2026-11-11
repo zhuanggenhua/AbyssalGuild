@@ -60,7 +60,7 @@ func run() -> void:
 	var card: int = board.session.spawn_card(board.catalog.find_by_name("Wood"), Vector2(3, 0), -1, {"refuse_attach": true})
 	board.selected = card
 	check(board._allows_card_actions() and board._can_drag_card(card), "pause keeps playing interactions")
-	for phase in ["feeding", "ready", "game_over"]:
+	for phase in ["feeding", "encounter", "ready", "game_over"]:
 		board.session.phase = phase
 		var snapshot: String = JSON.stringify(board.session.campaign.capture())
 		board._sell_selected()
@@ -79,6 +79,7 @@ func run() -> void:
 	board._sell_selected()
 	check(not board.session.cards.has(card), "selling sale works")
 	board.session.phase = "playing"
+	board.session.cycle.reset() # Explicit phase fixture must reset its authoritative timeline too.
 	board._save_game()
 	check(board.notice.text == "Saved locally.", "manual slot save works")
 	var live = board.session
@@ -121,6 +122,7 @@ func run() -> void:
 	check(board.session == live and board.active_slot == 4 and board.title_status.text.begins_with("Legacy copy failed"), "invalid legacy cannot replace live game")
 	# Departure checkpoint failure aborts travel; successful arrival saves both scenes.
 	board.session.phase = "playing"
+	board.session.cycle.reset() # Explicit phase fixture must reset its authoritative timeline too.
 	board.session.paused = false
 	var portal: int = board.session.spawn_card(board.catalog.find_by_name("Grand Portal"), Vector2(-3, -2), -1, {"refuse_attach": true})
 	var traveler: int = board.session.spawn_card(board.catalog.find_by_name("Villager"), Vector2(-5, -2), -1, {"refuse_attach": true})

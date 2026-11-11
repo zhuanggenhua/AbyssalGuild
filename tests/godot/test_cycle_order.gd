@@ -1,4 +1,5 @@
 extends SceneTree
+const CycleDriver = preload("res://tests/godot/cycle_test_driver.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const Equipment = preload("res://scripts/model/equipment_system.gd")
@@ -55,7 +56,7 @@ func _test_snapshots() -> void:
 	var s = make()
 	var first: int = s.spawn_card("starver")
 	var second: int = s.spawn_card("hero")
-	s.end_day()
+	CycleDriver.finish(s)
 	check(not s.cards.has(first) and not s.cards.has(second), "Starvation loot cannot enter the initial food pool")
 	check(s.stats().nutrition == 2 and s.phase == "game_over", "Late food remains on a board with no survivors")
 
@@ -71,7 +72,7 @@ func _test_snapshots() -> void:
 		if kind == "card_killed" and payload.card_id == food_id:
 			live.cards[empty_id].nutrition = 2
 	s.event_occurred.connect(replenish)
-	s.end_day()
+	CycleDriver.finish(s)
 	check(not s.cards.has(second) and s.cards[empty].nutrition == 2, "Initially empty food stays ineligible if nutrition changes during feeding")
 	s.event_occurred.disconnect(replenish)
 
@@ -79,7 +80,7 @@ func _test_snapshots() -> void:
 	first = s.spawn_card("hero")
 	food = s.spawn_card("food_b")
 	Equipment.detach(s, food)
-	s.end_day()
+	CycleDriver.finish(s)
 	check(not s.cards.has(first) and s.cards[food].nutrition == 2, "Unregistered food is absent from source AllCards")
 
 	s = make()
@@ -94,7 +95,7 @@ func _test_snapshots() -> void:
 			live._remove_card(removed)
 			live._remove_card(food)
 	s.event_occurred.connect(remove_waiting)
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.phase == "ready" and s.cards[initial].nutrition == 2, "Removed snapshot references are skipped safely without feeding replacements")
 	s.event_occurred.disconnect(remove_waiting)
 
@@ -105,7 +106,7 @@ func _test_source_order() -> void:
 	check(s.move_to_stack(first, s.cards[second].stack_id), "Character reorder fixture uses an ordinary stack move")
 	var food: int = s.spawn_card("food_b")
 	check(s._feeding_card_ids() == [second, first, food], "Registered stack/member order replaces global creation order")
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.cards.has(second) and not s.cards.has(first), "Stack-first character receives scarce food")
 
 	s = make()
@@ -115,7 +116,7 @@ func _test_source_order() -> void:
 	second = s.spawn_card("hero")
 	food = s.spawn_card("food_b")
 	check(s._feeding_card_ids() == [second, food, first, enemy], "All registered board stacks precede ongoing combatants")
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.cards.has(second) and not s.cards.has(first), "Board character eats before earlier-created combat character")
 
 	s = make()
@@ -127,7 +128,7 @@ func _test_source_order() -> void:
 	s.combat.start_combat([first], [first_enemy])
 	food = s.spawn_card("food_b")
 	check(s._feeding_card_ids() == [food, second, second_enemy, first, first_enemy], "Combat registration order preserves attacker then defender enumeration")
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.cards.has(second) and not s.cards.has(first), "Older registered combat gets scarce food first")
 
 	s = make()
@@ -135,7 +136,7 @@ func _test_source_order() -> void:
 	s.spawn_card("hero")
 	first = s.spawn_card("food_a")
 	second = s.spawn_card("food_b")
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.cards.has(first) and s.cards[first].nutrition == 2 and not s.cards.has(second), "Equal-distance leftovers reenter the tail, after untouched food")
 	check(s.stats().characters == 2 and s.phase == "ready", "Both characters survive stable-tie distribution")
 
@@ -144,14 +145,14 @@ func _test_source_order() -> void:
 	first = s.spawn_card("food_a")
 	second = s.spawn_card("food_b")
 	check(s.move_to_stack(first, s.cards[second].stack_id), "Food reorder fixture uses an ordinary stack move")
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.cards[first].nutrition == 4 and not s.cards.has(second), "Initial equal-distance food ties follow stack/member order, not creation order")
 
 	s = make()
 	s.spawn_card("hero")
 	first = s.spawn_card("food_b", Vector2(10, 0))
 	second = s.spawn_card("food_b", Vector2(1, 0))
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.cards.has(first) and not s.cards.has(second), "Nearest current settled pose still overrides candidate-list order")
 
 func _test_selling_events() -> void:
@@ -185,9 +186,11 @@ func _test_selling_events() -> void:
 			created.append(payload.base_definition_guid)
 	s.event_occurred.connect(observe)
 	check(s.sell_card(sold), "Excess card sells")
-	check(records == [{"currency": 1, "phase": "ready", "count": 3}], "Encounter selection occurs on first payout, below the all-card threshold")
+	check(records == [{"currency": 1, "phase": "encounter", "count": 2}], "Encounter selection occurs on first payout, below the all-card threshold")
 	check(created == ["visitor", "coin", "coin", "coin"], "Nested encounter creation precedes first coin's created event and remaining payout")
 	check(s.stats().currency == 3 and s.world.board_card_count() == 5, "Original sale finishes payout after synchronous cycle transition")
+	CycleDriver.drain(s)
+	check(s.phase == "ready", "Encounter waits complete before Start Day becomes ready")
 	check(s.world.completed_encounters.has("arrival") and s.world.processed_days.size() == 1, "Encounter reentry guard is claimed exactly once")
 	s.event_occurred.disconnect(observe)
 
@@ -220,7 +223,7 @@ func _test_pack_phases() -> void:
 	s.spawn_card("hero")
 	s.spawn_card("food_b")
 	s.speed = 2
-	s.end_day()
+	CycleDriver.finish(s)
 	var events: Array = []
 	var day_events := func(kind: String, _payload: Dictionary): events.append(kind)
 	s.event_occurred.connect(day_events)
@@ -242,7 +245,7 @@ func _test_source_data() -> void:
 	var stew: int = s.spawn_card(catalog.find_by_name("Stew"))
 	var apple: int = s.spawn_card(catalog.find_by_name("Apple"))
 	check(s.cards[stew].nutrition == 10 and s.cards[apple].nutrition == 2, "Source food nutrition is unmodified")
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.cards[stew].nutrition == 8 and not s.cards.has(apple) and s.stats().characters == 2, "Source Stew leftover goes behind equally near Apple")
 
 	s = Session.new()
@@ -253,7 +256,7 @@ func _test_source_data() -> void:
 	var sword: int = s.spawn_card(catalog.find_by_name("Sword"))
 	for i in range(74): s.spawn_card(catalog.find_by_name("Coin"))
 	for i in range(2): s.spawn_card(catalog.find_by_name("Berry"))
-	s.end_day()
+	CycleDriver.finish(s)
 	check(s.phase == "selling" and s.stats().excess == 1 and s.world.board_card_count() == 99, "Source board reaches selling with 99 all-cards and one excess")
 	# The first eligible roll is the scene's Slime. Control only the random seed,
 	# without modifying imported chance, threshold, price or encounter fields.
@@ -270,6 +273,7 @@ func _test_source_data() -> void:
 	s.event_occurred.connect(source_event)
 	check(s.sell_card(sword), "Source Sword sells for three coins")
 	check(payouts.size() == 1 and payouts[0] == [75, s.world.encounter_guids[1]], "Source weekly encounter triggers at first coin while board count is below 100")
+	CycleDriver.drain(s)
 	check(s.stats().currency == 77 and s.world.board_card_count() == 102 and s.phase == "ready", "Source remaining coins finish after encounter without reselection")
 	s.event_occurred.disconnect(source_event)
 

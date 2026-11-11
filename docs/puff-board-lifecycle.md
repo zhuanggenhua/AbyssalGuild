@@ -1,0 +1,13 @@
+# Puff lifecycle and exact recipe cues
+
+The board listens only to the model's explicit `puff_requested` source-site cue. It snapshots the existing card view's global position while the card is still available; if no current view exists, it reflects the payload's source Vector3 Z exactly once. The renderer's particle-local positions are already reflected and are never reflected again. The Puff root remains unrotated. The board does not infer puffs from generic card_removed, card_created or crafted events.
+
+Puff sound plays even when optional metadata, private PNGs or renderer support is missing. VisualAssets.create_puff may return null without changing model behavior or suppressing the cue. Presentation seeds come from a separate RNG; session RNG and saved positions are untouched.
+
+Existing emitters receive clocks once per board frame, before model tick creates any new emitters. Particle aging receives real delta. Emitter destruction receives the same scaled gameplay delta used by native presentation: zero under manual/modal pause or ending cycle, otherwise delta×selected speed. A source emitter can therefore remain as an empty retained node while paused after its particles have aged out. It is pruned when the renderer reaches its1.1-scaled-second destruction limit. Scene/session entry and title explicitly clear all retained emitters. Rendering never schedules nutrition, damage, loot, consumption or recipe completion.
+
+The ordinary recipe Pop sound now responds to `recipe_pop_requested`, emitted at the source pre-consumption location immediately after Puff, including null-output ordinary recipes. Generic crafted no longer plays Pop, preventing duplication and avoiding unrequested Pop on special recipe overrides. Exact source event ordering is covered by the model owner's tests.
+
+The external menu pause branch also advances the cycle's real-time wait clock once alongside real-time combat. Normal ending-cycle ConfirmationDialogs do not activate the Options/Escape lock and already used Session.tick; the defensive path prevents a future modal state from freezing real waits.
+
+`test_puff_board.gd` tests current-view capture, source fallback, no gameplay RNG/pose mutation, sound without visuals, no generic crafted Pop, real Kill timing, both lifetime clocks, scene/title cleanup and modal cycle continuity. An injected probe keeps lifecycle checks independent of renderer internals; optional private checks also instantiate the actual renderer and verify retained-paused/expired cleanup. Tests use temporary save/options state and silent audio recording. Particle shader blending, Unity random trajectory parity and GPU/manual acceptance remain explicitly unverified; see puff-simulation.md and renderer documentation for visual limits.

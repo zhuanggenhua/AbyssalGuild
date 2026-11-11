@@ -220,6 +220,8 @@ func _tick_production(delta: float) -> void:
 				produce_spawner.call(produce, position, -1)
 			else:
 				session.spawn_card(produce, position)
+			# Source puffs the producer after CreateCardInstance, not the produce.
+			session.request_puff(id)
 
 ## Same geometry as Board.IsPointValid: half stack width and half top-card depth,
 ## not entire stack depth. Bounds and footprint must come from the view/scene.

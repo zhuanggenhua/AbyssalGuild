@@ -1,4 +1,5 @@
 extends SceneTree
+const CycleDriver = preload("res://tests/godot/cycle_test_driver.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 var checks: int = 0
@@ -58,13 +59,13 @@ func _init() -> void:
 	var before_day: int = session.day
 	while session.stats().nutrition < 2:
 		session.spawn_card(catalog.find_by_name("Berry"))
-	session.end_day()
+	CycleDriver.finish(session)
 	check(session.phase == "ready", "fed village ready for next day")
 	check(session.start_day() and session.day == before_day + 1, "new day explicit")
 	var starving = Session.new()
 	starving.configure(catalog)
 	starving.spawn_card(catalog.find_by_name("Villager"))
-	starving.end_day()
+	CycleDriver.finish(starving)
 	check(starving.phase == "game_over" and starving.stats().characters == 0, "unfed character dies")
 	test_feeding_detaches_single_card(catalog)
 	test_review_regressions(catalog)
@@ -120,7 +121,7 @@ func test_edge_cases(catalog) -> void:
 	var berry: int = hunger.spawn_card(catalog.find_by_name("Berry"))
 	hunger.cards[berry].nutrition = 3
 	hunger.cards[villager].health = 1
-	hunger.end_day()
+	CycleDriver.finish(hunger)
 	check(hunger.cards[berry].nutrition == 1, "feeding preserves leftover nutrition")
 	check(hunger.cards[villager].health > 1, "feeding heals survivor")
 	var overflow = Session.new()
@@ -130,7 +131,7 @@ func test_edge_cases(catalog) -> void:
 	overflow.cards[food].nutrition = 2
 	for i in range(25):
 		overflow.spawn_card(wood)
-	overflow.end_day()
+	CycleDriver.finish(overflow)
 	check(overflow.phase == "selling" and overflow.stats().excess == 2, "day blocks on excess cards")
 	check(not overflow.start_day(), "cannot skip excess sale")
 	var sold: int = 0
@@ -148,7 +149,7 @@ func test_death_loot(catalog) -> void:
 	var loot: String = catalog.ref_guid(catalog.fields(villager).loot[0].Card)
 	var position := Vector2(2.5, -1.75)
 	var id: int = session.spawn_card(villager, position)
-	session.end_day()
+	CycleDriver.finish(session)
 	check(not session.cards.has(id), "starvation removes villager")
 	check(session.cards.size() == 1, "starvation creates exactly one loot card")
 	var dropped = session.cards.values()[0]
@@ -182,7 +183,7 @@ func test_review_regressions(catalog) -> void:
 	overflow.cards[food].nutrition = 2
 	for i in range(23):
 		overflow.spawn_card(catalog.find_by_name("Wood"))
-	overflow.end_day()
+	CycleDriver.finish(overflow)
 	check(overflow.stats().characters == 1, "one of two villagers survives insufficient food")
 	check(overflow.stats().cards_owned == 25, "corpse counts toward day-end capacity")
 	check(overflow.phase == "selling" and overflow.stats().excess == 1, "death loot can require an excess sale")
@@ -201,7 +202,7 @@ func test_review_regressions(catalog) -> void:
 			healing.cards[berry].nutrition = 1
 		var maximum: int = int(catalog.fields(healing.cards[character].definition_guid).maxHealth)
 		var expected: int = mini(maximum, 1 + 2 * session._round_to_even(float(maximum) * 0.25))
-		healing.end_day()
+		CycleDriver.finish(healing)
 		check(healing.cards[character].health == expected, "feeding uses source midpoint healing: " + name)
 
 func test_feeding_detaches_single_card(catalog) -> void:
@@ -217,7 +218,7 @@ func test_feeding_detaches_single_card(catalog) -> void:
 	catalog.definitions["test_feeding_craft"] = {"fields": {"requiredIngredients": [{"card": {"guid": session.cards[wood].definition_guid}, "count": 1}], "allowExcessIngredients": true}}
 	original.recipe_guid = "test_feeding_craft"
 	original.progress = 2
-	session.end_day()
+	CycleDriver.finish(session)
 	check(original.card_ids == [wood, rock], "feeding removes only food from middle of stack")
 	check(session.cards[rock].stack_id == original.id, "feeding does not split cards above food")
 	check(original.recipe_guid.is_empty() and original.progress == 0, "feeding cancels old craft even if remaining inputs match")

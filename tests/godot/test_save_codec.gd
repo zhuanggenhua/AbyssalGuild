@@ -60,6 +60,7 @@ func _init() -> void:
 	for phase in ["playing", "feeding", "selling", "ready", "game_over"]:
 		var state := snapshot.duplicate(true)
 		state.session.phase = phase
+		state.session.erase("cycle") # Legacy passive phases infer their initial controller state.
 		check(Codec.restore(target, state).ok and target.phase == phase, "phase " + phase)
 	for malformed in [null, [], {}, {"format": Codec.FORMAT, "version": 2}]:
 		reject(target, malformed, "invalid root")

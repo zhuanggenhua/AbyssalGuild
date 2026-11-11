@@ -1,4 +1,5 @@
 extends Node3D
+const CyclePresentation = preload("res://scripts/ui/cycle_presentation.gd")
 const CameraMotion = preload("res://scripts/ui/camera_motion.gd")
 const CombatPresentation = preload("res://scripts/ui/combat_presentation.gd")
 const EquipmentDisplay = preload("res://scripts/ui/equipment_display_controller.gd")
@@ -28,6 +29,9 @@ var layout_key: String = ""
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
 var combat_rectangles: Dictionary = {}
+var puffs: Array[Node3D] = []
+var puff_rng := RandomNumberGenerator.new()
+var puff_factory: Callable = Callable()
 var camera_motion = CameraMotion.new()
 var combat_presentation = CombatPresentation.new()
 var equipment_display = EquipmentDisplay.new()
@@ -66,6 +70,7 @@ var running: bool = false
 var selected: int = -1
 var dragging: int = -1
 var press_position := Vector2.ZERO
+var drag_grant: int = -1
 var drag_origin := Vector2.ZERO
 var drag_delta := Vector2.ZERO
 var drag_moved: bool = false
@@ -90,6 +95,7 @@ var refresh_clock: float = 0.0
 var active_tab: String = "quests"
 
 func _ready() -> void:
+	puff_rng.randomize()
 	add_child(feedback)
 	_build_world()
 	_build_ui()
@@ -323,6 +329,10 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	_clear_puffs()
+	drag_grant = -1
+	session.cycle.pose_sampler = _sample_cycle_pose
+	session.cycle.layout_resolver = _resolve_layout
 	combat_presentation.reset()
 	camera.h_offset = 0
 	camera.v_offset = 0
@@ -368,20 +378,24 @@ func _enter_game() -> void:
 	title_panel.hide()
 	hud.show()
 	_refresh()
+	var focus: Dictionary = session.cycle.focus_state()
+	if not focus.is_empty(): _focus_camera_position(focus.target_position, float(focus.duration))
 
 func _process(delta: float) -> void:
 	if not running:
 		return
+	var scaled_delta: float = delta * session.speed if session.phase == "playing" and not session.paused and not _ui_pause_active() else 0.0
+	_advance_puffs(delta, scaled_delta)
 	_update_camera_motion(delta)
 	combat_presentation.advance(delta)
 	if _ui_pause_active():
 		# Travel/return use real time even under an external menu pause.
 		session.combat.tick(0.0, delta)
+		session.cycle.advance(delta)
 		_sync_views()
 		return
-	var equipment_delta: float = delta * session.speed if session.phase == "playing" and not session.paused else 0.0
 	session.tick(delta)
-	equipment_display.advance(equipment_delta)
+	equipment_display.advance(scaled_delta)
 	_sync_views()
 	refresh_clock += delta
 	if refresh_clock >= 0.2:
@@ -446,6 +460,7 @@ func _sync_views() -> void:
 	var shake: Vector2 = combat_presentation.camera_offset()
 	camera.h_offset = shake.x
 	camera.v_offset = shake.y
+	CyclePresentation.apply(session.cycle.presentation_state(), views)
 	_sync_equipment_display()
 
 func _pick_target(screen: Vector2) -> Dictionary:
@@ -470,6 +485,7 @@ func _sync_equipment_display() -> void:
 
 # Pointer routing is separate from ray casting for deterministic adapter tests.
 func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
+	drag_grant = -1
 	var id: int = int(hit.get("card_id", -1))
 	var panel: int = int(hit.get("panel_owner", -1))
 	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5
@@ -491,6 +507,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 		dragging = id # Lock the just-detached stack before placement can move its visible pose.
 		_sync_views()
 	dragging = id if _can_drag_card(id) else -1
+	drag_grant = dragging
 	if dragging >= 0:
 		session.combat.dragged[dragging] = true
 		feedback.play_event("CardPick")
@@ -557,6 +574,7 @@ func _input(event: InputEvent) -> void:
 		if hovered != null and hovered != hud:
 			session.combat.dragged.clear()
 			dragging = -1
+			drag_grant = -1
 			drag_delta = Vector2.ZERO
 		else:
 			_finish_drag(event.position)
@@ -567,9 +585,11 @@ func _finish_drag(screen: Vector2) -> void:
 		pressed_panel = -1
 		return
 	var id: int = dragging
+	var carried_press: bool = id >= 0 and drag_grant == id and running and not _ui_pause_active()
+	drag_grant = -1
 	session.combat.dragged.clear()
 	dragging = -1
-	if not _allows_card_actions() or not session.cards.has(id):
+	if (not _allows_card_actions() and not carried_press) or not session.cards.has(id):
 		drag_delta = Vector2.ZERO
 		return
 	feedback.play_event("CardDrop")
@@ -589,7 +609,7 @@ func _finish_drag(screen: Vector2) -> void:
 	if drag_moved:
 		var stack = session.stacks[session.cards[id].stack_id]
 		var destination: Vector2 = session.card_target_position(id) + drag_delta
-		var trade: Dictionary = _try_trade_drop(id, destination)
+		var trade: Dictionary = _try_trade_drop(id, destination, carried_press)
 		if trade.terminal:
 			drag_delta = Vector2.ZERO
 			_refresh()
@@ -625,7 +645,7 @@ func _finish_drag(screen: Vector2) -> void:
 		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
 			var pack_stack: int = session.cards[id].stack_id
 			layout_locks[pack_stack] = true
-			session.open_pack(id)
+			session.open_pack(id, carried_press)
 			layout_locks.erase(pack_stack)
 
 	drag_delta = Vector2.ZERO
@@ -640,7 +660,11 @@ func _refresh() -> void:
 	pause_button.text = "Resume [Space]" if session.paused else "Pause [Space]"
 	pause_button.disabled = session.phase != "playing"
 	day_button.text = {"playing": "End day & feed", "feeding": "Feed villagers", "selling": "Sell %d excess cards" % stats.excess, "ready": "Start next day", "game_over": "Game over · return to title"}.get(session.phase, session.phase)
-	day_button.disabled = session.phase == "selling"
+	if session.phase == "feeding" and session.cycle.stage != "await_feed":
+		day_button.text = "Feeding · " + str(session.cycle.stage).replace("_", " ")
+	elif session.phase == "encounter":
+		day_button.text = "Encounter · " + str(session.cycle.stage).replace("_", " ")
+	day_button.disabled = session.phase in ["selling", "encounter"] or (session.phase == "feeding" and session.cycle.stage != "await_feed")
 	_refresh_market_labels()
 	inspection.text = "Select a card"
 	if session.cards.has(selected):
@@ -737,6 +761,7 @@ func _toggle_pause() -> void:
 	_refresh()
 
 func _advance_day() -> void:
+	if session.phase == "feeding" and session.cycle.stage != "await_feed": return
 	match session.phase:
 		"playing", "feeding": session.end_day()
 		"ready":
@@ -898,6 +923,8 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_clear_puffs()
+	drag_grant = -1
 	combat_presentation.reset()
 	camera.h_offset = 0
 	camera.v_offset = 0
@@ -957,6 +984,12 @@ func _engage_selected() -> void:
 	_refresh()
 
 func _on_session_event(kind: String, payload: Dictionary) -> void:
+	if kind == "cycle_focus_requested":
+		_focus_camera_position(payload.target_position, float(payload.duration))
+	elif kind == "cycle_sound":
+		feedback.play_event(str(payload.sound))
+	elif kind == "cycle_stage_changed":
+		call_deferred("_refresh")
 	if kind == "combat_ended": _release_combat_layout(int(payload.combat_id))
 	if kind == "scene_changed":
 		_enter_game()
@@ -965,7 +998,8 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 		notice.text = "Travel failed: " + str(payload.get("error", ""))
 	if kind == "pack_purchased": feedback.play_event("CashRegister")
 	elif kind == "cards_sold": feedback.play_event("Coins")
-	elif kind == "crafted": feedback.play_event("Pop")
+	elif kind == "recipe_pop_requested": feedback.play_event("Pop")
+	elif kind == "puff_requested": _spawn_puff(payload)
 	elif kind == "combat_attack_started":
 		feedback.play_event(ImpactFeedback.attack_sound(int(payload.combat_type)))
 	elif kind == "combat_hit":
@@ -1353,9 +1387,9 @@ func _sync_trade_zones() -> void:
 			trade_views.erase(index)
 	if not result.errors.is_empty(): notice.text = "Trade geometry unavailable: " + "; ".join(result.errors)
 
-func _try_trade_drop(card_id: int, destination: Vector2) -> Dictionary:
+func _try_trade_drop(card_id: int, destination: Vector2, carried_press: bool = false) -> Dictionary:
 	var outcome := {"terminal": false, "accepted": false, "card_id": card_id}
-	if not _allows_card_actions() or not session.cards.has(card_id): return outcome
+	if (not _allows_card_actions() and not carried_press) or not session.cards.has(card_id): return outcome
 	_sync_trade_zones()
 	var zone: Dictionary = TradeLayout.nearest_zone(trade_zones, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
 	if zone.is_empty(): return outcome
@@ -1414,6 +1448,7 @@ func _toggle_pause_menu() -> void:
 	pause_overlay.visible = not pause_overlay.visible
 	if pause_overlay.visible:
 		dragging = -1
+		drag_grant = -1
 		drag_delta = Vector2.ZERO
 		session.combat.dragged.clear()
 
@@ -1422,6 +1457,7 @@ func _open_options() -> void:
 		if session.phase != "playing": return
 		pause_overlay.show()
 		dragging = -1
+		drag_grant = -1
 		drag_delta = Vector2.ZERO
 		session.combat.dragged.clear()
 	options_panel.open()
@@ -1446,3 +1482,50 @@ func _present_impact(payload: Dictionary) -> void:
 	var popup = ImpactView.new()
 	add_child(popup)
 	popup.configure(descriptor, Vector3(target.x, 0.12, -target.y), str(payload.result.get("type", "")), visual_assets, session.scene_name, int(payload.result.get("advantage", 0)))
+
+func _sample_cycle_pose(id: int) -> Vector3:
+	var state: Dictionary = session.cycle.presentation_state()
+	if int(state.get("card_id", -1)) == id:
+		var point: Variant = CyclePresentation.sample(state)
+		if point is Vector3: return point
+	if views.has(id) and is_instance_valid(views[id]):
+		var point: Vector3 = views[id].global_position
+		return Vector3(point.x, point.y, -point.z)
+	return session.card_target_position_3d(id)
+
+func _spawn_puff(payload: Dictionary) -> void:
+	feedback.play_event("Puff") # Sound is independent of optional private visuals.
+	var id: int = int(payload.get("card_id", -1))
+	var origin: Vector3
+	if views.has(id) and is_instance_valid(views[id]) and not views[id].is_queued_for_deletion():
+		origin = views[id].global_position
+	elif payload.get("position") is Vector3:
+		var source: Vector3 = payload.position
+		origin = Vector3(source.x, source.y, -source.z)
+	else:
+		return
+	var node: Node3D
+	var seed_value: int = puff_rng.randi()
+	if puff_factory.is_valid():
+		node = puff_factory.call(session.scene_name, seed_value)
+	elif visual_assets.has_method("create_puff"):
+		node = visual_assets.create_puff(session.scene_name, seed_value)
+	if node == null: return
+	add_child(node)
+	node.global_position = origin
+	puffs.append(node)
+
+func _advance_puffs(real_delta: float, scaled_delta: float) -> void:
+	for node in puffs.duplicate():
+		if not is_instance_valid(node) or node.is_queued_for_deletion():
+			puffs.erase(node)
+			continue
+		node.advance(real_delta, scaled_delta)
+		if node.is_expired():
+			puffs.erase(node)
+			if not node.is_queued_for_deletion(): node.queue_free()
+
+func _clear_puffs() -> void:
+	for node in puffs:
+		if is_instance_valid(node) and not node.is_queued_for_deletion(): node.queue_free()
+	puffs.clear()

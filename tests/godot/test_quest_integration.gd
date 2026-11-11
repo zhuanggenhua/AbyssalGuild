@@ -1,4 +1,5 @@
 extends SceneTree
+const CycleDriver = preload("res://tests/godot/cycle_test_driver.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 var checks := 0
@@ -84,7 +85,7 @@ func test_introduction() -> void:
 	session.open_pack(starter)
 	check(done(session, "introduction_01"), "last starter slot completes Defeat quest")
 	check(not session.cards.has(starter), "starter removed")
-	check(event_kinds() == ["stats_changed", "card_created", "card_killed", "pack_opened"], "last opening source notification order")
+	check(event_kinds() == ["stats_changed", "card_created", "card_killed", "puff_requested", "pack_opened"], "last opening source notification order")
 	check(session.completed_quests == 1, "only starter completion")
 	check(session.open_pack(starter) == -1 and session.completed_quests == 1, "repeat open cannot duplicate completion")
 	var villager: int = card_id(session, "Villager")
@@ -182,7 +183,7 @@ func test_source_events() -> void:
 	var food: int = session.spawn_card(berry)
 	session.cards[food].nutrition = 2
 	log_events.clear()
-	session.end_day()
+	CycleDriver.finish(session)
 	check(amount(session, "food-death") == 1, "fully consumed food uses Kill")
 	check(count_event("stats_changed") == 1, "feeding publishes stats after consumption")
 	check(session.start_day(), "surviving day advances")
@@ -231,7 +232,7 @@ func test_recipe_cards_and_restore() -> void:
 	log_events.clear()
 	session.open_pack(id)
 	check(amount(session, "discover") == 1, "recipe card marks discovery once")
-	check(event_kinds() == ["recipe_discovered", "stats_changed", "card_created", "card_killed", "pack_opened"], "recipe card discovery before card spawn and exhausted pack death")
+	check(event_kinds() == ["recipe_discovered", "stats_changed", "card_created", "card_killed", "puff_requested", "pack_opened"], "recipe card discovery before card spawn and exhausted pack death")
 	var saved: Dictionary = session.quest_tracker.save_state()
 	session.quest_tracker.restore_state(saved)
 	check(amount(session, "discover") == 1 and session.completed_quests == 0, "restore retains active amount without replay")

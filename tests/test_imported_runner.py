@@ -20,6 +20,7 @@ MARKERS = {
     "test_source_board_mesh": "Source board mesh: PASS (2 models, synthetic)",
     "test_card_mesh_binding": "Source card/pack mesh: PASS (3 bindings; actual cached FBX synthetic)",
     "test_card_overlays": "Private card overlays: PASS (2 labels, 1 panels; actual cached FBX)",
+    "test_puff_view": "Private native Puff view: PASS",
     "test_puff_simulation": "Private Puff simulation: PASS (synthetic)",
     "test_equipment_display": "Private equipment interaction: PASS",
     "test_audio_feedback": "Private source audio: 1 SFX decoded and playback-start checked",
@@ -29,6 +30,7 @@ MARKERS = {
 }
 for name, prefix in (
     ("test_combat_feedback_ui", "Combat feedback UI"), ("test_ui_smoke", "UI"),
+    ("test_cycle_board", "Cycle board"), ("test_puff_board", "Puff board"),
     ("test_camera_board", "Camera board"), ("test_board_integration", "Board integration"), ("test_trade_collection_ui", "Trade/collection UI"),
     ("test_options_ui", "Options UI"), ("test_equipment_board", "Equipment board"),
     ("test_slot_ui", "Slot UI"), ("test_combat_board", "Combat board"),

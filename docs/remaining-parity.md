@@ -9,10 +9,12 @@ The full private source and assets now pass the 1327-file source lock.
 1. **Save lifecycle UI is now connected.** Slot selection, safe explicit legacy
    copying, new-day/travel checkpoints, quit failure handling and confirmed
    game-over archive have integration coverage. Archive rather than permanent
-   removal is an intentional native safety improvement. Continue platform/manual
-   acceptance and fault-injection testing, not a missing-feature claim.
+   removal is an intentional native safety improvement. Normal title archive-selected,
+   archive-all and restore-copy controls are still being finished; platform/manual
+   acceptance and further fault-injection testing remain.
 2. **Phase action locks are connected.** Playing/selling permit card mutation;
-   feeding/ready/game-over block it. Still requires manual input acceptance.
+   feeding/encounter/ready/game-over block new presses; a drag granted before the
+   boundary may finish, matching source pointer-down behavior. Still requires manual input acceptance.
 3. **Trade drop zones are connected.** Source-positioned buyer/vendor colliders,
    nearest-zone validation order, tail-only sales, installment payments and
    nonterminal fallthrough have 43 focused UI checks. Manual drag acceptance is
@@ -32,8 +34,10 @@ The full private source and assets now pass the 1327-file source lock.
 ## Presentation and platform acceptance
 
 - Original source UI composition, complete rendering/lighting parity, original fonts,
-  drag/craft/feed/death puff animations and some source event/sound timing remain
-  incomplete. Source-parameter camera smoothing, zoom and cycle navigation locks
+  some drag/craft/death interpolation and source event/sound timing remain
+  incomplete. Realtime feeding/encounter stages and native Puff rendering are now
+  connected; source built-in shader, Unity random distribution and GPU output
+  are not identical or visually verified. Source-parameter camera smoothing, zoom and cycle navigation locks
   are connected, with hierarchy/pointer acceptance limitations documented. Combat jump/projectile/hurt/shake adapters are now
   connected but use documented interpolation/noise approximations.
 - Original Card/Pack FBX and independently rewritten UV/material composition are
@@ -71,18 +75,21 @@ The UI advances real combat time while its menu pauses scaled gameplay, emits
 attack and additive hit/critical sounds separately, and creates generated damage
 popups. Attack/return motion, private Arrow/Magic and HitUI art, hurt flash/punch and
 camera shake are now connected through a read-only presentation adapter. Native
-fonts, easing/noise and current-target approximations remain; puff is incomplete.
+fonts, easing/noise and current-target approximations remain.
 
 Expanded equipment interaction preserves panel toggles, outside-click equipment
 exceptions, day locks and unequip-drag position. Its cosmetic RNG is independent
 of gameplay and its Perlin implementation is not Unity-identical. No real pointer,
 rendering or listening acceptance is implied by injected/headless checks.
 
-Feeding now snapshots source-ordered characters/food once, preserves leftover tie
-order, observes selling stats events including first-payout transitions, and lets
-packs open during selling. Full real-time feeding/encounter phases remain pending:
-combat can interleave with their waits, and effect timing cannot be faked with
-post-hoc UI animation. Carried drag completion across a cycle boundary remains.
+Feeding now snapshots source-ordered characters/food once and advances real-time
+focus/lift/travel/chew/settle waits, with nutrition and healing at consumption.
+Combat can interleave while scaled gameplay pauses. Selling observes first-payout
+transitions and encounters select once before notification and sequential spawns.
+Carried drags can finish across a cycle boundary, while new presses are locked.
+Complete cycle checkpoints are staged and independently validated, including
+active and inactive campaign scenes. Exact cross-engine coroutine resume order
+and animated stack reflow remain documented limitations.
 
 SFX now preserve overlapping voices when logical source slots wrap, retain source
 cooldown-before-lookup behavior and keep app-local gains without corrupting catalog
@@ -97,7 +104,9 @@ runners; no GPU, pointer or listening acceptance is implied.
 Source assets and generated content remain private and ignored. Public CI tests
 only public code/synthetic behavior and explicitly skips licensed-content checks.
 
-Puff metadata and standalone CPU simulation now cover active-scene references,
-birth ranges, weighted size curves and separate real/scaled clocks. This is not
-a visible effect yet: model event sites and native rendering remain pending; the
-source built-in shader and exact Unity random/renderer behavior are unresolved.
+Puff metadata, model event sites, CPU simulation and native private-texture
+rendering now cover active-scene references, source birth ranges, weighted size
+curves, separate real/scaled clocks and board cleanup. Event coverage includes
+ordinary recipes, Kill, chests, vendor payment, production and encounter spawning.
+The native renderer uses standard alpha blending as an explicit approximation;
+source built-in shader and exact Unity random/renderer behavior remain unresolved.
