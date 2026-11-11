@@ -606,7 +606,12 @@ func buy_pack(guid: String) -> int:
 		if price <= 0:
 			break
 		if int(catalog.fields(card.definition_guid).get("category", 0)) == 7:
+			var stack = stacks.get(card.stack_id)
 			_remove_card(card.id)
+			# Convenience buying can spend a crafting ingredient on any stack.
+			# Keep valid excess progress; never leave spent inputs crafting.
+			if stack != null:
+				_validate_craft(stack)
 			price -= 1
 		else:
 			var amount: int = mini(price, card.stored_coins)

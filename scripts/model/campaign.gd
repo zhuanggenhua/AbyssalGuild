@@ -47,13 +47,14 @@ func _random_position(session) -> Vector2:
 		point = Vector3(session.rng.randf_range(-1, 1), session.rng.randf_range(-1, 1), session.rng.randf_range(-1, 1))
 	return Vector2(point.x, point.z)
 
-func _new_scene(scene_name: String, next_id: int):
+func _new_scene(scene_name: String, next_id: int, departure):
 	var session = _temporary(scene_name)
 	session._next_id = next_id
 	session.day_duration = _session.get_ref().day_duration
-	# Global recipe knowledge exists before destination quest activation.
-	session.discovered_recipes = _session.get_ref().discovered_recipes.duplicate()
-	session.collection.apply_state(_session.get_ref().collection.stage_state(_session.get_ref().collection.save_state()))
+	# Held checkpoint settlement can discover recipes without mutating live state.
+	# Use that staged departure before destination Discover quests activate.
+	session.discovered_recipes = departure.discovered_recipes.duplicate()
+	session.collection.apply_state(departure.collection.stage_state(departure.collection.save_state()))
 	session.quest_tracker.start_new_game(session)
 	var defaults := _defaults(scene_name)
 	var center: Dictionary = defaults.get("defaultSpawnPosition", {})
@@ -102,10 +103,12 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 		if not loaded.ok:
 			return loaded
 	else:
-		destination = _new_scene(target, source._next_id)
+		destination = _new_scene(target, source._next_id, source)
 	destination._next_id = maxi(destination._next_id, source._next_id)
-	destination.discovered_recipes.merge(live.discovered_recipes, true)
-	destination.collection.merge_state(live.collection.stage_state(live.collection.save_state()))
+	# Revisited scenes share the same committed knowledge as the frozen source,
+	# not the pre-settlement live globals. Both merges remain isolated until commit.
+	destination.discovered_recipes.merge(source.discovered_recipes, true)
+	destination.collection.merge_state(source.collection.stage_state(source.collection.save_state()))
 	var remap := {}
 	for traveler in travelers:
 		var id: int = _restore_card(destination, traveler, _random_position(destination))

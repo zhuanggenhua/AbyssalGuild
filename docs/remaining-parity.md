@@ -118,12 +118,6 @@ source built-in shader and exact Unity random/renderer behavior remain unresolve
 A static/source-backed Godot audit identified remaining functionality beyond
 rendering acceptance. These are not covered by the completed-slice claims above:
 
-- Whole-price convenience purchases can currently consume coins belonging to an
-  active crafting stack without invalidating that recipe; the source-backed fix
-  must validate affected stacks and retain valid excess-ingredient progress.
-- Travel must propagate discoveries produced by held-state checkpoint
-  normalization from the staged departure into the destination immediately;
-  currently some knowledge only appears after Save/Continue.
 - Crafting must advance in reverse task activation order, not registered-stack
   order; this deterministic source ordering affects quest credit, new tasks and
   RNG continuation and still needs explicit persisted task-order state.
@@ -156,3 +150,12 @@ confirmation and Escape/gamepad-East menu/modal cancellation are also connected,
 including real headless Viewport event routing. Physical controller/window
 acceptance remains unverified. Source card information/progress/target helpers
 remain prepared but their live board wiring is still a separate unfinished slice.
+
+
+Whole-price convenience purchases now validate each coin's remaining source
+stack immediately, stopping invalid recipes without resetting valid excess-input
+progress. Staged departure discoveries, collection and read state now reach travel
+destinations before first-visit quest activation, and no longer wait until Continue
+to become visible. Both changes preserve failed-action atomicity and have actual
+source-card reproduction/continuation tests. Save APIs still require frame
+boundaries rather than arbitrary reentrant gameplay callbacks.
