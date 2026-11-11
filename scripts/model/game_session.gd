@@ -30,6 +30,8 @@ var ai = MobAI.new()
 var cycle = CycleController.new()
 var drag = HeldStack.new()
 var crafting = CraftingOrder.new()
+var travel_request: Callable = Callable()
+var travel_pending: bool = false
 var scene_name: String = "Main"
 var friendly_mode: bool = false
 var board_bounds: Variant = null
@@ -487,7 +489,7 @@ func tick_paused(delta: float) -> void:
 	if delta <= 0:
 		return
 	combat.tick(0.0, delta)
-	if crafting.advance(0.0):
+	if not travel_pending and crafting.advance(0.0):
 		return
 	cycle.advance(delta)
 
@@ -495,6 +497,10 @@ func _complete_recipe(stack) -> void:
 	var entry: Dictionary = catalog.get_definition(stack.recipe_guid)
 	var recipe: Dictionary = entry.get("fields", {})
 	if entry.get("script_class", "") == "TravelRecipe":
+		if travel_pending: return
+		if travel_request.is_valid():
+			travel_pending = bool(travel_request.call(stack.id, stack.recipe_guid))
+			return
 		var result: Dictionary = campaign.travel(stack.id, stack.recipe_guid)
 		if not result.ok:
 			stack.cancel_craft()

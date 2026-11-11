@@ -18,7 +18,10 @@ const CardHoverView = preload("res://scripts/ui/card_hover_view.gd")
 const CraftProgressView = preload("res://scripts/ui/craft_progress_view.gd")
 const NavigationInput = preload("res://scripts/ui/navigation_input.gd")
 const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
+const MenuSlide = preload("res://scripts/ui/menu_slide.gd")
 const DayClock = preload("res://scripts/ui/day_clock.gd")
+const SceneTransition = preload("res://scripts/ui/scene_transition.gd")
+const TitleNavigation = preload("res://scripts/ui/title_navigation.gd")
 const TitleGameplayPrefs = preload("res://scripts/ui/title_gameplay_prefs.gd")
 const OptionsAdapter = preload("res://scripts/ui/options_adapter.gd")
 const TradeLayout = preload("res://scripts/model/trade_layout.gd")
@@ -104,6 +107,18 @@ var drag_delta := Vector2.ZERO
 var drag_moved: bool = false
 var drag_start_position := Vector3.ZERO
 var hud: Control
+var scene_transition = SceneTransition.new()
+var scene_shade: ColorRect
+var _transition_pause_frame: bool = false
+var title_navigation = TitleNavigation.new()
+var title_home: VBoxContainer
+var title_preferences: VBoxContainer
+var title_saves: VBoxContainer
+var title_new_button: Button
+var title_load_button: Button
+var title_confirm_button: Button
+var title_cancel_button: Button
+var title_back_button: Button
 var title_panel: PanelContainer
 var title_status: Label
 var day_clock
@@ -118,6 +133,8 @@ var speed_buttons: Dictionary = {}
 var shop: VBoxContainer
 var market_panel: Control
 var detail_panel: Control
+var detail_toggle: Button
+var journal_slide = MenuSlide.new()
 var duration_label: Label
 var duration: HSlider
 var continue_button: Button
@@ -145,6 +162,7 @@ func _ready() -> void:
 	add_child(vendor_unlock)
 	_build_world()
 	_build_ui()
+	_build_scene_fader()
 	for dialog in [archive_dialog, game_over_dialog, quit_dialog, options_panel.reset_dialog]:
 		NavigationInput.enable_modal_cancel(dialog)
 		dialog.visibility_changed.connect(_sync_card_feedback)
@@ -277,7 +295,7 @@ func _build_ui() -> void:
 	for speed in [1.0, 2.0]:
 		speed_buttons[speed] = _button("%dx" % speed, speeds, _set_speed.bind(speed))
 	_button("Save", left, _save_game)
-	_button("Save & title", left, _return_title)
+	_button("Save & title", left, _request_return_title)
 	_label("MARKET", left, 20)
 	var market_scroll := ScrollContainer.new()
 	market_scroll.custom_minimum_size = Vector2(220, 250)
@@ -311,9 +329,10 @@ func _build_ui() -> void:
 	var market_toggle := _button("Market & controls", hud, func(): market_panel.visible = not market_panel.visible)
 	market_toggle.position = Vector2(18, 835)
 	market_toggle.size = Vector2(248, 40)
-	var detail_toggle := _button("Inspect & journal", hud, func(): detail_panel.visible = not detail_panel.visible)
+	detail_toggle = _button("Inspect & journal", hud, func(): journal_slide.toggle())
 	detail_toggle.position = Vector2(1174, 835)
 	detail_toggle.size = Vector2(248, 40)
+	journal_slide.configure(detail_panel, detail_toggle, func(): feedback.play_event("Click"))
 	notice = _label("", hud, 16)
 	notice.position = Vector2(285, 835)
 	notice.size = Vector2(865, 50)
@@ -347,31 +366,44 @@ func _build_ui() -> void:
 	_label("StackCraft · Godot migration", title, 22)
 	title_status = _label("Loading source data…", title)
 	title_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	duration_label = _label(TitleGameplayPrefs.duration_text(120), title)
+	title_home = VBoxContainer.new()
+	title_home.name = "TitleHome"
+	title.add_child(title_home)
+	title_new_button = _button("New Game", title_home, _open_title_preferences)
+	title_load_button = _button("Load Game", title_home, _open_title_saves)
+	title_preferences = VBoxContainer.new()
+	title_preferences.name = "GameplayPreferences"
+	title.add_child(title_preferences)
+	_label("Gameplay Preferences", title_preferences, 22)
+	duration_label = _label(TitleGameplayPrefs.duration_text(120), title_preferences)
 	duration = HSlider.new()
-	title.add_child(duration)
+	title_preferences.add_child(duration)
 	duration.value_changed.connect(func(value: float): duration_label.text = TitleGameplayPrefs.duration_text(value))
 	friendly_choice = CheckBox.new()
 	friendly_choice.text = TitleGameplayPrefs.friendly_text(false)
-	title.add_child(friendly_choice)
+	title_preferences.add_child(friendly_choice)
 	friendly_choice.toggled.connect(func(enabled: bool): friendly_choice.text = TitleGameplayPrefs.friendly_text(enabled))
-	_label("Saved games · native slots", title)
+	title_confirm_button = _button("Confirm · create new slot", title_preferences, _confirm_title_new_game)
+	title_cancel_button = _button("Cancel", title_preferences, _title_back)
+	title_saves = VBoxContainer.new()
+	title_saves.name = "SavedGames"
+	title.add_child(title_saves)
+	_label("Saved games · native slots", title_saves)
 	slot_picker = OptionButton.new()
 	slot_picker.item_selected.connect(_select_slot)
-	title.add_child(slot_picker)
-	_button("New game · new slot", title, start_new)
-	continue_button = _button("Continue selected slot", title, _continue_game)
+	title_saves.add_child(slot_picker)
+	continue_button = _button("Continue selected slot", title_saves, _request_continue_game)
 	continue_button.disabled = true
 	var archive_actions := HBoxContainer.new()
-	title.add_child(archive_actions)
+	title_saves.add_child(archive_actions)
 	archive_selected_button = _button("Archive selected", archive_actions, _request_archive_selected)
 	archive_all_button = _button("Archive all listed slots", archive_actions, _request_archive_all)
 	for button in [archive_selected_button, archive_all_button]: button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_label("Recoverable archives · originals retained", title)
+	_label("Recoverable archives · originals retained", title_saves)
 	archive_picker = OptionButton.new()
 	archive_picker.item_selected.connect(_select_archive)
-	title.add_child(archive_picker)
-	restore_archive_button = _button("Restore copy into a new slot", title, _restore_archive_copy)
+	title_saves.add_child(archive_picker)
+	restore_archive_button = _button("Restore copy into a new slot", title_saves, _restore_archive_copy)
 	restore_archive_button.disabled = true
 	archive_dialog = ConfirmationDialog.new()
 	archive_dialog.title = "Archive listed save slots"
@@ -380,15 +412,16 @@ func _build_ui() -> void:
 	archive_dialog.canceled.connect(_cancel_archive_slots)
 	add_child(archive_dialog)
 	legacy_picker = OptionButton.new()
-	title.add_child(legacy_picker)
-	legacy_button = _button("Copy legacy save into a new slot", title, _adopt_selected_legacy)
+	title_saves.add_child(legacy_picker)
+	legacy_button = _button("Copy legacy save into a new slot", title_saves, _adopt_selected_legacy)
 	legacy_button.hide()
 	legacy_picker.hide()
+	title_back_button = _button("Back", title_saves, _title_back)
 	game_over_dialog = ConfirmationDialog.new()
 	game_over_dialog.title = "Return to Title"
 	game_over_dialog.dialog_text = "This game has ended. Return to Title and move this slot, including backups, into the recoverable local archive?"
 	game_over_dialog.ok_button_text = "Archive slot & return"
-	game_over_dialog.confirmed.connect(_confirm_game_over_return)
+	game_over_dialog.confirmed.connect(_request_game_over_return)
 	add_child(game_over_dialog)
 	quit_dialog = ConfirmationDialog.new()
 	quit_dialog.title = "Quit during day-end?"
@@ -396,9 +429,45 @@ func _build_ui() -> void:
 	quit_dialog.confirmed.connect(_confirm_quit)
 	quit_dialog.canceled.connect(_cancel_quit)
 	add_child(quit_dialog)
-	_button("Options", title, _open_options)
-	title_quit_button = _button("Quit Game", title, _request_title_quit)
+	_button("Options", title_home, _open_options)
+	title_quit_button = _button("Quit Game", title_home, _request_title_quit)
 	_build_pause_options(layer)
+	_sync_title_destination()
+
+func _title_navigation_allowed() -> bool:
+	return not scene_transition.active() and not running and not quit_dispatched and not options_panel.visible and not _navigation_modal_active()
+
+func _sync_title_destination() -> void:
+	title_home.visible = title_navigation.destination == TitleNavigation.HOME
+	title_preferences.visible = title_navigation.destination == TitleNavigation.PREFS
+	title_saves.visible = title_navigation.destination == TitleNavigation.SAVES
+
+func _open_title_preferences() -> void:
+	if not _title_navigation_allowed(): return
+	title_navigation.open(TitleNavigation.PREFS)
+	_sync_title_destination()
+	duration.grab_focus()
+
+func _open_title_saves() -> void:
+	if not _title_navigation_allowed(): return
+	title_navigation.open(TitleNavigation.SAVES)
+	_refresh_slots()
+	_sync_title_destination()
+	title_back_button.grab_focus()
+
+func _title_back() -> void:
+	if not _title_navigation_allowed(): return
+	var previous: String = title_navigation.destination
+	title_navigation.open(TitleNavigation.HOME)
+	_sync_title_destination()
+	if previous == TitleNavigation.PREFS: title_new_button.grab_focus()
+	elif previous == TitleNavigation.SAVES: title_load_button.grab_focus()
+
+func _confirm_title_new_game() -> void:
+	if not _title_navigation_allowed() or not title_navigation.consume_new_game(): return
+	_request_new_game()
+	# Failure leaves prefs/error visible and permits another explicit Confirm.
+	if not running: title_navigation.open(TitleNavigation.PREFS)
 
 func _build_shop() -> void:
 	for child in shop.get_children():
@@ -433,6 +502,9 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	journal_slide.reset(MenuSlide.initial_state(catalog.data).open)
+	title_navigation.open(TitleNavigation.HOME)
+	_sync_title_destination()
 	day_clock.configure(catalog.data, session.scene_name, visual_assets)
 	_clear_card_feedback()
 	vendor_unlock.cancel()
@@ -461,6 +533,7 @@ func _enter_game() -> void:
 		session.collection.changed.connect(_collection_changed)
 	slots.configure(session.campaign, slot_root)
 	session.campaign.before_travel = _departure_checkpoint
+	session.travel_request = _request_travel
 	session.combat.start_overlap_selector = _combat_start_overlaps
 	session.combat.resize_overlap_selector = _combat_resize_overlaps
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
@@ -498,11 +571,27 @@ func _enter_game() -> void:
 	if not focus.is_empty(): _focus_camera_position(focus.target_position, float(focus.duration))
 
 func _process(delta: float) -> void:
+	_transition_pause_frame = scene_transition.blocks_input()
+	if _transition_pause_frame:
+		# Finish the departing world's unscaled frame before committing at black.
+		# Oversized frames cannot leak time past the fade-out boundary.
+		var departing_delta: float = minf(maxf(delta, 0), maxf(0, SceneTransition.DURATION - scene_transition.elapsed))
+		journal_slide.advance(departing_delta)
+		_advance_running_frame(departing_delta)
+		scene_transition.advance(delta)
+		_sync_scene_fader()
+		return
+	journal_slide.advance(delta)
+	scene_transition.advance(delta)
+	_sync_scene_fader()
+	_advance_running_frame(delta)
+
+func _advance_running_frame(delta: float) -> void:
 	if not running:
 		return
 	# Sample ownership before advancing real-time reveals. An expiring reveal
 	# cannot retroactively release the scaled time of this frame.
-	var external_pause: bool = _ui_pause_active() or vendor_unlock.is_active()
+	var external_pause: bool = _transition_pause_frame or _ui_pause_active() or vendor_unlock.is_active()
 	var scaled_delta: float = delta * session.speed if session.phase == "playing" and not session.paused and not external_pause else 0.0
 	_advance_puffs(delta, scaled_delta)
 	_update_camera_motion(delta)
@@ -782,6 +871,9 @@ func _board_point(screen: Vector2) -> Vector2:
 	return Vector2(point.x, -point.z)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if scene_transition.blocks_input():
+		get_viewport().set_input_as_handled()
+		return
 	if NavigationInput.is_cancel_press(event):
 		_handle_escape()
 		get_viewport().set_input_as_handled()
@@ -814,6 +906,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
+	if scene_transition.blocks_input():
+		get_viewport().set_input_as_handled()
+		return
 	if running and (event is InputEventMouseMotion or event is InputEventMouseButton):
 		_record_card_pointer(event.position)
 	# Middle-button pan bypasses GUI blocking, matching the source input path.
@@ -1194,7 +1289,7 @@ func _continue_game() -> void:
 
 func _adopt_selected_legacy() -> void:
 	if legacy_picker.item_count <= 0: return
-	_adopt_legacy(str(legacy_picker.get_item_metadata(legacy_picker.selected)))
+	_request_scene_change(_adopt_legacy.bind(str(legacy_picker.get_item_metadata(legacy_picker.selected))))
 
 func _adopt_legacy(path: String) -> void:
 	if data_error != OK or path not in legacy_paths: return
@@ -1239,6 +1334,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	journal_slide.reset(false)
 	_clear_card_feedback()
 	vendor_unlock.cancel()
 	_cancel_archive_slots()
@@ -1260,6 +1356,8 @@ func _show_title() -> void:
 	running = false
 	dragging = -1
 	hud.hide()
+	title_navigation.open(TitleNavigation.HOME)
+	_sync_title_destination()
 	title_panel.show()
 	_refresh_slots()
 	for view in views.values(): view.hide()
@@ -1279,7 +1377,7 @@ func _notification(what: int) -> void:
 		_clear_card_hover()
 		_clear_drag_target_feedback()
 		return
-	if what != NOTIFICATION_WM_CLOSE_REQUEST or quit_dispatched or _navigation_modal_active(): return
+	if what != NOTIFICATION_WM_CLOSE_REQUEST or scene_transition.active() or quit_dispatched or _navigation_modal_active(): return
 	if options_panel != null and options_panel.visible and options_panel.dirty:
 		options_panel.request_close()
 		if options_panel.visible: return
@@ -1297,6 +1395,7 @@ func _navigation_modal_active() -> bool:
 	return options_panel != null and options_panel.reset_dialog != null and options_panel.reset_dialog.visible
 
 func _request_title_quit() -> void:
+	if scene_transition.active(): return
 	if running or quit_dispatched or options_panel.visible or _navigation_modal_active(): return
 	pending_quit = "title"
 	quit_dialog.title = "Quit Game"
@@ -1307,6 +1406,7 @@ func _cancel_quit() -> void:
 	pending_quit = ""
 
 func _confirm_quit() -> void:
+	if scene_transition.active(): return
 	var requested: String = pending_quit
 	pending_quit = "" # Consume a confirmation once, including a stale request.
 	quit_dialog.hide()
@@ -1316,6 +1416,8 @@ func _confirm_quit() -> void:
 		_execute_quit()
 
 func _execute_quit() -> void:
+	scene_transition.cancel()
+	session.travel_pending = false
 	if quit_dispatched: return
 	quit_dispatched = true
 	if quit_callback.is_valid():
@@ -1351,7 +1453,7 @@ func _engage_selected() -> void:
 
 func _on_session_event(kind: String, payload: Dictionary) -> void:
 	if kind == "day_ended":
-		detail_panel.hide()
+		journal_slide.day_ended()
 		day_clock.hide()
 		status.hide()
 		call_deferred("_refresh")
@@ -1825,21 +1927,24 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	_label("Your selected time pace is preserved.", box, 15)
 	_button("Continue [Escape]", box, _toggle_pause_menu)
 	_button("Options", box, _open_options)
-	_button("Save & return to title", box, _return_title)
+	_button("Save & return to title", box, _request_return_title)
 	pause_overlay.hide()
 	options_panel = OptionsPanel.new()
 	layer.add_child(options_panel)
 
 func _ui_pause_active() -> bool:
-	return running and ((pause_overlay != null and pause_overlay.visible) or (options_panel != null and options_panel.visible))
+	return scene_transition.blocks_input() or (running and ((pause_overlay != null and pause_overlay.visible) or (options_panel != null and options_panel.visible)))
 
 func _toggle_pause_menu() -> void:
+	if scene_transition.blocks_input(): return
 	if not running or session.phase != "playing" or options_panel.visible: return
 	pause_overlay.visible = not pause_overlay.visible
 	# External pause changes time, not an already captured pointer.
 	_refresh()
 
 func _open_options() -> void:
+	if scene_transition.blocks_input(): return
+	if quit_dispatched or _navigation_modal_active(): return
 	if running:
 		if session.phase != "playing": return
 		pause_overlay.show()
@@ -1847,6 +1952,7 @@ func _open_options() -> void:
 	if running: _refresh()
 
 func _handle_escape() -> void:
+	if scene_transition.blocks_input(): return
 	if _navigation_modal_active(): return
 	# Source PauseMenu never changes external pause during IsEndingCycle.
 	if running and session.phase != "playing": return
@@ -1854,6 +1960,8 @@ func _handle_escape() -> void:
 		options_panel.request_close()
 	elif running:
 		_toggle_pause_menu()
+	else:
+		_title_back()
 
 func _present_impact(payload: Dictionary) -> void:
 	var descriptor: Dictionary = ImpactFeedback.describe(int(payload.get("combat_type", 0)), payload.get("result", {}), ImpactFeedback.hit_ui_fields(catalog.data, session.scene_name))
@@ -2015,3 +2123,92 @@ func _restore_archive_copy() -> void:
 	selected_slot = int(result.slot)
 	_refresh_slots()
 	title_status.text = "Restored a copy into slot %d%s. The archive was kept. Choose Continue to load the copy." % [selected_slot, " using its valid backup" if result.get("recovered",false) else ""]
+
+func _build_scene_fader() -> void:
+	var layer := CanvasLayer.new()
+	layer.layer = 100
+	add_child(layer)
+	scene_shade = ColorRect.new()
+	scene_shade.name = "SceneFade"
+	layer.add_child(scene_shade)
+	scene_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_sync_scene_fader()
+
+func _sync_scene_fader() -> void:
+	if scene_shade == null: return
+	scene_shade.color = Color(0, 0, 0, scene_transition.alpha)
+	scene_shade.visible = scene_transition.active()
+	scene_shade.mouse_filter = Control.MOUSE_FILTER_STOP if scene_transition.blocks_input() else Control.MOUSE_FILTER_IGNORE
+
+func _request_scene_change(action: Callable) -> bool:
+	if quit_dispatched or not scene_transition.begin(action): return false
+	panning = false
+	pending_quit = ""
+	_clear_card_feedback()
+	_sync_scene_fader()
+	return true
+
+func _request_new_game() -> void:
+	if data_error != OK or running: return
+	_request_scene_change(_commit_new_game.bind(session, int(duration.value), friendly_choice.button_pressed))
+
+func _request_continue_game() -> void:
+	if data_error != OK or running or selected_slot <= 0: return
+	_request_scene_change(_commit_continue_game.bind(session, selected_slot))
+
+func _request_return_title() -> void:
+	if not running or scene_transition.active(): return
+	if session.phase == "game_over":
+		_return_title()
+		return
+	var result: Dictionary = _save_active_slot()
+	if not result.ok:
+		notice.text = "Could not save; session kept open: " + str(result.get("error", "Unknown error"))
+		return
+	_request_scene_change(_commit_title.bind(session))
+
+func _commit_new_game(owner, requested_duration: int, requested_friendly: bool) -> void:
+	if session != owner or running: return
+	duration.value = requested_duration
+	friendly_choice.button_pressed = requested_friendly
+	start_new()
+
+func _commit_continue_game(owner, requested_slot: int) -> void:
+	if session != owner or running: return
+	selected_slot = requested_slot
+	_continue_game()
+
+func _commit_title(owner) -> void:
+	if session == owner and running: _show_title()
+
+func _request_game_over_return() -> void:
+	if not running or session.phase != "game_over": return
+	_request_scene_change(_confirm_game_over_return)
+
+func _request_travel(stack_id: int, recipe_guid: String) -> bool:
+	if not running or scene_transition.active() or quit_dispatched: return false
+	var candidate = Session.new()
+	candidate.configure(catalog)
+	var result: Dictionary = candidate.campaign.restore(session.campaign.capture())
+	if result.ok:
+		# Stage against request-time state, without any live checkpoint callback.
+		result = candidate.campaign.travel(stack_id, recipe_guid)
+	if result.ok: result = _departure_checkpoint()
+	if not result.ok:
+		if session.stacks.has(stack_id): session.stacks[stack_id].cancel_craft()
+		_on_session_event("travel_failed", result)
+		return false
+	return _request_scene_change(_commit_travel.bind(session, candidate))
+
+func _commit_travel(owner, candidate) -> void:
+	owner.travel_pending = false
+	if owner != session or not running: return
+	# Atomic validated candidate swap; real-time old-scene activity after the
+	# departure capture intentionally cannot rewrite captured travelers.
+	session = candidate
+	_enter_game()
+	_checkpoint("Arrived at " + session.scene_name)
+
+func _exit_tree() -> void:
+	scene_transition.cancel()
+	session.travel_pending = false

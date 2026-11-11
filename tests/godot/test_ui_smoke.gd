@@ -216,6 +216,19 @@ func _check_scene_ui(board, scene_name: String, vendor_count: int) -> void:
 	for id in board.views:
 		check(board.session.cards.has(id), scene_name + " view references live card")
 
+func _finish_travel_fade(board, departing, from_scene: String, to_scene: String, expected_elapsed: float) -> void:
+	var old_elapsed: float = departing.elapsed
+	check(board.session == departing and board.session.scene_name == from_scene and board.scene_transition.phase == "out", "travel request retains " + from_scene + " until black")
+	check(board.scene_transition.blocks_input() and board.scene_shade.mouse_filter == Control.MOUSE_FILTER_STOP, "travel fade-out owns pointer and external pause")
+	board._process(0.5)
+	check(board.session == departing and departing.elapsed == old_elapsed and is_equal_approx(board.scene_transition.alpha, 0.5), "half fade keeps departing scene and scaled clock fixed")
+	board._process(0.5)
+	check(board.session != departing and board.session.scene_name == to_scene and board.scene_transition.phase == "in", "black commits a separate validated " + to_scene + " session")
+	check(is_equal_approx(board.session.elapsed, expected_elapsed), "new destination receives no old fade-out frame")
+	check(not board.scene_transition.blocks_input() and board.scene_shade.mouse_filter == Control.MOUSE_FILTER_IGNORE, "fade-in releases pointer and transition pause at black")
+	board._process(1.0)
+	check(not board.scene_transition.active() and not board.scene_shade.visible and not board.scene_transition.blocks_input(), "completed fade clears overlay and scene input lock")
+
 func _make_travel_stack(board) -> int:
 	var portal: int = board.session.spawn_card(board.catalog.find_by_name("Grand Portal"), Vector2(-3, -2))
 	var traveler: int = board.session.spawn_card(board.catalog.find_by_name("Villager"), Vector2(-5, -2))
@@ -273,11 +286,13 @@ func _test_world_and_campaign(board) -> void:
 	check(board.session.stacks.has(travel_stack) and board.session.stacks[travel_stack].recipe_guid.is_empty(), "failed travel cancels recipe without destroying stack")
 	recipe.fields.targetScenes = targets
 	board.session._check_recipe(board.session.stacks[travel_stack])
+	var main_elapsed: float = board.session.elapsed
 	board.session.tick(float(recipe.fields.craftingDuration))
+	_finish_travel_fade(board, live, "Main", "Island", 0.0)
 	board._refresh()
 	_check_scene_ui(board, "Island", 1)
 	check(board.notice.text.begins_with("Arrived at Island") and board.running, "runtime travel event updates running UI")
-	check(board.session.elapsed == 0, "travel tick does not advance Island clock")
+	check(is_equal_approx(board.session.elapsed, 1.0), "Island clock resumes for exactly the one-second fade-in")
 	check(board.session.campaign.saved_scenes.has("Main"), "Main snapshot retained in campaign")
 	check(board.session.friendly_mode, "friendly mode survives travel to Island")
 	board._save_game()
@@ -298,6 +313,7 @@ func _test_world_and_campaign(board) -> void:
 	DirAccess.remove_absolute(board._active_slot_path() + ".tmp")
 	travel_stack = _make_travel_stack(board)
 	board.session.tick(float(recipe.fields.craftingDuration))
+	_finish_travel_fade(board, live, "Island", "Main", main_elapsed)
 	board._refresh()
 	_check_scene_ui(board, "Main", 8)
 	check(board.session.cards.has(chest) and board.session.cards[chest].base_definition_guid == chest_guid, "return Main restores original chest")

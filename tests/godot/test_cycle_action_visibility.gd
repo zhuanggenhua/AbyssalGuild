@@ -57,7 +57,7 @@ func run() -> void:
 	check(not board.day_button.is_visible_in_tree(), "title hides gameplay action")
 	board.start_new(); board.set_process(false)
 	await process_frame
-	check(not board.market_panel.visible and not board.detail_panel.visible, "both sidebars start collapsed")
+	check(not board.market_panel.visible and board.detail_panel.visible, "source journal starts open while native market stays collapsed")
 	check(board.day_button.is_visible_in_tree() and not board.day_button.disabled, "one End Day action remains available outside collapsed market")
 	check(not board.market_panel.is_ancestor_of(board.day_button) and not board.detail_panel.is_ancestor_of(board.day_button), "day action has no collapsible sidebar ancestor")
 	check(action_count(board) == 1, "exactly one HUD button dispatches the day action")

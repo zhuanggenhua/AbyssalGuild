@@ -9,7 +9,8 @@ The public repository includes no original third-party assets or exported conten
 1. Follow `data-import.md` to generate local `data/stackcraft.json` from a licensed
    source copy. Optional private media import is described in `visual-import.md`.
 2. Open `project.godot` in Godot 4.6, or run `godot --path .`.
-3. Choose day duration/friendly mode and New game, or Continue a native save.
+3. Choose New Game, set day duration/friendly mode, then Confirm. Load Game opens
+   the native save picker; choose a slot and Continue. Cancel/Back returns home.
 
 Missing data blocks starting and displays an import command. No mock replacement
 is loaded. Save/Continue selects a native multi-scene slot under
@@ -25,8 +26,11 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
   it resumes the same timer. A captured release over UI or after opening Pause/
   Options still resolves that hold once; it does not silently cancel or roll back.
   See [held-stack lifecycle](held-stack-lifecycle.md).
-- Bottom buttons open Market & controls and Inspect & journal. Sidebars start
-  collapsed so the source perspective camera's starter area is not covered.
+- The bottom Market & controls button opens the native trade controls. The
+  right inspection/journal panel starts open from source UIRoot metadata and
+  toggles with << / >> using the source 0.5-second real-time slide. Repeated
+  clicks while it moves are ignored. Missing metadata uses an explicit closed
+  fallback. The independent native market starts collapsed.
 - Select a card to inspect source text and state. Sell card and sell stack are
   separate commands. Currency can be dropped onto a chest; a sole selected chest
   can withdraw a coin. Source matrix and active-crafting eligibility apply.
@@ -36,7 +40,9 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
 - Escape opens the pause menu during play; its Options panel preserves the
   selected pace, applies supported preferences and reports unsupported mappings.
   Ending-cycle locks prevent opening it during feeding/selling/encounter/ready/game-over.
-  See `options-ui.md`. Space pauses. Buttons select speed. WASD or middle-drag pans; the wheel zooms.
+  See `options-ui.md`. Space pauses. The always-visible day clock shows progress
+  and cycles Normal → Fast → Paused; separate buttons select supported speed.
+  WASD or middle-drag pans; the wheel zooms.
   Imported camera metadata supplies perspective FOV, clip planes and source pose.
 - Scene-specific shops expose their configured packs, quest locks and prices.
   Source-positioned buyer/vendor plates now accept dropped card tails, including
@@ -45,11 +51,16 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
 - End day advances real-time focus, food travel/consumption and encounter waits,
   then requires selling excess cards before advancing.
   Daily encounters and friendly-mode filtering are connected. Starvation can end
-  a session. Active/completed quests and discovered recipes have separate ledgers;
-  hovering an individual row marks its raw item ID read. Opening tabs marks nothing.
+  a session. Active/completed quests stay under their configured groups; discovered
+  recipes group by source category. Headers collapse without marking rows read.
+  Hovering a visible individual row marks its raw item ID read; opening tabs marks nothing.
 - Completing actual TravelRecipes changes Main/Island, vendors, quests and clock;
-  scene contents and timers persist. Save & title stays open if saving fails.
-- New commits a fresh slot without overwriting existing games. Confirmed Start Day
+  scene contents and timers persist. User scene changes fade to black for one real
+  second, commit, and fade back for one second. Departure travel/title checkpoints
+  are captured before fade; failures retain the current game. Save & title stays
+  open if saving fails.
+- New Game opens preferences without allocating; Confirm creates a fresh slot
+  without overwriting existing games. Confirmed Start Day
   and travel checkpoint automatically. Game-over Return asks before archiving the
   ended slot; no deletion happens merely on death. The title picker reports scene,
   quest percentage, UTC file time and backup recovery.
@@ -65,8 +76,10 @@ vertex/morph bounds; without media a generated surface uses verified source
 12x8-to-24x16 bounds. Card geometry uses source colliders even without textures.
 Private Card/Pack FBX and an independently rewritten UV shader can now be used
 when the licensed assets and import cache are available. Generated geometry remains
-the fallback. Original fonts and complete Title/Main/Island UI are not reproduced;
-GPU/rendered acceptance is still required.
+the fallback. Source title destinations, gameplay preferences, day clock, journal
+groups and transitions are connected in native controls. Original fonts and exact
+Title/Main/Island canvas geometry are not reproduced; GPU/rendered acceptance is
+still required.
 
 Stack footprints include the source margin, trailing step and first-card size.
 The source iteration-limited separation solver handles stack overlap and board
@@ -129,3 +142,9 @@ one coin; dragged/repeated releases do not. Pace controls expose only source
 Normal (1x) and Fast (2x), with ending-phase/menu guards. See
 [cycle action visibility](cycle-action-visibility.md). Generated recipe-card
 ingredient descriptions now survive pack/research creation and cold Continue.
+
+
+Title destinations, day-clock bindings, journal groups and source-timed scene/menu
+transitions are documented in [title navigation](title-navigation.md),
+[day clock](day-clock-ui.md), [journal groups](journal-groups.md),
+[scene transitions](scene-transitions.md) and [menu slide](menu-slide.md).

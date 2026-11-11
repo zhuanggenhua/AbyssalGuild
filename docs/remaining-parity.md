@@ -4,7 +4,7 @@ This is a source-audit checklist, not a claim that the game is complete. Referen
 StackCraft `a11a89b04cea8370476f2559b639bb9b4cbc08d8`. No Unity execution was used.
 The full private source and assets now pass the 1327-file source lock.
 
-## Functional work still required
+## Implemented behavior awaiting broader acceptance
 
 1. **Save lifecycle UI is now connected.** Slot selection, safe explicit legacy
    copying, new-day/travel checkpoints, quit failure handling and confirmed
@@ -35,8 +35,8 @@ The full private source and assets now pass the 1327-file source lock.
 ## Presentation and platform acceptance
 
 - Original source UI composition, complete rendering/lighting parity, original fonts,
-  transient spawn/current-pose details and source event/sound timing remain
-  incomplete. Realtime feeding/encounter stages and native Puff rendering are now
+  transient spawn/current-pose details and exact source event/sound timing remain
+  distinct from the verified native behavior.  Realtime feeding/encounter stages and native Puff rendering are now
   connected; source built-in shader, Unity random distribution and GPU output
   are not identical or visually verified. Source-parameter camera smoothing, zoom and cycle navigation locks
   are connected, with hierarchy/pointer acceptance limitations documented. Combat jump/projectile/hurt/shake adapters are now
@@ -234,3 +234,35 @@ Native layout and inline journal detail still differ from the source Canvas and
 hover panel. Journal closure is immediate rather than its source slide; the
 referenced TMP font is absent from the locked source subtree. Rendered/platform
 acceptance and the other cross-engine approximations above remain unresolved.
+
+
+## Title destinations and source-timed navigation
+
+The title now separates Home, Gameplay Preferences and Saved Games. Opening
+preferences does not allocate a slot; Confirm consumes one pending intent,
+while Back/Cancel/Escape preserve data and modal/options priority. See
+[title navigation](title-navigation.md).
+
+Scene changes now use one-second real-time linear black fades with token-owned
+commits. Travel stages a request-time candidate and checkpoints before fade;
+Save & Title also saves before fade. Input/scaled-time ownership releases before
+fade-in, independently of user/menu/vendor pauses. See
+[scene transitions](scene-transitions.md) for native transaction safety policies.
+
+The journal resolves its source initial-open state and uses a half-second
+unscaled OutQuad slide, including ignored reentry, admitted click sounds and
+source day-end behavior. See [menu slide](menu-slide.md). This supersedes the
+previous immediate-close limitation; native panel width/fonts/layout still differ.
+
+A final bounded static audit of equipment/stat rounding, special recipes, world
+production/chests/enclosures, trade limits and card-information descriptors found
+no additional evidenced functional omission beyond the work above. That is not
+a proof of engine, visual, physics, RNG or platform equivalence. Rendered/manual,
+listening, Windows and export/install acceptance remain explicitly outstanding.
+
+
+The bounded enabled-presentation inventory additionally identified missing source
+manual-pause grayscale/day-end vignette and several TextButton/toggle/menu Click
+sound triggers. These are concrete implementation work for the next slice, not
+merely manual acceptance. Native hover styling and exact canvas geometry remain
+separate adaptation limits.

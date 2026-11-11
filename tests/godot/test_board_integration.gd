@@ -44,18 +44,21 @@ func run() -> void:
 	board.session.spawn_target_selector = Callable()
 	board.session.spawn_layout_resolver = Callable()
 	var starter: String = board.session.cards.values()[0].definition_guid
-	check(not board.market_panel.visible and not board.detail_panel.visible, "sidebars initially hidden to avoid covering starter")
+	check(not board.market_panel.visible and board.detail_panel.visible, "journal initial open state follows source while native market stays hidden")
 	var toggles: Dictionary = {}
 	for node in board.hud.get_children():
-		if node is Button and node.text in ["Market & controls", "Inspect & journal"]: toggles[node.text] = node
+		if node is Button and node.tooltip_text in ["Market & controls", "Inspect & journal"]: toggles[node.tooltip_text] = node
 	check(toggles.size() == 2, "both sidebar toggle buttons available")
 	for caption in toggles:
 		var button: Button = toggles[caption]
 		check(button.visible and not button.disabled and button.position.y == 835, "sidebar toggle accessible at bottom: " + caption)
 		button.pressed.emit()
-	check(board.market_panel.visible and board.detail_panel.visible, "sidebar buttons reveal controls and inspector")
+	board.journal_slide.advance(0.5)
+	check(board.market_panel.visible and not board.detail_panel.visible, "sidebar buttons open market and close source-open journal")
 	for button in toggles.values(): button.pressed.emit()
-	check(not board.market_panel.visible and not board.detail_panel.visible, "sidebar buttons close panels without replacing board")
+	board.journal_slide.advance(0.5)
+	check(not board.market_panel.visible and board.detail_panel.visible, "sidebar buttons close market and reopen journal without replacing board")
+	board.detail_panel.hide()
 	clear_board(board)
 	var wood_guid: String = board.catalog.find_by_name("Wood")
 	var a: int = board.session.spawn_card(wood_guid)

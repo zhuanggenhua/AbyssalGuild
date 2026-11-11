@@ -29,17 +29,17 @@ uses the current scene instead of always saying Main.
 
 Validation:
 - `test_day_clock.gd`: 16 synthetic resolver/view/phase/pace checks.
-- `test_day_clock_board.gd`: 29 actual-source/private-media checks, including both scenes and
+- `test_day_clock_board.gd`: 30 actual-source/private-media checks, including both scenes and
   all six scene/icon bindings, live clicks, title/menu/options locks and day boundaries.
-  A data-only import runs 21 checks, verifies the live text fallback, and emits
+  A data-only import runs 22 checks, verifies the live text fallback, and emits
   an explicit artwork SKIP. An existing manifest requires every referenced
   texture; successful private bindings emit a positive imported-runner marker.
 - Existing cycle-action and held-stack board regressions cover discoverability
   and carried pointer releases across day-end boundaries.
 
 The native button/progress geometry and fonts are not a reconstruction of Unity
-Canvas layout. Journal closing is immediate rather than the source's unscaled
-0.5-second slide. Original TMP font GUID
+Canvas layout. The source unscaled
+0.5-second journal slide is now connected; see [menu slide](menu-slide.md). Original TMP font GUID
 `8f586378b4e144a9851e7b34d9b748ee` is referenced but absent from the locked subtree.
 Headless resource/input tests do not establish rendered legibility, physical
 pointer/controller behavior, original-font or pixel parity. No Unity execution,

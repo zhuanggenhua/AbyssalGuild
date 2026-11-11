@@ -34,6 +34,7 @@ func _prune() -> void:
 ## Returns true on a scene transition; caller must not advance destination time.
 func advance(step: float) -> bool:
 	var session = _session.get_ref()
+	if session.get("travel_pending") == true: return true
 	var scene: String = session.scene_name
 	var frame: Array = _live_tasks()
 	for index in range(frame.size() - 1, -1, -1):
@@ -48,7 +49,7 @@ func advance(step: float) -> bool:
 			stack.progress += step
 		if stack.progress >= duration:
 			session._complete_recipe(stack)
-			if session.scene_name != scene:
+			if session.get("travel_pending") == true or session.scene_name != scene:
 				return true
 	_prune()
 	return false
