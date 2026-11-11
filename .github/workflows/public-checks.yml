@@ -1,0 +1,73 @@
+name: Public source-free checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  public-checks:
+    name: Python and Godot 4.6.3 (no licensed content)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out public code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          lfs: false
+          submodules: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12.14'
+
+      - name: Install Python dependency
+        run: |
+          python -m pip install --disable-pip-version-check --no-cache-dir --only-binary=:all: -r requirements.txt
+
+      - name: Install verified official Godot
+        env:
+          GODOT_ARCHIVE: Godot_v4.6.3-stable_linux.x86_64.zip
+          # Official GitHub release asset digest. See docs/ci.md for provenance.
+          GODOT_SHA256: d0bc2113065e481c9c2c2b2c37daa4e8be3fe9e27f0ab9ab0b6096e9a37907f3
+        run: |
+          install_dir="$RUNNER_TEMP/godot-4.6.3"
+          mkdir -p "$install_dir"
+          cd "$install_dir"
+          curl --fail --location --retry 3 --connect-timeout 20 --max-time 240 \
+            "https://github.com/godotengine/godot/releases/download/4.6.3-stable/$GODOT_ARCHIVE" \
+            --output "$GODOT_ARCHIVE"
+          printf '%s  %s\n' "$GODOT_SHA256" "$GODOT_ARCHIVE" | sha256sum --check --strict
+          unzip -q "$GODOT_ARCHIVE"
+          chmod +x Godot_v4.6.3-stable_linux.x86_64
+          printf 'GODOT=%s/Godot_v4.6.3-stable_linux.x86_64\n' "$install_dir" >> "$GITHUB_ENV"
+
+      - name: Run public regression checks
+        id: public
+        timeout-minutes: 6
+        run: bash tools/test_public_ci.sh
+
+      - name: Report coverage boundary
+        if: ${{ always() }}
+        env:
+          PUBLIC_OUTCOME: ${{ steps.public.outcome }}
+        run: |
+          {
+            printf '## Public source-free checks\n\n'
+            printf 'Regression step: **%s**.\n\n' "$PUBLIC_OUTCOME"
+            printf 'Godot 4.6.3; Python 3.12.14; no licensed source, imported data/assets, or restored project caches.\n\n'
+            printf '**SKIP:** source-data suites and imported-data branches, source FBX meshes, and real gameplay/visual/input acceptance. See docs/ci.md.\n'
+            printf '\nA green check validates the public code and synthetic/missing-data behavior, not the full migration.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
