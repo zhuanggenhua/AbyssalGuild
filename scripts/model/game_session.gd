@@ -636,8 +636,8 @@ func buy_pack(guid: String) -> int:
 
 ## Source AllCards order: registered stacks and their members, then each ongoing
 ## combat's attackers and defenders. Equipped/unregistered cards are not included.
-## Keep this local to feeding: other consumers have independently audited ordering.
-func _feeding_card_ids() -> Array:
+## Shared by audited feeding and AI targeting consumers.
+func source_card_ids() -> Array:
 	var result: Array = []
 	for stack in stacks.values():
 		for id in stack.card_ids:
@@ -648,6 +648,9 @@ func _feeding_card_ids() -> Array:
 			if cards.has(id) and not result.has(id):
 				result.append(id)
 	return result
+
+func _feeding_card_ids() -> Array:
+	return source_card_ids()
 
 ## Live feeding is nonblocking. The automatic timeout waits for this explicit
 ## request; the manual early-end button remains a native convenience.

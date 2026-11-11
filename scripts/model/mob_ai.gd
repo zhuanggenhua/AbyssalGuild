@@ -15,6 +15,9 @@ var max_attempts: int = 5
 var point_validator: Callable = Callable()
 ## () -> Array of world.aggressive_intent combat snapshots.
 var combat_geometry: Callable = Callable()
+## () -> void; resolve immediately after accepted movement or a failed patrol.
+## Like the other geometry adapters, retained across configure/travel.
+var placement_resolver: Callable = Callable()
 ## Optional placement adapter (guid, position, ignored_stack_id) -> spawned ID.
 ## Used for source CreateCardInstance auto-attachment/overlap resolution.
 var produce_spawner: Callable = Callable()
@@ -143,11 +146,14 @@ func _detach(card_id: int) -> void:
 		return
 	if stack.card_ids.size() <= 1:
 		return
+	var was_crafting: bool = not stack.recipe_guid.is_empty()
 	var target: Vector2 = session.card_target_position(card_id)
 	Equipment.detach(session, card_id, target)
 	Equipment.return_to_board(session, card_id)
-	if session.stacks.has(stack.id):
-		session._validate_craft(stack)
+	# Source stops an existing task, otherwise checks newly exposed ingredients.
+	# Equipment.detach already cancels the former without activating a replacement.
+	if session.stacks.has(stack.id) and not was_crafting:
+		session._check_recipe(stack)
 
 func _act_aggressively(card_id: int) -> void:
 	var session = _session.get_ref()
@@ -190,6 +196,8 @@ func _patrol(card_id: int) -> void:
 			direction = Vector2(session.rng.randf_range(-1, 1), session.rng.randf_range(-1, 1))
 		if _move_if_valid(card_id, stack.position + direction.normalized() * move_radius):
 			return
+	# Source patrol resolves even when every candidate (or zero attempts) fails.
+	_resolve_placement()
 
 func _move_if_valid(card_id: int, target: Vector2) -> bool:
 	var session = _session.get_ref()
@@ -199,8 +207,13 @@ func _move_if_valid(card_id: int, target: Vector2) -> bool:
 	stack.position = target
 	for id in stack.card_ids:
 		session.cards[id].position = target
+	_resolve_placement()
 	session.changed.emit()
 	return true
+
+func _resolve_placement() -> void:
+	if placement_resolver.is_valid():
+		placement_resolver.call()
 
 func _tick_production(delta: float) -> void:
 	var session = _session.get_ref()

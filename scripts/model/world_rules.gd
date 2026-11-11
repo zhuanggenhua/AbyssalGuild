@@ -286,9 +286,8 @@ func aggressive_intent(card_id: int, combats: Array = []) -> Dictionary:
 		return {"action": "join_combat" if sqrt(distance) <= attack * 1.5 else "approach_combat", "combat_id": nearest.id, "position": nearest.position}
 	var target: int = -1
 	distance = INF # Source FindClosestPlayerCard does NOT enforce its radius parameter.
-	for candidate in session.cards.values():
-		if session.equipment.owners.has(candidate.id):
-			continue
+	for candidate_id in session.source_card_ids():
+		var candidate = session.cards[candidate_id]
 		if int(session.catalog.fields(candidate.definition_guid).get("faction", 0)) != 1 or session.combat.membership.has(candidate.id):
 			continue
 		var value: float = position.distance_squared_to(session.card_target_position_3d(candidate.id))

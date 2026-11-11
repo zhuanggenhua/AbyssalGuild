@@ -162,12 +162,16 @@ source-card reproduction/continuation tests. Save APIs still require frame
 boundaries rather than arbitrary reentrant gameplay callbacks.
 
 
-## Newly reproduced AI placement gaps
+## AI placement and target-order corrections
 
-Source audit also found two narrow AI differences still under repair: accepted
-mob movement (and exhausted patrols) needs an immediate overlap-resolution call,
-including when an unrelated card is held; equidistant player target selection
-needs registered-stack/member ordering rather than card creation order. The
-native drag-protection lock remains an intentional interaction difference from
-source physics. These findings do not invalidate the separate crafting/feedback
-checks, and are not represented as presentation-only gaps.
+Accepted approaches and completed patrols (including exhausted attempts) now
+resolve overlaps before another AI movement, even when an unrelated card is
+held. Equidistant players use registered-stack/member order rather than card
+creation order, including after native save continuation. Existing native held
+locks remain deliberate; source physics only uses explicit pack locks.
+
+AI detachment also checks a previously idle surviving stack for a newly valid
+recipe. Legal source-card assembly reproduces Cow departure unblocking Fruit
+Salad, and verifies authoritative task activation and normal completion. See
+[AI placement and ordering](ai-placement-order.md). These are headless runtime
+corrections, not a claim of rendered motion or physical-pointer acceptance.

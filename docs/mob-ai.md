@@ -18,6 +18,9 @@ of `Board.IsPointValid`. The audited source revision is
    footprint, top_margin)` reproduces the source boundary test when provided
    the actual board bounds, stack width and source TopCard depth. Without the
    callback, movement is rejected rather than inventing physical board bounds.
+   Bind `placement_resolver()` to the direct board overlap resolver. Accepted
+   approaches and completed patrols (even exhausted attempts) resolve before
+   another AI movement; do not route this through the pickup-guarded frame check.
 3. Optionally configure `combat_geometry() -> Array` of `{id, ongoing,
    has_player, position: Vector2}` snapshots from actual combat rectangles.
    Rectless combats must be omitted. Without geometry, mobs can hunt and begin
@@ -126,3 +129,14 @@ AI and validate combat membership, preserving timers and RNG. Campaign swaps
 reconfigure scene prefab eligibility before restore. The board supplies source
 footprint/bounds validation and an average-fighter combat-position adapter; this
 last adapter is not an exact recreation of animated source combat rectangles.
+
+
+## Placement, targeting and newly exposed recipes
+
+The [AI placement/order slice](ai-placement-order.md) adds immediate resolution
+while an unrelated card is held, stable nearest-player ties in registered-stack
+order, and recipe selection after a previously idle stack loses its extra mob.
+The legal Cow/Apple/Berry reproduction now selects and completes Fruit Salad.
+Synthetic checks (16 placement/order and 9 detachment) and source-backed checks
+(12 board and 8 detachment) accompany the existing 55 AI checks. Native held-stack
+protection remains deliberate; original physics only honors explicit pack locks.

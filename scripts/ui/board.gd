@@ -452,6 +452,7 @@ func _enter_game() -> void:
 	_update_board_geometry()
 	session.ai.point_validator = _ai_point_valid
 	session.ai.combat_geometry = _combat_geometry
+	session.ai.placement_resolver = _resolve_layout
 	session.ai.produce_spawner = Callable()
 	session.spawn_target_selector = _select_spawn_target
 	session.spawn_layout_resolver = _resolve_layout
