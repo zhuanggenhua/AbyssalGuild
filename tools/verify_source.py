@@ -21,6 +21,9 @@ def verify(data_dir, source=None):
     check(hashlib.sha256(payload).hexdigest() == manifest['stackcraft_json_sha256'], 'Data SHA-256 mismatch')
     check(payload == json_bytes(data), 'Data is not in canonical JSON format')
     check(data['provenance']['source_commit'] == manifest['source_commit'], 'Provenance mismatch')
+    sparse = manifest.get('import_mode') == 'logic_only_sparse_assets'
+    check(data['provenance'].get('import_mode') == manifest.get('import_mode'), 'Import mode mismatch')
+    check(data['provenance'].get('missing_visual_assets') == manifest.get('missing_visual_assets'), 'Missing visual asset report mismatch')
     seen, ids = set(), {}
     for group in (*GROUPS, 'scenes', 'referenced_prefabs'):
         records = data[group]
@@ -56,12 +59,13 @@ def verify(data_dir, source=None):
             check(candidate.is_file(), f'Missing source: {path}')
             if candidate.is_file():
                 check(hashlib.sha256(candidate.read_bytes()).hexdigest() == digest, f'Changed source: {path}')
-        regenerated, regenerated_manifest = build(source, manifest['source_commit'])
+        regenerated, regenerated_manifest = build(source, manifest['source_commit'], sparse)
         check(json_bytes(regenerated) == payload, 'Reimport differs from data')
         check(json_bytes(regenerated_manifest) == json_bytes(manifest), 'Reimport differs from manifest')
     if errors:
         raise ValueError('\n'.join(errors))
     return {'status': 'verified', 'counts': data['counts'], 'unresolved_external': len(missing),
+            'missing_visual_assets': manifest.get('missing_visual_assets', []),
             'source_reimported': source is not None}
 
 

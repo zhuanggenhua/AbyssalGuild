@@ -120,3 +120,24 @@ These facts identify where values came from. They do not validate screen layout,
 ## Automated coverage
 
 Fourteen synthetic tests cover type preservation, enum values, repeatability, standalone and source-backed verification, corrupted output, changed source, tampered counts, dangling gameplay references, duplicate GUIDs, duplicate YAML keys, multiple Unity documents, large object IDs, explicit external-reference reporting, null references, and recursive/cyclic prefab dependencies. The same verifier additionally passed against the original source snapshot. No test fixture embeds template source or art.
+
+## Explicit logic-only recovery
+
+When a read connector can restore all text inputs but not large binary media,
+`--allow-missing-visual-assets` permits a **logic-only** import. It retains each
+missing file's real `.meta` GUID, creates no substitute source files, and records
+sorted `missing_visual_assets` in both provenance and manifest. Only known binary
+media extensions can be absent; scripts, definitions, prefabs and scenes remain
+mandatory. The default import remains strict. `verify_source.py --source ...`
+reimports with the recorded mode and checks the missing-file report too.
+
+```sh
+python3 tools/import_stackcraft.py --source /path/to/Assets/StackCraft --allow-missing-visual-assets
+python3 tools/verify_source.py --source /path/to/Assets/StackCraft
+```
+
+This does **not** make a partial source pass `check_source_lock.py`, prove visual
+parity, or grant redistribution permission. The 2026-11-11 cloud recovery checked
+1324 available files byte-for-byte against the lock; missing originals were
+`Documentation.pdf`, `Sounds/KingsFeast.wav`, and `Sprites/Artwork.png`. All 275
+serialized gameplay entries, 3 scenes and 31 prefabs reimported successfully.

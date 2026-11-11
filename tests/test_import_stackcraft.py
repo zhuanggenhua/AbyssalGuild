@@ -60,6 +60,33 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(fields['artTexture']['fileID'], '0')
         self.assertEqual(data['cards'][0]['script_class'], 'CardDefinition')
 
+    def test_sparse_visual_import_is_explicit_and_reported(self):
+        image = self.write('Sprites/Unavailable.png', 'fake fixture image', 'd' * 32)
+        image.unlink()
+        with self.assertRaisesRegex(ValueError, 'Orphan metadata'):
+            build(self.root)
+        data, manifest = build(self.root, allow_missing_visual_assets=True)
+        self.assertEqual(manifest['missing_visual_assets'], ['Sprites/Unavailable.png'])
+        self.assertEqual(data['provenance']['import_mode'], 'logic_only_sparse_assets')
+        self.assertIn('d' * 32, data['guid_index'])
+        self.out.mkdir()
+        (self.out / 'stackcraft.json').write_bytes(json_bytes(data))
+        (self.out / 'manifest.json').write_bytes(json_bytes(manifest))
+        self.assertEqual(verify(self.out, self.root)['missing_visual_assets'], ['Sprites/Unavailable.png'])
+        self.assertFalse(image.exists())
+
+    def test_sparse_import_still_rejects_missing_gameplay_and_scripts(self):
+        self.card.unlink()
+        with self.assertRaisesRegex(ValueError, 'Orphan metadata'):
+            build(self.root, allow_missing_visual_assets=True)
+
+    def test_sparse_manifest_tampering_is_rejected(self):
+        data, manifest = self.generate()
+        manifest['import_mode'] = 'logic_only_sparse_assets'
+        (self.out / 'manifest.json').write_bytes(json_bytes(manifest))
+        with self.assertRaisesRegex(ValueError, 'Import mode mismatch'):
+            verify(self.out)
+
     def test_enums_with_explicit_values(self):
         data, _ = self.generate()
         self.assertEqual(data['enums']['CardCategory'], {'None': 0, 'Resource': 4, 'Character': 5})

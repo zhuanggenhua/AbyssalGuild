@@ -98,11 +98,11 @@ def read_enums(root):
             result[name] = members
     return result
 
-def build(root, source_commit=SOURCE_COMMIT):
+def build(root, source_commit=SOURCE_COMMIT, allow_missing_visual_assets=False):
     root = Path(root).resolve()
     if not (root / 'Resources/Cards').is_dir():
         raise ValueError('Source must be the original Assets/StackCraft directory')
-    index, inputs = {}, {}
+    index, inputs, missing_visual_assets = {}, {}, []
     def track(path):
         relative = path.relative_to(root).as_posix()
         inputs[relative] = sha256(path)
@@ -116,7 +116,11 @@ def build(root, source_commit=SOURCE_COMMIT):
             raise ValueError(f'Duplicate GUID {guid}')
         source = Path(str(meta)[:-5])
         if not source.exists():
-            raise ValueError(f'Orphan metadata {meta}')
+            # Explicit logic-only import: retain GUIDs but never invent source bytes.
+            # Scripts, serialized definitions, prefabs and scenes remain mandatory.
+            if not allow_missing_visual_assets or source.suffix.lower() not in ('.png', '.jpg', '.jpeg', '.wav', '.ogg', '.mp3', '.fbx', '.pdf'):
+                raise ValueError(f'Orphan metadata {meta}')
+            missing_visual_assets.append(source.relative_to(root).as_posix())
         relative = source.relative_to(root).as_posix()
         index[guid] = {'source_path': relative, 'kind': source.suffix.lstrip('.') or 'directory'}
         track(meta)
@@ -194,11 +198,17 @@ def build(root, source_commit=SOURCE_COMMIT):
     gameplay_missing = [r for r in unresolved if r['field_path'].split('/')[1] in GROUPS]
     if gameplay_missing:
         raise ValueError(f'Unresolved gameplay GUIDs: {gameplay_missing}')
+    if allow_missing_visual_assets:
+        result['provenance']['missing_visual_assets'] = sorted(missing_visual_assets)
+        result['provenance']['import_mode'] = 'logic_only_sparse_assets'
     manifest = {'schema_version': 1, 'source_commit': source_commit, 'counts': result['counts'],
                 'source_files_sha256': inputs, 'excluded_assets': excluded,
                 'references': {'total': len(all_refs), 'resolved': len(all_refs) - len(unresolved),
                                'unresolved_external': unresolved},
                 'stackcraft_json_sha256': hashlib.sha256(json_bytes(result)).hexdigest()}
+    if allow_missing_visual_assets:
+        manifest['missing_visual_assets'] = sorted(missing_visual_assets)
+        manifest['import_mode'] = 'logic_only_sparse_assets'
     return result, manifest
 
 def main():
@@ -206,8 +216,9 @@ def main():
     parser.add_argument('--source', required=True, type=Path)
     parser.add_argument('--output', default=Path('data'), type=Path)
     parser.add_argument('--source-commit', default=SOURCE_COMMIT, help='Provenance label, not independently proven by the importer')
+    parser.add_argument('--allow-missing-visual-assets', action='store_true', help='Logic-only import: report absent binary media without fabricating files; never permits missing gameplay inputs')
     args = parser.parse_args()
-    result, manifest = build(args.source, args.source_commit)
+    result, manifest = build(args.source, args.source_commit, args.allow_missing_visual_assets)
     args.output.mkdir(parents=True, exist_ok=True)
     for name, data in [('stackcraft.json', result), ('manifest.json', manifest)]:
         (args.output / name).write_bytes(json_bytes(data))
