@@ -143,7 +143,8 @@ func _detach(card_id: int) -> void:
 		return
 	if stack.card_ids.size() <= 1:
 		return
-	Equipment.detach(session, card_id)
+	var target: Vector2 = session.card_target_position(card_id)
+	Equipment.detach(session, card_id, target)
 	Equipment.return_to_board(session, card_id)
 	if session.stacks.has(stack.id):
 		session._validate_craft(stack)
@@ -157,7 +158,7 @@ func _act_aggressively(card_id: int) -> void:
 			var ids: Array = session.stacks[session.cards[card_id].stack_id].card_ids.duplicate()
 			session.combat.add_combatants(int(intent.combat_id), ids)
 		"approach_combat", "approach_player":
-			var start: Vector2 = session.cards[card_id].position
+			var start: Vector2 = session.card_target_position(card_id)
 			_move_if_valid(card_id, start + start.direction_to(intent.position) * move_radius)
 		"attack_player":
 			var attacker_stack = session.stacks.get(session.cards[card_id].stack_id)
@@ -214,7 +215,7 @@ func _tick_production(delta: float) -> void:
 		world.production_timers[id] = float(fields.get("produceInterval", 10.0))
 		var produce: String = session.catalog.ref_guid(fields.get("produceCard", {}))
 		if not fields.get("isAggressive", false) and world.can_act(id) and not produce.is_empty():
-			var position: Vector2 = session.cards[id].position
+			var position: Vector2 = session.card_target_position(id)
 			if produce_spawner.is_valid():
 				produce_spawner.call(produce, position, -1)
 			else:

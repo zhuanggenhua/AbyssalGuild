@@ -52,10 +52,19 @@ CardManager and referenced settings. Twenty synthetic tests use deliberately
 unequal scene templates/colliders/margins to expose errors hidden by the shipped
 matching references.
 
-A newly audited gap remains: stacked cards store their root position while the
-view adds per-card offsets. Individual-distance feeding, AI, combat and selected
-spawn consumers need a derived settled-pose accessor; root-based crafting and
-pack outputs must remain root-based. Animated current-pose parity is separate.
+The derived settled-pose accessor now corrects individual feeding distances, AI
+selection/detachment/production and equipment placement without changing stored
+positions. Thirty checks cover source/synthetic geometry and native save round
+trips. Combat batch capture, death/growth and UI individual consumers remain.
+Root-based crafting and pack outputs stay root-based; animated pose parity is
+separate.
+
+Combat impact feedback has a tested pure descriptor, including both normal-hit
+and critical audio rather than replacing one with the other. Live presentation
+hookup is pending. A deeper audit confirms current immediate combat resolution
+still differs from source attack travel, return and lethal cleanup phases. These
+delays affect progress, RNG ordering and health timing, not only visuals; the
+in-flight model/save/two-clock integration remains required.
 
 Source assets and generated content remain private and ignored. Public CI tests
 only public code/synthetic behavior and explicitly skips licensed-content checks.

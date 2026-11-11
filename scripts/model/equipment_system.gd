@@ -58,7 +58,7 @@ func equip(wearer_id: int, item_id: int) -> bool:
 		equipped[wearer_id] = {}
 	equipped[wearer_id][slot] = item_id
 	owners[item_id] = wearer_id
-	detach(session, item_id)
+	detach(session, item_id, session.card_target_position(item_id))
 	var transform_guid: String = session.catalog.ref_guid(fields.get("classChangeResult", {}))
 	if not transform_guid.is_empty() and not session.catalog.fields(transform_guid).is_empty():
 		if not originals.has(wearer_id):
@@ -84,7 +84,7 @@ func unequip(wearer_id: int, slot: int) -> int:
 	owners.erase(item_id)
 	if session.cards.has(item_id):
 		if session.cards.has(wearer_id):
-			session.cards[item_id].position = session.cards[wearer_id].position
+			session.cards[item_id].position = session.card_target_position(wearer_id)
 		return_to_board(session, item_id)
 	session.changed.emit()
 	return item_id
@@ -94,7 +94,9 @@ func unequip_all(wearer_id: int) -> void:
 		unequip(wearer_id, slot)
 	equipped.erase(wearer_id)
 
-static func detach(session, card_id: int) -> void:
+## Optional pre-captured target lets individual callers preserve the visible pose.
+## Batch callers must snapshot ALL members before any removals change indices.
+static func detach(session, card_id: int, target_position: Variant = null) -> void:
 	var card = session.cards[card_id]
 	var stack = session.stacks.get(card.stack_id)
 	if stack != null:
@@ -103,6 +105,8 @@ static func detach(session, card_id: int) -> void:
 		if stack.card_ids.is_empty():
 			session.stacks.erase(stack.id)
 	card.stack_id = -1
+	if target_position is Vector2:
+		card.position = target_position
 
 static func return_to_board(session, card_id: int) -> void:
 	if not session.cards.has(card_id) or session.stacks.has(session.cards[card_id].stack_id):

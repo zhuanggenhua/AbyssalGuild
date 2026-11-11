@@ -147,6 +147,7 @@ func _init() -> void:
 	tasks[0].position = Vector2(5, 0)
 	check(world.aggressive_intent(mob, tasks).action == "approach_player", "combat aggro boundary strictly excluded")
 	session.cards[hero].position = Vector2(1.5, 0)
+	session.stacks[session.cards[hero].stack_id].position = Vector2(1.5, 0)
 	check(world.aggressive_intent(mob).action == "attack_player", "attack range inclusive")
 	session.combat.membership[hero] = 1
 	check(world.aggressive_intent(mob).action == "patrol", "hunt excludes engaged player")

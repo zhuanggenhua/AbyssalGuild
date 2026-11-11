@@ -59,6 +59,41 @@ func configure(source_catalog, random_seed: int = 1, selected_scene: String = "M
 		event_occurred.connect(_track_quest_event)
 	ai.configure(self, world, scene_name)
 
+## Settled source target, not an animated transform. Stored save fields stay unchanged.
+func card_target_position_3d(card_id: int) -> Vector3:
+	if not cards.has(card_id):
+		return Vector3.ZERO
+	var card = cards[card_id]
+	var stack = stacks.get(card.stack_id)
+	if stack == null or not stack.card_ids.has(card_id):
+		return Vector3(card.position.x, 0, card.position.y)
+	var index: int = stack.card_ids.find(card_id)
+	var settings: Dictionary = catalog.settings("CardSettings")
+	# Scene settings win; the catalog fallback keeps sceneless model fixtures usable.
+	for scene in catalog.data.get("scenes", []):
+		if str(scene.get("name", "")) != scene_name:
+			continue
+		for document in scene.get("documents", []):
+			if document.get("script_class", "") == "CardManager":
+				var guid: String = catalog.ref_guid(document.get("fields", {}).get("cardSettings", {}))
+				if not guid.is_empty() and not catalog.fields(guid).is_empty():
+					settings = catalog.fields(guid)
+		break
+	var step: Dictionary = settings.get("stackStep", {})
+	return Vector3(stack.position.x, 0, stack.position.y) + Vector3(float(step.get("x", 0)), float(step.get("y", 0)), float(step.get("z", 0))) * index
+
+func card_target_position(card_id: int) -> Vector2:
+	var target := card_target_position_3d(card_id)
+	return Vector2(target.x, target.z)
+
+## Capture before any batch mutation changes stack indices. Missing IDs are omitted.
+func capture_card_targets(ids: Array) -> Dictionary:
+	var result: Dictionary = {}
+	for id in ids:
+		if cards.has(id):
+			result[id] = card_target_position(id)
+	return result
+
 func start_new_game() -> int:
 	campaign.saved_scenes.clear()
 	campaign.current_scene = scene_name
@@ -567,14 +602,14 @@ func end_day() -> Dictionary:
 			var distance: float = INF
 			for food in cards.values():
 				if int(catalog.fields(food.definition_guid).get("category", 0)) == 3 and food.nutrition > 0:
-					var candidate: float = character.position.distance_squared_to(food.position)
+					var candidate: float = card_target_position_3d(character.id).distance_squared_to(card_target_position_3d(food.id))
 					if candidate < distance:
 						distance = candidate
 						nearest = food
 			if nearest == null:
 				kill_card(character.id)
 				break
-			_prepare_food_for_feeding(nearest, character.position)
+			_prepare_food_for_feeding(nearest, card_target_position(character.id))
 			var eaten: int = mini(need, nearest.nutrition)
 			nearest.nutrition -= eaten
 			need -= eaten

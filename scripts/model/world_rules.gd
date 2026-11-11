@@ -242,7 +242,7 @@ func tick_production(delta: float) -> Array:
 		production_timers[id] = float(fields.get("produceInterval", 10.0))
 		var produce: String = session.catalog.ref_guid(fields.get("produceCard", {}))
 		if not fields.get("isAggressive", false) and can_act(id) and not produce.is_empty():
-			spawned.append(session.spawn_card(produce, session.cards[id].position))
+			spawned.append(session.spawn_card(produce, session.card_target_position(id)))
 	return spawned
 
 ## Combat snapshots: {id, ongoing, position: Vector2, has_player}. Omit rectless tasks.
@@ -252,6 +252,7 @@ func aggressive_intent(card_id: int, combats: Array = []) -> Dictionary:
 	if not session.cards.has(card_id):
 		return {}
 	var card = session.cards[card_id]
+	var position: Vector3 = session.card_target_position_3d(card_id)
 	var fields: Dictionary = session.catalog.fields(card.definition_guid)
 	var radius: float = float(fields.get("aggroRadius", 5.0))
 	var attack: float = float(fields.get("attackRadius", 1.5))
@@ -260,7 +261,7 @@ func aggressive_intent(card_id: int, combats: Array = []) -> Dictionary:
 	for task in combats:
 		if not task.get("ongoing", false) or not task.get("has_player", false) or not task.get("position") is Vector2:
 			continue
-		var candidate: float = card.position.distance_squared_to(task.position)
+		var candidate: float = position.distance_squared_to(Vector3(task.position.x, 0, task.position.y))
 		if candidate < distance:
 			distance = candidate
 			nearest = task
@@ -273,10 +274,10 @@ func aggressive_intent(card_id: int, combats: Array = []) -> Dictionary:
 			continue
 		if int(session.catalog.fields(candidate.definition_guid).get("faction", 0)) != 1 or session.combat.membership.has(candidate.id):
 			continue
-		var value: float = card.position.distance_squared_to(candidate.position)
+		var value: float = position.distance_squared_to(session.card_target_position_3d(candidate.id))
 		if value < distance:
 			distance = value
 			target = candidate.id
 	if target != -1:
-		return {"action": "attack_player" if sqrt(distance) <= attack else "approach_player", "card_id": target, "position": session.cards[target].position}
+		return {"action": "attack_player" if sqrt(distance) <= attack else "approach_player", "card_id": target, "position": session.card_target_position(target)}
 	return {"action": "patrol"}
