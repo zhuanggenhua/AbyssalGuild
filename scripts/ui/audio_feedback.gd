@@ -10,6 +10,8 @@ var assets
 var source_settings: Dictionary = {}
 var next_player: int = 0
 var cooldown: float = 0.05
+var user_sfx_db: float = 0.0
+var user_bgm_db: float = 0.0
 
 func configure(catalog, visual_assets) -> void:
 	assets = visual_assets
@@ -45,6 +47,7 @@ func configure(catalog, visual_assets) -> void:
 	cooldown = maxf(0, float(source_settings.get("_SFXCooldown", 0.05)))
 	for index in clampi(int(source_settings.get("_SFXPoolSize", 8)), 1, 64):
 		var player := AudioStreamPlayer.new()
+		player.volume_db = user_sfx_db
 		add_child(player)
 		pool.append(player)
 
@@ -89,6 +92,7 @@ func play_event(event_name: String) -> bool:
 	next_player = (next_player + 1) % pool.size()
 	player.stop()
 	player.stream = stream
+	player.volume_db = user_sfx_db
 	player.pitch_scale = randf_range(0.95, 1.05) if bool(source_settings.get("_randomizeSFXPitch", false)) else 1.0
 	player.play()
 	last_played[event_name] = now
@@ -105,7 +109,7 @@ func play_music() -> bool:
 		add_child(music)
 		music.finished.connect(func(): music.play())
 	music.stream = stream
-	music.volume_linear = float(source_settings.get("_defaultMusicVolume", 0.3))
+	music.volume_linear = music_gain_linear()
 	music.play()
 	return true
 
@@ -121,3 +125,16 @@ func _exit_tree() -> void:
 	stream_cache.clear()
 	last_played.clear()
 	assets = null
+
+func music_gain_linear() -> float:
+	# Source per-clip gain and user mixer gain multiply once, never accumulate.
+	return maxf(0.0, float(source_settings.get("_defaultMusicVolume", 0.3))) * db_to_linear(user_bgm_db)
+
+func set_user_gains(sfx_db: float, bgm_db: float) -> bool:
+	if not is_finite(sfx_db) or not is_finite(bgm_db) or sfx_db < -80 or sfx_db > 0 or bgm_db < -80 or bgm_db > 0: return false
+	user_sfx_db = sfx_db
+	user_bgm_db = bgm_db
+	for player in pool:
+		if is_instance_valid(player): player.volume_db = user_sfx_db
+	if is_instance_valid(music): music.volume_linear = music_gain_linear()
+	return true

@@ -242,3 +242,6 @@ func model_scene(guid: String) -> PackedScene:
 
 func create_card_mesh(appearance_data: Dictionary) -> MeshInstance3D:
 	return preload("res://scripts/ui/card_mesh_binding.gd").create(self, appearance_data)
+
+func create_equipment_panel(metadata: Dictionary) -> Node3D:
+	return preload("res://scripts/ui/equipment_panel_view.gd").create(self, metadata)

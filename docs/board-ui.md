@@ -30,7 +30,10 @@ unchanged. Unity saves are not supported. See `save-slots.md`.
 - Drop a single equipment card onto a character to equip. Unequip returns gear.
   Select an enemy and Engage to start combat with the nearest available friendly.
   Autonomous mobs also move, produce items and engage using imported AI settings.
-- Space pauses. Buttons select speed. WASD or middle-drag pans; the wheel zooms.
+- Escape opens the pause menu during play; its Options panel preserves the
+  selected pace, applies supported preferences and reports unsupported mappings.
+  Ending-cycle locks prevent opening it during feeding/selling/ready/game-over.
+  See `options-ui.md`. Space pauses. Buttons select speed. WASD or middle-drag pans; the wheel zooms.
   Imported camera metadata supplies perspective FOV, clip planes and source pose.
 - Scene-specific shops expose their configured packs, quest locks and prices.
   Source-positioned buyer/vendor plates now accept dropped card tails, including
@@ -55,7 +58,10 @@ The model retains source X/Z. The view reflects Z consistently for cards, board,
 lighting, camera and pointer rays. The original imported FBX board uses its real
 vertex/morph bounds; without media a generated surface uses verified source
 12x8-to-24x16 bounds. Card geometry uses source colliders even without textures.
-Original shaders, fonts, frame/slot artwork and card meshes are not reproduced.
+Private Card/Pack FBX and an independently rewritten UV shader can now be used
+when the licensed assets and import cache are available. Generated geometry remains
+the fallback. Original fonts and complete Title/Main/Island UI are not reproduced;
+GPU/rendered acceptance is still required.
 
 Stack footprints include the source margin, trailing step and first-card size.
 The source iteration-limited separation solver handles stack overlap and board

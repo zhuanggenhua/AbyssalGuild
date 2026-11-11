@@ -23,20 +23,22 @@ The full private source and assets now pass the 1327-file source lock.
 5. **Combat overlap merging is connected.** Pre-start and resize hooks preserve
    source registration order and RNG draws; live board paths are tested. Original
    animation, visual clarity and physics-query ordering still need acceptance.
-6. **Menus/options.** The validated native options store and application plans
-   have 90 checks; full Escape/options UI and actual application are still pending.
-   Unsupported Unity display/shadow modes must be disclosed rather than silently
-   substituted.
+6. **Menus/options are connected.** Escape preserves the prior playing pace;
+   title/pause options persist independent app preferences with retry protection.
+   Audio uses app-local gains; unsupported resolution enumeration, Half VSync and
+   Unity shadow presets are explicitly reported. Model plans have 90 checks and
+   UI has 42, but native display/audio behavior still needs manual acceptance.
 
 ## Presentation and platform acceptance
 
 - Original source UI composition, complete rendering/lighting parity, original fonts,
-  equipment/price overlays, drag/craft/feed/death/projectile animations, camera
+  expanded equipment interaction, drag/craft/feed/death/projectile animations, camera
   smoothing/shake and source sound timing remain incomplete.
 - Original Card/Pack FBX and independently rewritten UV/material composition are
   now bound when complete private inputs exist. This has structural/resource
-  coverage, not pixel/GPU acceptance. Equipment panels and full stat overlays
-  remain incomplete.
+  coverage, not pixel/GPU acceptance. Source-referenced price/health/nutrition labels
+  and compact equipment occupancy panels are now bound, including chest coin
+  overrides. Expanded equipment cards and original fonts remain incomplete.
 - Nearby attachment currently uses deterministic target-pose collider geometry,
   not Unity Physics overlap ordering or animated transforms. Source target-layout
   math is covered, but cross-engine physics equivalence is not established.

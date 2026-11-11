@@ -5,6 +5,8 @@ const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
+const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
+const OptionsAdapter = preload("res://scripts/ui/options_adapter.gd")
 const TradeLayout = preload("res://scripts/model/trade_layout.gd")
 const TradeZoneView = preload("res://scripts/ui/trade_zone_view.gd")
 const SaveSlots = preload("res://scripts/model/save_slots.gd")
@@ -25,6 +27,12 @@ var feedback = AudioFeedback.new()
 var slot_root: String = "user://slots"
 var legacy_paths: Array[String] = ["user://session.json", "user://campaign.json"]
 var slots = SaveSlots.new()
+var options_path: String = "user://options.json"
+var options_apply_adapter: Callable = Callable()
+var options_hardware_modes: Array = []
+var native_options_adapter = OptionsAdapter.new()
+var options_panel
+var pause_overlay: Control
 var trade_zones: Array = []
 var trade_views: Dictionary = {}
 var trade_activated: Dictionary = {}
@@ -86,6 +94,10 @@ func _ready() -> void:
 Visual and manual input acceptance are not complete."
 		vendor_guids = SceneConfig.offered_packs(catalog)
 		_build_shop()
+	native_options_adapter.configure(feedback)
+	var options_adapter: Callable = options_apply_adapter if options_apply_adapter.is_valid() else native_options_adapter.apply
+	var options_loaded: Dictionary = options_panel.configure(options_adapter, options_hardware_modes, options_path)
+	if not options_loaded.ok: title_status.text += "\nOptions could not be read; defaults are in use. Open Options for details."
 	get_tree().auto_accept_quit = false
 	if data_error == OK:
 		session.configure(catalog)
@@ -265,6 +277,8 @@ func _build_ui() -> void:
 	quit_dialog.dialog_text = "Day-end progress is not autosaved on quit. Your last checkpoint stays intact. Quit now?"
 	quit_dialog.confirmed.connect(func(): get_tree().quit())
 	add_child(quit_dialog)
+	_button("Options", title, _open_options)
+	_build_pause_options(layer)
 
 func _build_shop() -> void:
 	for child in shop.get_children():
@@ -299,6 +313,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	pause_overlay.hide()
 	for zone in trade_views.values(): zone.queue_free()
 	trade_views.clear()
 	trade_zones.clear()
@@ -341,6 +356,9 @@ func _enter_game() -> void:
 func _process(delta: float) -> void:
 	if not running:
 		return
+	if _ui_pause_active():
+		_sync_views()
+		return
 	session.tick(delta)
 	_sync_views()
 	refresh_clock += delta
@@ -382,6 +400,11 @@ func _sync_views() -> void:
 		for child in views[id].get_children():
 			if child is StaticBody3D: child.collision_layer = 1 if views[id].visible else 0
 		views[id].caption.text = _name(session.cards[id].definition_guid)
+		var current_card = session.cards[id]
+		var current_fields: Dictionary = catalog.fields(current_card.definition_guid)
+		var display_state := {"health": current_card.health, "nutrition": current_card.nutrition, "sell_price": int(current_fields.get("sellPrice", 1)), "equipment_slots": session.equipment.equipped.get(id, {}).keys()}
+		if session.world._is_chest(id): display_state["price_override"] = str(current_card.stored_coins)
+		views[id].update_state(display_state)
 		views[id].highlight(id == selected)
 		if session.combat.membership.has(id):
 			var combat_position: Vector2 = session.cards[id].position + (drag_delta if dragging == id else Vector2.ZERO)
@@ -415,7 +438,10 @@ func _board_point(screen: Vector2) -> Vector2:
 	return Vector2(point.x, -point.z)
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not running: return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		_handle_escape()
+		return
+	if not running or _ui_pause_active(): return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
 		_toggle_pause()
 	if event is InputEventMouseButton:
@@ -624,6 +650,7 @@ func _refresh_market_labels() -> void:
 		vendor_buttons[guid].disabled = not _allows_card_actions() or session.completed_quests < minimum or currency < price
 
 func _toggle_pause() -> void:
+	if _ui_pause_active(): return
 	if session.phase == "playing": session.set_paused(not session.paused)
 	_refresh()
 
@@ -652,7 +679,7 @@ func _sell_selected_stack() -> void:
 	_refresh()
 
 func _allows_card_actions() -> bool:
-	return running and session.phase in ["playing", "selling"]
+	return running and not _ui_pause_active() and session.phase in ["playing", "selling"]
 
 func _active_slot_path() -> String:
 	return slots.slot_path(active_slot)
@@ -789,6 +816,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	pause_overlay.hide()
 	running = false
 	dragging = -1
 	hud.hide()
@@ -806,6 +834,9 @@ func _prepare_quit() -> bool:
 
 func _notification(what: int) -> void:
 	if what != NOTIFICATION_WM_CLOSE_REQUEST: return
+	if options_panel != null and options_panel.visible and options_panel.dirty:
+		options_panel.request_close()
+		if options_panel.visible: return
 	if running and session.phase != "playing":
 		quit_dialog.popup_centered()
 	elif _prepare_quit():
@@ -1244,3 +1275,50 @@ func _try_trade_drop(card_id: int, destination: Vector2) -> Dictionary:
 	# cards through equipment/combat/ordinary placement exactly once.
 	if not outcome.terminal and not dropped.card_ids.is_empty(): outcome.card_id = int(dropped.card_ids[0])
 	return outcome
+
+func _build_pause_options(layer: CanvasLayer) -> void:
+	pause_overlay = Control.new()
+	pause_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	pause_overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	layer.add_child(pause_overlay)
+	var shade := ColorRect.new()
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.color = Color(0.02, 0.04, 0.06, 0.85)
+	pause_overlay.add_child(shade)
+	var box := _panel(pause_overlay, Rect2(500, 270, 440, 330))
+	_label("PAUSED · MENU", box, 26)
+	_label("Your selected time pace is preserved.", box, 15)
+	_button("Continue [Escape]", box, _toggle_pause_menu)
+	_button("Options", box, _open_options)
+	_button("Save & return to title", box, _return_title)
+	pause_overlay.hide()
+	options_panel = OptionsPanel.new()
+	layer.add_child(options_panel)
+
+func _ui_pause_active() -> bool:
+	return running and ((pause_overlay != null and pause_overlay.visible) or (options_panel != null and options_panel.visible))
+
+func _toggle_pause_menu() -> void:
+	if not running or session.phase != "playing" or options_panel.visible: return
+	pause_overlay.visible = not pause_overlay.visible
+	if pause_overlay.visible:
+		dragging = -1
+		drag_delta = Vector2.ZERO
+		session.combat.dragged.clear()
+
+func _open_options() -> void:
+	if running:
+		if session.phase != "playing": return
+		pause_overlay.show()
+		dragging = -1
+		drag_delta = Vector2.ZERO
+		session.combat.dragged.clear()
+	options_panel.open()
+
+func _handle_escape() -> void:
+	# Source PauseMenu never changes external pause during IsEndingCycle.
+	if running and session.phase != "playing": return
+	if options_panel.visible:
+		options_panel.request_close()
+	elif running:
+		_toggle_pause_menu()

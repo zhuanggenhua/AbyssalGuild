@@ -195,6 +195,27 @@ func run() -> void:
 	var zero_footprint_expected := Vector2(board.session.board_bounds.end.x, board.session.board_bounds.end.y - board.session.board_top_margin)
 	check(withdrawal.position.is_equal_approx(zero_footprint_expected), "withdraw point clamps to source bounds and header with zero footprint")
 	board.session.spawn_target_selector = board._select_spawn_target
+	board._refresh()
+	if board.views[chest].stat_labels.has("price"):
+		check(board.views[chest].stat_labels.price.text == str(board.session.cards[chest].stored_coins), "board sync supplies stored-coins price override to chest label")
+	var food: int = board.session.spawn_card(board.catalog.find_by_name("Berry"), Vector2(-3, -2), -1, {"refuse_attach": true})
+	board.session.cards[food].nutrition = 1
+	board._refresh()
+	if board.views[food].stat_labels.has("nutrition"):
+		check(board.views[food].stat_labels.nutrition.text == "1", "board sync supplies live food nutrition")
+	var wearer: int = board.session.spawn_card(board.catalog.find_by_name("Villager"), Vector2(0, -2), -1, {"refuse_attach": true})
+	var gear: int = board.session.spawn_card(board.catalog.find_by_name("Sword"), Vector2(2, -2), -1, {"refuse_attach": true})
+	board.session.equipment.equip(wearer, gear)
+	board.session.cards[wearer].health = 7
+	board._refresh()
+	if board.views[wearer].stat_labels.has("health"):
+		check(board.views[wearer].stat_labels.health.text == "7", "board sync supplies current health rather than definition maximum")
+	if board.views[wearer].equipment_panel != null:
+		check(board.views[wearer].equipment_panel.active_slots.x == 1, "board sync fills occupied weapon slot")
+	board.session.equipment.unequip_all(wearer)
+	board._refresh()
+	if board.views[wearer].equipment_panel != null:
+		check(board.views[wearer].equipment_panel.active_slots == Vector3.ZERO, "board sync clears slot occupancy after unequip")
 	print("Board integration checks: %d passed / %d total" % [checks - failures, checks])
 	board.queue_free()
 	# Drain deferred node/audio/resource deletion before terminating the tree.

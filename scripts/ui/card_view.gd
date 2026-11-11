@@ -5,9 +5,13 @@ var caption: Label3D
 var body: MeshInstance3D
 var material: StandardMaterial3D
 var source_material: ShaderMaterial
+var stat_labels: Dictionary = {}
+var equipment_panel: Node3D
+var _default_state: Dictionary = {}
 
 func configure(id: int, title: String, category: int, is_pack: bool, visual_assets = null, fields: Dictionary = {}, scene_name: String = "Main", collider_size: Vector3 = Vector3.ZERO) -> void:
 	card_id = id
+	_default_state = {"sell_price": int(fields.get("sellPrice", 1)), "nutrition": int(fields.get("nutrition", 0)), "health": int(fields.get("maxHealth", 15))}
 	body = MeshInstance3D.new()
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(1.4, 0.06, 1.95)
@@ -81,6 +85,33 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 			art_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			face.material_override = art_material
 			add_child(face)
+
+	if visual_assets != null:
+		var labels: Dictionary = appearance.get("prefab", {}).get("labels", {})
+		for role in ["price", "nutrition", "health"]:
+			var label: Label3D = preload("res://scripts/ui/card_stat_labels.gd").create(visual_assets, labels.get(role, {}), 0.01 if source_material != null else mesh.size.y / 2.0 + 0.01, source_material != null)
+			if label != null:
+				label.name = role.capitalize()
+				stat_labels[role] = label
+				add_child(label)
+		equipment_panel = visual_assets.create_equipment_panel(appearance.get("prefab", {}).get("equipment_panel", {}))
+		if equipment_panel != null:
+			add_child(equipment_panel)
+	update_state({})
+
+func update_state(state: Dictionary) -> void:
+	# Each update is a full display snapshot. Omission clears an old override.
+	var values: Dictionary = _default_state.duplicate()
+	values.merge(state, true)
+	if stat_labels.has("price"):
+		var text: String = str(values.get("price_override")) if values.get("price_override") != null else str(values.get("sell_price", 0))
+		preload("res://scripts/ui/card_stat_labels.gd").set_value(stat_labels.price, text)
+	for role in ["nutrition", "health"]:
+		if stat_labels.has(role):
+			preload("res://scripts/ui/card_stat_labels.gd").set_value(stat_labels[role], str(values.get(role, 0)))
+	if equipment_panel != null:
+		var slots: Variant = values.get("equipment_slots", [])
+		equipment_panel.set_slots(slots if slots is Array else [])
 
 func highlight(value: bool) -> void:
 	material.emission_enabled = value

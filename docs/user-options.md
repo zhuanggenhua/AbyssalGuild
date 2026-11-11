@@ -1,4 +1,4 @@
-# User options model (UI/application not yet integrated)
+# User options model and application integration
 
 `user_options.gd` stores native, global application preferences independently of campaign saves. It contains no AudioServer, DisplayServer, Engine, host-volume, or window calls. Configure/load/change/reset/save never applies settings. An explicitly injected adapter is the only application route.
 
@@ -22,7 +22,7 @@ The audio sliders convert values ≤0.0001 to −80 dB, otherwise `20*log10(valu
 
 GraphicsManager deduplicates hardware resolutions ignoring refresh rate, sorts width then height, and picks the mode nearest 1920×1080 on first run; equal distances keep the first sorted mode. There is no hard-coded available-resolution menu. VSync overrides the cap in source performance semantics. Source URP shadow presets use Off distance 0; Low 512/10/1, Medium 1024/20/2, High 2048/30/3, Ultra 4096/40/4 (map resolution / distance / cascades). These are **Unity-specific renderer settings**, not a verified Godot mapping.
 
-GameOptionsUI applies and saves each change; Close also flushes preferences. Reset prompts then clears PlayerPrefs and reinitializes graphics/audio. PauseMenu opens the same options panel, toggles external pause, and disallows cancel toggles during day-ending flow. This model does not implement those UI/pause behaviors.
+GameOptionsUI applies and saves each change; Close also flushes preferences. Reset prompts then clears PlayerPrefs and reinitializes graphics/audio. PauseMenu opens the same options panel, toggles external pause, and disallows cancel toggles during day-ending flow. The model remains data-only; the board OptionsPanel now implements those UI/pause behaviors as described in `options-ui.md`.
 
 ## Helper API
 
@@ -42,8 +42,15 @@ Format is `abyssal-guild-user-options`, version 1, JSON, bounded to 16 KiB; this
 
 A saved resolution absent from the verified hardware list is retained as preference data but marked unsupported for application. Unlike source's potentially mismatched display/label fallback, the model does not blindly apply it. An adapter should ask/select a verified mode deliberately. Godot does not provide a portable equivalent of Unity's entire hardware mode list, half-refresh VSync, or URP shadow presets; do not substitute an invented list, adaptive/mailbox VSync, or unverified shadow mapping and label it source parity. Unsupported choices need a visible explanation or disabled UI until implemented.
 
-Day duration and Friendly Mode belong to each campaign's gameplay preferences and are not global user options. Neither campaign state nor transient pause, temporary music ducking, active combat or scene progress is persisted here. This task does not modify board controls or AudioFeedback; integration should preserve existing per-source gains and playback behavior.
+Day duration and Friendly Mode belong to each campaign's gameplay preferences and are not global user options. Neither campaign state nor transient pause, temporary music ducking, active combat or scene progress is persisted here. Board integration now uses an external menu pause lock and AudioFeedback app-local user gains. Source per-clip music gain is composed exactly once. See `options-ui.md` for mappings, persistence, unsupported controls and manual acceptance limits.
 
 ## Verification
 
 `tests/godot/test_user_options.gd` runs synthetic mode lists and a fake application adapter, using a unique temporary `user://test-user-options-…` path. It checks defaults, conversions/floor, bounds/type rejection, source cycle sequences, detached adapter data, JSON restoration, atomic replacement/backup recovery, invalid fallback and no automatic application. It never changes actual display, refresh rate, global engine cap or host/app audio volume. Tests remove only their own temporary files. Runtime renderer/audio mapping and UI interaction remain unverified until separately integrated and tested.
+
+## Integrated interface
+
+`options_panel.gd` and `options_adapter.gd` now connect this model to title/Escape
+options. The native headless branch is a no-op, and UI tests inject an adapter
+without changing display/audio. Full integration behavior and remaining native
+renderer/hardware limitations are documented in `options-ui.md`.

@@ -7,6 +7,7 @@ from pathlib import Path
 import shutil
 from import_stackcraft import parse_unity, json_bytes, sha256
 from visual_scene_metadata import apply_overrides, camera_records, light_records, transform_chain
+from card_visual_metadata import annotations
 
 SUPPORTED = {'.png', '.wav', '.fbx'}
 
@@ -82,9 +83,12 @@ def build(source, catalog, output):
             keys = ('m_LocalPosition', 'm_LocalRotation', 'm_LocalScale')
             if pose and text and all(k in rect for k in keys) and str(rect.get('m_Father', {}).get('fileID')) == str(root_transform.get('file_id')):
                 title = {'transform_chain': pose + [{k: rect[k] for k in keys}], 'color': text['m_fontColor'], 'rect_size': rect.get('m_SizeDelta', {})}
+        overlays = annotations(docs, owner)
+        title = overlays['labels'].get('title', title)
         result['prefabs'][guid] = {'source_path': index.get(guid, {}).get('source_path', ''),
             'size': collider.get('m_Size', {}), 'materials': renderer.get('m_Materials', []),
             'mesh': mesh, 'transform_chain': pose, 'title': title,
+            'labels': overlays['labels'], 'equipment_panel': overlays['equipment_panel'],
             'renderers': [{'owner': f.get('m_GameObject'), 'materials': f.get('m_Materials', [])} for f in renderers]}
         return guid
     for scene in catalog.get('scenes', []):
