@@ -44,3 +44,12 @@ Use writable HOME/XDG directories in restricted containers. The first attempt us
 Tests cover source-data loading; matrix decode and same-definition restrictions; exact starter sequence/exhaustion; recipe start/progress/pause/auto-repeat; Keep/Consume/Destroy; surplus matching; weighted zero/empty behavior; sale and rejection; vendor installments and purchases; partial nutrition/healing; starvation; excess-capacity selling and explicit day advancement. This is executable domain evidence, not evidence of visual or full-game parity.
 
 For a fresh checkout or to isolate logic tests from the UI, run `bash tools/test_godot.sh`. This creates a temporary minimal Godot project pointing at the same files, with writable user-data directories. Imported data is required; the command fails rather than substitute sample content.
+
+## Later integrated checkpoints
+
+The earlier boundary list describes the initial slice. Current session additionally
+uses the quest tracker, special recipes, equipment and combat helpers, plus the
+Godot-native save codec and runnable board UI. See `quest-tracker.md`,
+`special-recipes.md`, `combat.md`, `save-format.md`, and `board-ui.md` for verified
+coverage and remaining limits. `world_cards()` excludes attached gear as source
+CardManager.AllCards does. `tools/test_all.sh` is the aggregate regression command.

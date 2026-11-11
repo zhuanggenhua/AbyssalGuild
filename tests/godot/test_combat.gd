@@ -109,5 +109,63 @@ func _init() -> void:
 	check(merged > 0 and combat.tasks.size() == 1, "merge replaces tasks, tolerates repeated IDs")
 	check(combat.tasks[merged].player_is_attacker and combat.tasks[merged].attackers.size() == 2 and combat.tasks[merged].defenders.size() == 2, "merge repartitions by faction and player becomes attacker")
 	check(combat.flee(hero), "previous player defender can flee after merge")
+	check(equipment.equip(hero2, weapon), "equip during active fight")
+	var saved_equipment: Dictionary = JSON.parse_string(JSON.stringify(equipment.save_state()))
+	var staged_equipment: Dictionary = equipment.stage_state(saved_equipment, session.cards)
+	check(staged_equipment.ok and weapon in staged_equipment.unstacked, "JSON equipment staging validates ownership")
+	var saved_combat: Dictionary = JSON.parse_string(JSON.stringify(combat.save_state()))
+	var staged_combat: Dictionary = combat.stage_state(saved_combat, session.cards)
+	check(staged_combat.ok and hero2 in staged_combat.unstacked, "JSON combat staging validates membership")
+	equipment.apply_state(staged_equipment)
+	combat.apply_state(staged_combat)
+	check(equipment.stats(hero2).attack == 12 and combat.membership.has(hero2), "apply staged state preserves equipment/combat")
+	saved_equipment.wearers[0].items[0].item = 999999
+	check(not equipment.stage_state(saved_equipment, session.cards).ok, "bad equipment reference rejected")
+	saved_combat.tasks[0].attackers.append(hero2)
+	check(not combat.stage_state(saved_combat, session.cards).ok, "duplicate combatant rejected")
+	check(combat.membership.has(hero2) and equipment.owners.has(weapon), "failed staging never mutates live helpers")
+	_test_session(catalog)
 	print("Combat/equipment checks: ", checks, "; failures: ", failures)
 	quit(1 if failures else 0)
+
+func _test_session(catalog) -> void:
+	catalog.definitions["coin"] = {"guid": "coin", "fields": {"displayName": "Coin", "category": 7}}
+	catalog.data.cards.append(catalog.definitions.coin)
+	catalog.definitions["food"] = {"guid": "food", "fields": {"category": 3, "nutrition": 2}}
+	var session = Session.new()
+	session.configure(catalog, 23)
+	var hero: int = session.spawn_card("hero")
+	var weapon: int = session.spawn_card("weapon")
+	check(session.equipment.equip(hero, weapon), "session owns configured equipment")
+	check(session.stats().cards_owned == 1 and session.world_cards().size() == 1, "equipped gear excluded from source AllCards and capacity")
+	var target: int = session.spawn_card("mob")
+	check(not session.move_to_stack(weapon, session.cards[target].stack_id) and session.split_stack(weapon, Vector2.ZERO) == -1 and not session.sell_card(weapon), "stackless equipment guards")
+	check(session.sell_card(hero), "sell equipped wearer")
+	check(not session.cards.has(weapon) and session.equipment.owners.is_empty(), "ordinary wearer destruction removes attached gear")
+	hero = session.spawn_card("hero")
+	weapon = session.spawn_card("weapon")
+	session.equipment.equip(hero, weapon)
+	var fight: int = session.combat.start_combat([hero], [target])
+	check(fight > 0 and not session.move_to_stack(hero, session.cards[weapon].stack_id) and session.split_stack(hero, Vector2.ZERO) == -1 and not session.sell_card(hero), "stackless fighter guards")
+	session.paused = true
+	var before: float = session.combat.tasks[fight].progress[hero]
+	session.tick(0.2)
+	check(session.combat.tasks[fight].progress[hero] == before, "session pause gates combat tick")
+	session.paused = false
+	session.speed = 2.0
+	session.tick(0.1)
+	check(is_equal_approx(session.combat.tasks[fight].progress[hero], before + 20), "session scales combat delta once")
+	catalog.definitions.hero.fields["loot"] = [{"Card": {"guid": "food"}, "Weight": 1}]
+	catalog.definitions.mage.fields["loot"] = [{"Card": {"guid": "blade"}, "Weight": 1}]
+	check(session.kill_card(hero), "kill equipped combatant")
+	check(session.stats().nutrition == 2, "death loot uses reverted original class")
+	check(session.cards.has(weapon) and session.stacks.has(session.cards[weapon].stack_id) and session.equipment.owners.is_empty(), "kill drops gear instead of destroying")
+	check(session.combat.tasks.is_empty() and session.stacks.has(session.cards[target].stack_id), "external death ends fight and returns survivor")
+	hero = session.spawn_card("hero")
+	var armor: int = session.spawn_card("armor")
+	session.equipment.equip(hero, armor)
+	session.cards[hero].health = 1
+	session.end_day()
+	check(session.cards[hero].health == 16, "feeding uses equipped maximum health")
+	session.start_new_game()
+	check(session.equipment.equipped.is_empty() and session.combat.tasks.is_empty() and session.equipment.owners.is_empty(), "new game resets helpers")

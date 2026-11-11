@@ -199,3 +199,66 @@ func merge_combats(task_ids: Array) -> int:
 			membership.erase(id)
 		tasks.erase(task_id)
 	return start_combat(players, mobs, true)
+
+func save_state() -> Dictionary:
+	var records: Array = []
+	for id in tasks:
+		var task: Dictionary = tasks[id]
+		var progress: Array = []
+		for card_id in task.attackers + task.defenders:
+			progress.append({"card": card_id, "value": task.progress[card_id]})
+		records.append({"id": id, "attackers": task.attackers.duplicate(), "defenders": task.defenders.duplicate(), "player_is_attacker": task.player_is_attacker, "timer": task.timer, "progress": progress})
+	return {"tasks": records, "next_id": _next_id}
+
+func stage_state(raw: Variant, cards: Dictionary) -> Dictionary:
+	var invalid := {"ok": false, "error": "Invalid combat snapshot"}
+	if not raw is Dictionary or not raw.get("tasks", null) is Array:
+		return invalid
+	if not Equipment.valid_integer(raw.get("next_id"), 1) or raw.tasks.size() > cards.size():
+		return invalid
+	var result := {"ok": true, "tasks": {}, "membership": {}, "next_id": int(raw.get("next_id", -1)), "unstacked": []}
+	if result.next_id < 1:
+		return invalid
+	var catalog = _session.get_ref().catalog
+	for record in raw.tasks:
+		if not record is Dictionary or not record.get("attackers", null) is Array or not record.get("defenders", null) is Array or not record.get("progress", null) is Array or not record.get("player_is_attacker", null) is bool:
+			return invalid
+		if not Equipment.valid_integer(record.get("id"), 1) or not Equipment.valid_number(record.get("timer")) or record.attackers.size() + record.defenders.size() > cards.size() or record.progress.size() > cards.size():
+			return invalid
+		var id: int = int(record.get("id", -1))
+		var timer: float = float(record.get("timer", INF))
+		if id < 1 or id >= result.next_id or result.tasks.has(id) or not is_finite(timer) or record.attackers.is_empty() or record.defenders.is_empty():
+			return invalid
+		var task := {"attackers": [], "defenders": [], "player_is_attacker": record.player_is_attacker, "timer": timer, "progress": {}}
+		for side in ["attackers", "defenders"]:
+			for raw_id in record[side]:
+				if not Equipment.valid_integer(raw_id, 1):
+					return invalid
+				var card_id: int = int(raw_id)
+				if not cards.has(card_id) or result.membership.has(card_id) or cards[card_id].stack_id != -1:
+					return invalid
+				var expected: int = 1 if ((side == "attackers") == record.player_is_attacker) else 2
+				var fields: Dictionary = catalog.fields(cards[card_id].definition_guid)
+				if int(fields.get("faction", 0)) != expected or int(fields.get("category", 0)) not in [2, 9]:
+					return invalid
+				task[side].append(card_id)
+				result.membership[card_id] = id
+				result.unstacked.append(card_id)
+		for entry in record.progress:
+			if not entry is Dictionary or not Equipment.valid_integer(entry.get("card"), 1) or not Equipment.valid_number(entry.get("value")):
+				return invalid
+			var card_id: int = int(entry.get("card", -1))
+			var value: float = float(entry.get("value", INF))
+			if result.membership.get(card_id, -1) != id or task.progress.has(card_id) or not is_finite(value):
+				return invalid
+			task.progress[card_id] = value
+		if task.progress.size() != task.attackers.size() + task.defenders.size():
+			return invalid
+		result.tasks[id] = task
+	return result
+
+func apply_state(staged: Dictionary) -> void:
+	tasks = staged.tasks
+	membership = staged.membership
+	_next_id = staged.next_id
+	dragged.clear()

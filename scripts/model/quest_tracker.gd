@@ -128,7 +128,7 @@ func sync_stats(session) -> void:
 					amount = int(snapshot.get("currency", 0))
 				else:
 					amount = 0
-					for card in session.cards.values():
+					for card in (session.world_cards() if session.has_method("world_cards") else session.cards.values()):
 						if card.base_definition_guid == target:
 							amount += 1
 			QuestType.FOOD:

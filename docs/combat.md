@@ -61,7 +61,7 @@ GUID (for quest tracking), not the wearer's transformed definition.
 This is a logical model slice, not complete scene parity. Attack/projectile
 animations, real-time attack/return delays, sound, camera shake, hurt feedback,
 combat rectangle layout, automatic spatial overlap/merge detection, drag-based
-engagement, AI initiation and combat/equipment save serialization are not provided
+engagement and AI initiation are not provided
 by these files. The caller explicitly starts/merges combats. Consequently exact
 wall-clock attack timing is not yet source-equivalent during presentation delays.
 Equipment dropping returns to the wearer's board position; spatial displacement
@@ -75,3 +75,29 @@ The fixture covers rounding, hit/critical boundaries, all RPS directions,
 transformation/reversion, modifier sums, replacement, health preservation,
 stack detachment/return, action accumulation, drag exclusion, flee permissions,
 reinforcements, external removal, lethal turns and faction-based merges.
+
+## Snapshot helper contract
+
+Both helpers expose `save_state()`, `stage_state(raw, cards)` and
+`apply_state(staged)`. Staging validates references against an already restored
+card map without mutating live state, returning `ok`, an error on failure, and
+`unstacked` card IDs on success. The enclosing save codec must check that these
+IDs exactly account for stackless cards and do not overlap between helpers.
+The codec applies only after every session section validates. Equipment owners
+and combat membership are derived, never trusted from saved redundant maps.
+JSON uses arrays of records so numeric dictionary keys are preserved explicitly.
+This local snapshot preserves action progress/timers; source Unity reload instead
+initializes combat action progress again. Transient drag exclusion is not saved.
+
+Session regression tests cover scaled/paused tick, stackless guards, equipped
+wearer sales, death drops and post-reversion loot, equipped-health feeding and
+new-game reset. Ordinary wearer destruction removes attached gear (source
+GameObject child destruction); Kill explicitly drops it before removal.
+Snapshot scalar validation rejects containers, strings and fractional or unsafe
+IDs before conversion. Arrays are bounded by restored card counts and three
+slots. Finite negative progress/timers remain valid: negative stat modifiers and
+oversized single-frame delta can produce these in the source model.
+
+Attached gear is excluded from `world_cards()`, owned-card capacity and Have quest
+counts, matching CardEquipment.OnEquipped unregistering its world stack. Combatants
+remain counted. This is separate from persistent ownership in the card registry.

@@ -113,3 +113,83 @@ static func return_to_board(session, card_id: int) -> void:
 	stack.card_ids.append(card_id)
 	session.stacks[stack.id] = stack
 	session.cards[card_id].stack_id = stack.id
+
+func save_state() -> Dictionary:
+	var wearers: Array = []
+	for wearer in equipped:
+		var items: Array = []
+		for slot in equipped[wearer]:
+			items.append({"slot": slot, "item": equipped[wearer][slot]})
+		wearers.append({"wearer": wearer, "items": items, "original": originals.get(wearer, ""), "class_item": class_items.get(wearer, -1)})
+	return {"wearers": wearers}
+
+func stage_state(raw: Variant, cards: Dictionary) -> Dictionary:
+	var invalid := {"ok": false, "error": "Invalid equipment snapshot"}
+	if not raw is Dictionary or not raw.get("wearers", null) is Array:
+		return invalid
+	if raw.wearers.size() > cards.size():
+		return invalid
+	var result := {"ok": true, "equipped": {}, "owners": {}, "originals": {}, "class_items": {}, "unstacked": []}
+	var catalog = _session.get_ref().catalog
+	for record in raw.wearers:
+		if not record is Dictionary or not record.get("items", null) is Array:
+			return invalid
+		if not valid_integer(record.get("wearer"), 1) or not valid_integer(record.get("class_item", -1)) or not record.get("original", "") is String or record.items.size() > 3:
+			return invalid
+		var wearer: int = int(record.get("wearer", -1))
+		if not cards.has(wearer) or result.equipped.has(wearer) or int(catalog.fields(cards[wearer].definition_guid).get("category", 0)) != 2:
+			return invalid
+		result.equipped[wearer] = {}
+		for entry in record.items:
+			if not entry is Dictionary or not valid_integer(entry.get("item"), 1) or not valid_integer(entry.get("slot"), 0):
+				return invalid
+			var item: int = int(entry.get("item", -1))
+			var slot: int = int(entry.get("slot", -1))
+			if not cards.has(item) or result.owners.has(item) or result.equipped[wearer].has(slot) or slot not in [0, 1, 2]:
+				return invalid
+			var fields: Dictionary = catalog.fields(cards[item].definition_guid)
+			if int(fields.get("category", 0)) != 5 or int(fields.get("equipmentSlot", 0)) != slot or cards[item].stack_id != -1:
+				return invalid
+			result.equipped[wearer][slot] = item
+			result.owners[item] = wearer
+			result.unstacked.append(item)
+		var original: String = str(record.get("original", ""))
+		var class_item: int = int(record.get("class_item", -1))
+		if original.is_empty() != (class_item == -1):
+			return invalid
+		if class_item != -1:
+			if not cards.has(class_item) or result.owners.get(class_item, -1) != wearer or catalog.fields(original).is_empty():
+				return invalid
+			if catalog.ref_guid(catalog.fields(cards[class_item].definition_guid).get("classChangeResult", {})) != cards[wearer].definition_guid:
+				return invalid
+			result.originals[wearer] = original
+			result.class_items[wearer] = class_item
+	return result
+
+func apply_state(staged: Dictionary) -> void:
+	equipped = staged.equipped
+	owners = staged.owners
+	originals = staged.originals
+	class_items = staged.class_items
+
+static func valid_integer(value: Variant, minimum: int = -1) -> bool:
+	if not value is int and not value is float:
+		return false
+	return is_finite(float(value)) and float(value) >= minimum and float(value) <= 9007199254740991.0 and float(value) == floor(float(value))
+
+static func valid_number(value: Variant) -> bool:
+	return (value is int or value is float) and is_finite(float(value))
+
+## Ordinary destruction destroys attached equipment; Kill drops it first.
+func remove_card_state(card_id: int) -> void:
+	var session = _session.get_ref()
+	if owners.has(card_id):
+		var wearer: int = owners[card_id]
+		for slot in equipped.get(wearer, {}).keys():
+			if equipped[wearer][slot] == card_id:
+				unequip(wearer, slot)
+	for item in equipped.get(card_id, {}).values().duplicate():
+		session._remove_card(item)
+	equipped.erase(card_id)
+	originals.erase(card_id)
+	class_items.erase(card_id)

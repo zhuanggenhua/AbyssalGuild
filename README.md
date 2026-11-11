@@ -25,4 +25,13 @@ python3 tools/check_source_lock.py /path/to/Assets/StackCraft
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
+导入后可用 Godot 4.6 打开 `project.godot`，运行主场景。当前已有可操作的原创 3D 桌面、战斗/装备和 Godot 原生存档，仍是迁移阶段版本，不是原版视觉复刻或最终亲测版。
+
+```sh
+bash tools/test_all.sh
+godot --path .
+```
+
+没有本地导入数据时会明确阻止开始游戏，不以假数据代替原模板。操作说明见 [`docs/board-ui.md`](docs/board-ui.md)。
+
 运行时和视觉验收进度见 [`docs/migration-progress.md`](docs/migration-progress.md)。

@@ -3,6 +3,8 @@ extends RefCounted
 const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
 const SpecialRecipes = preload("res://scripts/model/special_recipes.gd")
+const EquipmentSystem = preload("res://scripts/model/equipment_system.gd")
+const CombatSystem = preload("res://scripts/model/combat_system.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)
@@ -11,6 +13,8 @@ var cards: Dictionary = {}
 var stacks: Dictionary = {}
 var discovered_recipes: Dictionary = {}
 var quest_tracker = QuestTracker.new()
+var equipment = EquipmentSystem.new()
+var combat = CombatSystem.new()
 var completed_quests: int:
 	get:
 		return quest_tracker.completed_count()
@@ -26,12 +30,16 @@ var _next_id: int = 1
 
 func configure(source_catalog, random_seed: int = 1) -> void:
 	catalog = source_catalog
+	equipment.configure(self)
+	combat.configure(self, equipment)
 	rng.seed = random_seed
 	quest_tracker.configure(catalog, "Main")
 	if not event_occurred.is_connected(_track_quest_event):
 		event_occurred.connect(_track_quest_event)
 
 func start_new_game() -> int:
+	equipment.reset()
+	combat.reset()
 	cards.clear()
 	stacks.clear()
 	discovered_recipes.clear()
@@ -80,6 +88,8 @@ func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: in
 func _remove_card(id: int) -> void:
 	if not cards.has(id):
 		return
+	equipment.remove_card_state(id)
+	combat.remove_combatant(id, false)
 	var stack = stacks.get(cards[id].stack_id)
 	if stack != null:
 		stack.card_ids.erase(id)
@@ -94,9 +104,12 @@ func kill_card(id: int) -> bool:
 		return false
 	var card = cards[id]
 	var fields: Dictionary = catalog.fields(card.definition_guid)
-	var category: int = int(fields.get("category", 0))
 	# Source notifies before loot, equipment cleanup and removal.
 	event_occurred.emit("card_killed", {"card_id": id, "definition_guid": card.definition_guid})
+	equipment.unequip_all(id)
+	combat.remove_combatant(id, false)
+	fields = catalog.fields(card.definition_guid)
+	var category: int = int(fields.get("category", 0))
 	if category == 2 or category == 9:
 		spawn_card(_roll_loot(fields.get("loot", [])), card.position)
 	var stack = stacks.get(card.stack_id)
@@ -191,7 +204,7 @@ func can_stack(bottom_guid: String, top_guid: String) -> bool:
 	return int(rules[index]) == 1 or (int(rules[index]) == 2 and bottom_guid == top_guid)
 
 func move_to_stack(card_id: int, target_id: int) -> bool:
-	if not cards.has(card_id) or not stacks.has(target_id):
+	if not cards.has(card_id) or not stacks.has(target_id) or not stacks.has(cards[card_id].stack_id):
 		return false
 	var card = cards[card_id]
 	var source = stacks[card.stack_id]
@@ -226,7 +239,7 @@ func move_to_stack(card_id: int, target_id: int) -> bool:
 	return true
 
 func split_stack(card_id: int, position: Vector2) -> int:
-	if not cards.has(card_id):
+	if not cards.has(card_id) or not stacks.has(cards[card_id].stack_id):
 		return -1
 	var source = stacks[cards[card_id].stack_id]
 	var moving: Array = source.card_ids.slice(source.card_ids.find(card_id))
@@ -305,6 +318,7 @@ func tick(delta: float) -> void:
 	if paused or phase != "playing" or delta <= 0:
 		return
 	var step: float = delta * speed
+	combat.tick(step)
 	for stack in stacks.values().duplicate():
 		if stack.recipe_guid.is_empty() or stack.paused:
 			continue
@@ -345,9 +359,17 @@ func _complete_recipe(stack) -> void:
 	if repeatable and category != 2 and category != 9 and stacks.has(stack.id):
 		_check_recipe(stack)
 
+## Source AllCards is registered board stacks plus combatants, never attached gear.
+func world_cards() -> Array:
+	var result: Array = []
+	for card in cards.values():
+		if not equipment.owners.has(card.id):
+			result.append(card)
+	return result
+
 func stats() -> Dictionary:
 	var result := {"currency": 0, "nutrition": 0, "characters": 0, "cards_owned": 0, "card_limit": int(catalog.settings("CardSettings").get("baseCardLimit", 24))}
-	for card in cards.values():
+	for card in world_cards():
 		var definition: Dictionary = catalog.get_definition(card.definition_guid)
 		var fields: Dictionary = definition.fields
 		var category: int = int(fields.get("category", 0))
@@ -378,7 +400,7 @@ func _sell_cards(ids: Array) -> bool:
 	var base_guids: Array = []
 	var total_price: int = 0
 	for id in ids:
-		if not cards.has(id):
+		if not cards.has(id) or equipment.owners.has(id) or combat.membership.has(id):
 			return false
 		var card = cards[id]
 		var fields: Dictionary = catalog.fields(card.definition_guid)
@@ -454,7 +476,7 @@ func end_day() -> Dictionary:
 			var eaten: int = mini(need, nearest.nutrition)
 			nearest.nutrition -= eaten
 			need -= eaten
-			var maximum: int = int(catalog.fields(character.definition_guid).get("maxHealth", 15))
+			var maximum: int = int(equipment.stats(character.id).get("maxHealth", 15))
 			character.health = mini(maximum, character.health + _round_to_even(float(maximum) * 0.5 * eaten / hunger))
 			if nearest.nutrition <= 0:
 				kill_card(nearest.id)
