@@ -16,7 +16,7 @@
 
 当前仓库公开。模板自身的源码和整包再分发许可尚未确认，因此不在 Git 中复制 Unity 原文件、PDF、原模型、原素材或批量导出的内容数据。导入工具、独立重写的 Godot 源码、来源校验与测试会分阶段保存。
 
-持有合法模板副本的开发者可以在本地生成被 Git 忽略的内容；具体导入说明将在数据导入阶段提供。未经核验，不将生成数据或素材重新加入公开提交。许可说明见 [`docs/source-baseline.md`](docs/source-baseline.md)。
+持有合法模板副本的开发者可以按[静态导入说明](docs/data-import.md)在本地生成被 Git 忽略的内容。未经核验，不将生成数据或素材重新加入公开提交。许可说明见 [`docs/source-baseline.md`](docs/source-baseline.md)。
 
 ## 验证
 
