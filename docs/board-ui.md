@@ -12,8 +12,10 @@ The public repository includes no original third-party assets or exported conten
 3. Choose day duration/friendly mode and New game, or Continue a native save.
 
 Missing data blocks starting and displays an import command. No mock replacement
-is loaded. Save/Continue uses `user://session.json`, a multi-scene campaign file
-with staged validation and healthy backup recovery. Unity saves are not supported.
+is loaded. Save/Continue selects a native multi-scene slot under
+`user://slots/SaveSlotNNN.json`, with staged validation and healthy backup recovery.
+Legacy single-save files are offered for explicit copy into a fresh slot and kept
+unchanged. Unity saves are not supported. See `save-slots.md`.
 
 ## Controls and features
 
@@ -37,6 +39,12 @@ with staged validation and healthy backup recovery. Unity saves are not supporte
   a session. Quests and discovered recipes have separate ledgers.
 - Completing actual TravelRecipes changes Main/Island, vendors, quests and clock;
   scene contents and timers persist. Save & title stays open if saving fails.
+- New commits a fresh slot without overwriting existing games. Confirmed Start Day
+  and travel checkpoint automatically. Game-over Return asks before archiving the
+  ended slot; no deletion happens merely on death. The title picker reports scene,
+  quest percentage, UTC file time and backup recovery.
+- Card drag/sale/trade allow playing and selling only. Feeding, ready and game-over
+  block those mutations. Manual pause retains playing-phase card interaction.
 
 ## Geometry and placement
 
@@ -76,3 +84,7 @@ in the current cloud environment. Unity was not launched, per the user's request
 The HUD is an original functional layout, not the original Title/Main/Island UI.
 Camera pan is immediate rather than Unity SmoothDamp. No claim of exact physics
 query ordering, shader parity, screenshots or final playability acceptance is made.
+
+## Slot and combat-merge regression suites
+
+`test_slot_ui.gd` covers the new picker/checkpoint/phase workflow. `test_combat_board.gd` additionally covers automatic pre-start and post-resize rectangle overlap merging through pure geometry callbacks, replacing old task rectangles without returning still-fighting units to the board. This uses target-pose rectangle/collider geometry and registration order, not a claim of Unity physics hit order or animated combat parity.

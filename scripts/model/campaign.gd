@@ -9,6 +9,8 @@ var _session: WeakRef
 var current_scene: String = "Main"
 var slot_number: int = 1
 var saved_scenes: Dictionary = {}
+## Live-only departure checkpoint; never copied into staging or serialization.
+var before_travel: Callable = Callable()
 
 func configure(session, scene_name: String = "Main", slot: int = 1) -> void:
 	_session = weakref(session)
@@ -49,6 +51,9 @@ func _new_scene(scene_name: String, next_id: int):
 	var session = _temporary(scene_name)
 	session._next_id = next_id
 	session.day_duration = _session.get_ref().day_duration
+	# Global recipe knowledge exists before destination quest activation.
+	session.discovered_recipes = _session.get_ref().discovered_recipes.duplicate()
+	session.collection.apply_state(_session.get_ref().collection.stage_state(_session.get_ref().collection.save_state()))
 	session.quest_tracker.start_new_game(session)
 	var defaults := _defaults(scene_name)
 	var center: Dictionary = defaults.get("defaultSpawnPosition", {})
@@ -100,6 +105,7 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 		destination = _new_scene(target, source._next_id)
 	destination._next_id = maxi(destination._next_id, source._next_id)
 	destination.discovered_recipes.merge(live.discovered_recipes, true)
+	destination.collection.merge_state(live.collection.stage_state(live.collection.save_state()))
 	var remap := {}
 	for traveler in travelers:
 		var id: int = _restore_card(destination, traveler, _random_position(destination))
@@ -126,6 +132,11 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 	var valid := Codec._stage(destination, snapshot)
 	if not valid.ok:
 		return valid
+	# Native checkpoint precedes the atomic live transition, not staged consumption.
+	if before_travel.is_valid():
+		var checkpoint: Variant = before_travel.call()
+		if not checkpoint is Dictionary or not checkpoint.get("ok") is bool or not checkpoint.ok:
+			return Codec._fail(str(checkpoint.get("error", "Departure checkpoint failed")) if checkpoint is Dictionary else "Invalid departure checkpoint response")
 	# Validation above makes this commit deterministic. Tracker must match destination.
 	saved_scenes[current_scene] = baseline
 	current_scene = target
@@ -160,13 +171,15 @@ func _restore_card(session, original, position: Vector2) -> int:
 func capture() -> Dictionary:
 	var scenes := saved_scenes.duplicate(true)
 	scenes[current_scene] = Codec.capture(_session.get_ref())
-	return {"format": FORMAT, "version": 1, "slot_number": slot_number, "current_scene": current_scene, "scenes": scenes}
+	return {"format": FORMAT, "version": 1, "slot_number": slot_number, "current_scene": current_scene, "scenes": scenes, "global_progress": {"collection": _session.get_ref().collection.save_state(), "discovered_recipes": _session.get_ref().discovered_recipes.duplicate()}}
 
 func restore(snapshot: Variant) -> Dictionary:
 	if not snapshot is Dictionary or snapshot.get("format") != FORMAT or snapshot.get("version") != 1 or not Codec._integer(snapshot.get("slot_number"), 1):
 		return Codec._fail("Invalid campaign header")
 	if not snapshot.get("scenes") is Dictionary or not snapshot.get("current_scene") is String or not snapshot.scenes.has(snapshot.current_scene):
 		return Codec._fail("Invalid campaign scenes")
+	var merged := {"discovered_cards": {}, "seen_items": {}}
+	var recipes: Dictionary = {}
 	for name in snapshot.scenes:
 		if not name is String or _defaults(name).is_empty():
 			return Codec._fail("Unknown campaign scene")
@@ -174,6 +187,30 @@ func restore(snapshot: Variant) -> Dictionary:
 		var valid := Codec._stage(session, snapshot.scenes[name])
 		if not valid.ok:
 			return valid
+		for key in merged:
+			merged[key].merge(valid.helpers.collection[key], true)
+		recipes.merge(valid.data.discovered_recipes, true)
+	var current: Dictionary = snapshot.scenes[snapshot.current_scene].duplicate(true)
+	if snapshot.has("global_progress"):
+		var global = snapshot.global_progress
+		if not global is Dictionary or not global.has("collection") or not global.has("discovered_recipes"):
+			return Codec._fail("Invalid global progress")
+		# Reuse strict recipe and collection staging without mutating live state.
+		var probe: Dictionary = current.duplicate(true)
+		probe.session.collection = global.collection
+		probe.session.discovered_recipes = global.discovered_recipes
+		var valid := Codec._stage(_temporary(snapshot.current_scene), probe)
+		if not valid.ok:
+			return valid
+		for key in merged:
+			merged[key].merge(valid.helpers.collection[key], true)
+		recipes.merge(valid.data.discovered_recipes, true)
+	current.session.collection = {"discovered_cards": merged.discovered_cards.keys(), "seen_items": merged.seen_items.keys()}
+	current.session.discovered_recipes = recipes
+	var final_check := Codec._stage(_temporary(snapshot.current_scene), current)
+	if not final_check.ok:
+		return final_check
+	# All scenes and canonical globals validated before changing any live state.
 	var live = _session.get_ref()
 	current_scene = snapshot.current_scene
 	slot_number = int(snapshot.slot_number)
@@ -182,7 +219,7 @@ func restore(snapshot: Variant) -> Dictionary:
 	live.world.configure(live, snapshot.current_scene)
 	live.ai.configure(live, live.world, snapshot.current_scene)
 	live.quest_tracker.configure(live.catalog, snapshot.current_scene)
-	var result := Codec.restore(live, snapshot.scenes[snapshot.current_scene])
+	var result := Codec.restore(live, current)
 	if not result.ok:
 		return result
 	return {"ok": true}

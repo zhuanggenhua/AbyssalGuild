@@ -15,6 +15,8 @@ func _init() -> void:
 
 func run() -> void:
 	var board = Board.new()
+	board.slot_root = "user://ui-test-slots-%d-%d" % [Time.get_unix_time_from_system(), Time.get_ticks_usec()]
+	board.legacy_paths.clear()
 	root.add_child(board)
 	await process_frame
 	check(board.title_panel.visible and not board.running, "title appears before simulation")
@@ -147,18 +149,24 @@ func run() -> void:
 	check(board.views[enemy].visible and not board.views[gear].visible, "Continue renders fighters but not attached equipment")
 	# Corrupt both candidates: failed Continue must preserve the live session.
 	var live = board.session
-	for path in ["user://session.json", "user://session.json.bak"]:
+	var healthy_primary: String = FileAccess.get_file_as_string(board._active_slot_path())
+	for path in [board._active_slot_path(), board._active_slot_path() + ".bak"]:
 		var file := FileAccess.open(path, FileAccess.WRITE)
 		file.store_string("not json")
 		file.close()
 	board._continue_game()
 	check(board.session == live and board.running, "failed Continue preserves live session")
 	board._save_game()
-	DirAccess.make_dir_absolute("user://session.json.tmp")
+	check(board.notice.text.begins_with("Save failed"), "corrupt-only slot is not silently overwritten")
+	var repaired_fixture := FileAccess.open(board._active_slot_path(), FileAccess.WRITE)
+	repaired_fixture.store_string(healthy_primary)
+	repaired_fixture.close()
+	board._save_game()
+	DirAccess.make_dir_absolute(board._active_slot_path() + ".tmp")
 	board._return_title()
 	check(board.running and board.session == live and not board.title_panel.visible, "failed title-save retains live board")
 	check(board.notice.text.begins_with("Could not save"), "failed save is explained")
-	DirAccess.remove_absolute("user://session.json.tmp")
+	DirAccess.remove_absolute(board._active_slot_path() + ".tmp")
 	_test_world_and_campaign(board)
 	await _test_source_camera_interaction(board)
 	print("UI checks: %d passed / %d total" % [checks - failures, checks])
@@ -260,7 +268,7 @@ func _test_world_and_campaign(board) -> void:
 	board.session.tick(float(recipe.fields.craftingDuration))
 	board._refresh()
 	_check_scene_ui(board, "Island", 1)
-	check(board.notice.text == "Arrived at Island" and board.running, "runtime travel event updates running UI")
+	check(board.notice.text.begins_with("Arrived at Island") and board.running, "runtime travel event updates running UI")
 	check(board.session.elapsed == 0, "travel tick does not advance Island clock")
 	check(board.session.campaign.saved_scenes.has("Main"), "Main snapshot retained in campaign")
 	check(board.session.friendly_mode, "friendly mode survives travel to Island")
@@ -275,11 +283,11 @@ func _test_world_and_campaign(board) -> void:
 	check(board.session.friendly_mode, "Island Continue retains friendly mode")
 	# Atomic save failures on Island must not reset scene, vendors, or the live model.
 	live = board.session
-	DirAccess.make_dir_absolute("user://session.json.tmp")
+	DirAccess.make_dir_absolute(board._active_slot_path() + ".tmp")
 	board._return_title()
 	check(board.running and board.session == live and board.session.scene_name == "Island", "failed Island save retains live destination")
 	check(board.vendor_guids.size() == 1 and board.notice.text.begins_with("Could not save"), "failed Island save preserves market and explains error")
-	DirAccess.remove_absolute("user://session.json.tmp")
+	DirAccess.remove_absolute(board._active_slot_path() + ".tmp")
 	travel_stack = _make_travel_stack(board)
 	board.session.tick(float(recipe.fields.craftingDuration))
 	board._refresh()

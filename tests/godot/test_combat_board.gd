@@ -17,6 +17,8 @@ func drop(board, id: int, destination: Vector2) -> void:
 	board._finish_drag(board.camera.unproject_position(Vector3(destination.x, 0, -destination.y)))
 func run() -> void:
 	var board = Board.new()
+	board.slot_root = "user://ui-test-slots-%d-%d" % [Time.get_unix_time_from_system(), Time.get_ticks_usec()]
+	board.legacy_paths.clear()
 	root.add_child(board)
 	await process_frame
 	check(board.data_error == OK, "real source data loaded")
@@ -104,8 +106,41 @@ func run() -> void:
 	check(not board._can_drag_card(enemy) and not board._can_drag_card(player), "mob-initiated fight allows neither side attacker-flee drag")
 	drop(board, player, Vector2(-20, -20))
 	check(board.session.combat.membership.has(player), "player defender cannot flee mob-initiated fight")
+	# Real view hooks merge a new overlapping fight before allocating its task.
+	var old_task: int = task_id
+	var old_center: Vector2 = board.combat_layouts[old_task].center
+	var second_player: int = board.session.spawn_card(villager_guid, Vector2(4, -2), -1, {"refuse_attach": true})
+	var second_enemy: int = board.session.spawn_card(enemy_guid, Vector2(5, -2), -1, {"refuse_attach": true})
+	board._set_board_card_position(second_player, old_center)
+	board._set_board_card_position(second_enemy, old_center + Vector2(0.1, 0))
+	var merged: int = board.session.combat.start_combat([second_player], [second_enemy])
+	board._refresh()
+	check(merged >= 0 and merged != old_task and board.session.combat.tasks.size() == 1, "view pre-start overlap hook merges existing fight")
+	check(board.session.combat.tasks[merged].player_is_attacker and board.session.combat.tasks[merged].attackers.size() == 2, "merged fight normalizes player attacking side")
+	check(not board.combat_rectangles.has(old_task) and board.combat_rectangles.has(merged), "merge replaces old rectangle without survivor transition")
+	check(board.session.cards[player].stack_id == -1 and board.session.cards[enemy].stack_id == -1, "old fighters remain detached through merge")
+	for id in board.session.cards.keys(): board.session._remove_card(id)
+	board._refresh()
+	var left: int = _create_fight(board, villager_guid, enemy_guid, Vector2(-3, -1))
+	var right: int = _create_fight(board, villager_guid, enemy_guid, Vector2(3, -1))
+	check(left != right and board.session.combat.tasks.size() == 2, "separated fights remain independent")
+	var newcomers: Array = []
+	for index in range(10): newcomers.append(board.session.spawn_card(villager_guid, Vector2(0, -3), -1, {"refuse_attach": true}))
+	check(board.session.combat.add_combatants(left, newcomers), "newcomers accepted before resize overlap check")
+	board._refresh()
+	check(board.session.combat.tasks.size() == 1 and not board.session.combat.tasks.has(left) and not board.session.combat.tasks.has(right), "resized rectangle overlap merges separate tasks")
+	check(board.combat_rectangles.size() == 1 and board.combat_layouts.size() == 1, "resize merge removes stale rectangles")
 	print("Combat board checks: %d passed / %d total" % [checks - failures, checks])
 	board.queue_free()
 	await process_frame
 	await create_timer(0.5).timeout
 	quit(0 if failures == 0 else 1)
+
+func _create_fight(board, player_guid: String, enemy_guid: String, center: Vector2) -> int:
+	var player: int = board.session.spawn_card(player_guid, center, -1, {"refuse_attach": true})
+	var enemy: int = board.session.spawn_card(enemy_guid, center, -1, {"refuse_attach": true})
+	board._set_board_card_position(player, center + Vector2(0, -0.2))
+	board._set_board_card_position(enemy, center + Vector2(0, 0.2))
+	var task_id: int = board.session.combat.start_combat([player], [enemy])
+	board._refresh()
+	return task_id

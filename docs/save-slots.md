@@ -1,6 +1,6 @@
-# Native save-slot helper (not yet wired to UI)
+# Native save slots and title workflow
 
-`save_slots.gd` is a standalone inventory and persistence adapter over the existing Campaign codec. It does not change the title screen, application-quit handling, game-over handling or campaign gameplay. No real user save is moved, adopted or deleted by adding this helper.
+`save_slots.gd` provides inventory and persistence over the Campaign codec. `scripts/ui/board.gd` now connects it to the title picker, New, Continue, explicit Save, checkpoints and confirmed game-over return. Merely launching the title lists slots without rewriting, adopting or deleting existing files.
 
 ## Source audit
 
@@ -10,7 +10,7 @@ Static reference: CardLoop `a11a89b04cea8370476f2559b639bb9b4cbc08d8`, within `A
 - The title slot label shows slot number, current scene, quest percentage and LastSaved. It does **not** show day. Native day metadata below is an added presentation option derived from the active scene snapshot.
 - DayCycleManager saves after the player confirms Start Day and StartNewDay runs. Game-over deletion is deferred until the player clicks Return to Title on its modal, not immediately when the last character dies.
 - BackToTitle and InitiateTravel call SaveGame. OnApplicationQuit saves outside Title except while DayCycleManager.IsEndingCycle. GameOver deletes the current save and returns to Title. Title deletion and Clear Games use confirmation dialogs.
-- This helper deliberately preserves evidence of corrupt files instead of making their numbers available for overwrite, and uses recoverable removal rather than the original irreversible delete. Original autosave triggers and game-over UI transitions are **not implemented here**.
+- This helper deliberately preserves evidence of corrupt files instead of making their numbers available for overwrite, and uses recoverable removal rather than the original irreversible delete. The board adapter implements the checkpoint and confirmation behavior documented below.
 
 ## API
 
@@ -28,12 +28,29 @@ Instantiate and call `configure(campaign, root = "user://slots")`. Root is a cal
 
 A backup-only slot remains loadable. A malformed primary plus healthy backup appears as valid/recovered with the primary diagnostic retained. Temporary files are never treated as committed games and never auto-promoted; temporary-only entries reserve their numbers for explicit review. Enumeration does not rewrite, delete or repair any artifact. Campaign's existing flush, verification, backup and rename behavior applies; see `save-format.md` for the power-loss and platform limitations.
 
-## Legacy adoption plan
+## Title and checkpoint integration
 
-Do not automatically scan/adopt or remove `user://session.json`, `user://session.json.bak`, or the earlier `user://campaign.json`. They are separate native single-save formats, not Unity data. The UI should offer explicit adoption when those files exist: load the chosen file through Campaign into an isolated configured candidate session (Campaign already wraps native single-session envelopes), show recovery/errors, then use a separate slot helper on that candidate to create the next unoccupied campaign slot. Only switch the live session after the new save succeeds. Keep the original and backup unchanged; report the new slot to the user. This adoption workflow is a documented integration plan, **not an implemented slot-helper action**. A corrupt legacy file must never cause an empty new game to be saved as its replacement.
+- New creates a fresh candidate session and commits the lowest available slot before replacing the live game. This initial immediate checkpoint is a deliberate safety addition to the source flow. Failed allocation leaves the current session intact.
+- The title picker shows slot number, current scene, quest percentage, file modification time in UTC, and backup-recovery status. The timestamp is filesystem metadata, not Unity LastSaved. Invalid slots stay visible with errors and cannot be continued; their artifacts remain reserved.
+- Continue validates the selected slot into a separate candidate before switching. Loading a different slot replaces its collection/discovery state; it does not union progress from the previously active slot.
+- Explicit Save and ordinary Return to Title write only the active valid slot. Failed writes keep the live session open and display an error. Corrupt-only slots are not silently overwritten.
+- Confirmed Start Day first calls `start_day`, then checkpoints the new day. A failure preserves the advanced live day and reports that Save must be retried; it does not pretend to have persisted or revert the day.
+- `campaign.before_travel` checkpoints the current source session only after the travel candidate validates. Save failure aborts before live travel mutation. The native departure checkpoint contains the unchanged pre-travel source; the original consumes before SaveGame with deferred-destruction ambiguity. After scene change the board checkpoints the destination and the frozen source-scene snapshot. A destination-write failure keeps the live destination open with a visible warning; the source checkpoint remains available.
+- Application close while playing checkpoints first and refuses to close on save failure. During feeding, selling, ready or game-over, quit skips autosave like source IsEndingCycle. The adapter adds a warning confirmation before quitting during those phases so the user knows only the previous checkpoint is retained. Closing from the title writes nothing.
+- Game-over detection does not archive or overwrite the last checkpoint. The Return to Title action asks for confirmation. Acceptance moves only the active slot and its backup/temp artifacts to the recoverable `.deleted` archive. Failure keeps the ended live game open. Success reports the archive path. There is no permanent purge.
+
+## Legacy adoption
+
+When `user://session.json`, `user://campaign.json`, or their backup exists, the title offers **Copy legacy save into a new slot**. These are earlier native formats, not Unity saves. No adoption happens merely by opening the app or refreshing the picker.
+
+The explicit action loads the chosen legacy primary/backup into an isolated configured candidate. Only a valid candidate is saved into the next unoccupied slot, and only successful creation switches the live game. Original and backup bytes stay unchanged, including after failed adoption. Success reports the new slot and any backup recovery. A corrupt legacy file cannot create an empty replacement. Repeating the explicit action creates another copy rather than overwriting the previous copy.
+
+## Phase input policy
+
+Card dragging, sale and trade are allowed while playing or selling, and blocked during feeding, ready and game-over. A manual pause does not disable playing-phase interactions. Inspection and navigation remain available. Explicit Save is available before game-over; game-over Save instead explains the confirmed archive flow. This adapter still lacks original animated/modal presentation and original title styling.
 
 ## Verification and remaining gaps
 
 `tests/godot/test_save_slots.gd` uses a unique temporary `user://test-save-slots-…` directory and a synthetic catalog. It checks lowest-free allocation, corruption and reservations, byte preservation, metadata and nonmutating enumeration, backup recovery, filename/header mismatch, save failures, recoverable deletion, reuse, ignored legacy files and invalid roots. Cleanup is restricted to that test-owned directory. No existing user slot or legacy save is touched.
 
-Slot selection, New Game integration, modal confirmations, Start Day/quit/title/travel autosave timing, game-over removal, delete-all UI, archive recovery UI, and timestamp localization remain unwired. This helper is not evidence of full title/save-slot parity or Unity-save compatibility. Linux Godot headless tests do not prove Windows rename or real power-loss behavior.
+`tests/godot/test_slot_ui.gd` exercises title selection, safe New, independent slot progress, Start Day/quit/travel checkpoints, phase locks, failed saves, legacy preservation and confirmed game-over archive using unique test-owned local directories. Existing UI smoke and combat/layout suites use their own slot directories too. Normal title-slot deletion, delete-all, archive restore UI, and local-time timestamp formatting remain unimplemented. This helper is not evidence of full title/save-slot parity or Unity-save compatibility. Linux Godot headless tests do not prove Windows rename or real power-loss behavior.

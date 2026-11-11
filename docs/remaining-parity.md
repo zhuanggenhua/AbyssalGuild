@@ -6,27 +6,24 @@ The full private source and assets now pass the 1327-file source lock.
 
 ## Functional work still required
 
-1. **Save lifecycle UI.** Native multi-slot storage is implemented and tested as a
-   helper, but the title still uses one Continue path. Connect slot selection,
-   safe legacy adoption, confirmed-new-day and travel checkpoints, and close
-   handling. Source game-over removal happens when the player confirms Return to
-   Title, not at the instant the last character dies. The current UI still saves
-   that dead session. Native deletion should use the helper's recoverable archive,
-   which is an intentional improvement over the original permanent file removal.
-2. **Phase action locks.** The source locks notification/feeding/encounter/ready
-   and game-over interactions, reopening card actions while selling excess.
-   Current drag/sale commands need one consistent phase policy and tests.
+1. **Save lifecycle UI is now connected.** Slot selection, safe explicit legacy
+   copying, new-day/travel checkpoints, quit failure handling and confirmed
+   game-over archive have integration coverage. Archive rather than permanent
+   removal is an intentional native safety improvement. Continue platform/manual
+   acceptance and fault-injection testing, not a missing-feature claim.
+2. **Phase action locks are connected.** Playing/selling permit card mutation;
+   feeding/ready/game-over block it. Still requires manual input acceptance.
 3. **Trade drop zones.** Source drop order is trade, equipment, combat, then regular
    stacking. Native buyer/vendor logic and source positions exist, including
    Main Coin versus Island Coral payouts, but trade remains button-driven.
    Connect zone colliders, whole-stack validation and vendor installments.
-4. **Global discovery and unread state.** Recipe discovery exists. Source
-   `DiscoveredCards` (including friendly-suppressed factory outputs), menu
-   `SeenItems`, and pack collection progress are not yet persisted or displayed.
-5. **Combat overlap merging.** Fighter rows, live rectangles, AI center, join/start,
-   flee and native layout snapshots are connected. The logical merge API and
-   geometry tests exist, but source pre-start overlap merging and merge-on-resize
-   are not yet connected through every initiation path.
+4. **Discovery presentation remains.** Global card discovery, recipe collection
+   totals and hover-only SeenItems semantics now persist atomically across scenes
+   and slots. Vendor collection trackers and individually hoverable menu rows are
+   not yet connected to the existing aggregate ledger.
+5. **Combat overlap merging is connected.** Pre-start and resize hooks preserve
+   source registration order and RNG draws; live board paths are tested. Original
+   animation, visual clarity and physics-query ordering still need acceptance.
 6. **Menus/options.** No full Escape options menu, persisted user audio/display
    choices, completed-quest history view or original unread-item presentation.
 

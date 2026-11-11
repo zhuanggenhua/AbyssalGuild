@@ -1,5 +1,6 @@
 extends RefCounted
 ## Engine-independent gameplay slice. No nodes, imported art, or Unity code.
+const Collection = preload("res://scripts/model/collection.gd")
 const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
 const SpecialRecipes = preload("res://scripts/model/special_recipes.gd")
@@ -12,6 +13,7 @@ const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)
 var catalog
+var collection = Collection.new()
 var cards: Dictionary = {}
 var stacks: Dictionary = {}
 var discovered_recipes: Dictionary = {}
@@ -45,6 +47,7 @@ var _selecting_spawn: bool = false
 
 func configure(source_catalog, random_seed: int = 1, selected_scene: String = "Main") -> void:
 	catalog = source_catalog
+	collection.configure(catalog)
 	scene_name = selected_scene
 	campaign.configure(self, scene_name)
 	world.configure(self, scene_name)
@@ -66,6 +69,7 @@ func start_new_game() -> int:
 	cards.clear()
 	stacks.clear()
 	discovered_recipes.clear()
+	collection.reset()
 	vendor_payments.clear()
 	day = 1
 	elapsed = 0.0
@@ -94,6 +98,8 @@ func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: in
 	if definition.is_empty() or _selecting_spawn:
 		return -1
 	var is_pack: bool = definition.get("script_class", "") == "PackDefinition"
+	if not is_pack:
+		collection.mark_card(guid)
 	# CreateCardInstance rejects aggressive definitions before instance allocation.
 	# Packs use CreatePackInstance, a separate source factory without this gate.
 	if not is_pack and friendly_mode and definition.fields.get("isAggressive", false):
@@ -605,36 +611,46 @@ func sell_stack(stack_id: int) -> bool:
 	return _sell_cards(stacks[stack_id].card_ids.duplicate())
 
 ## Source vendor supports installments. Validates the whole dropped stack first.
-## Returns {accepted, paid, pack_id}; an accepted partial payment is not a purchase.
+## Returns {accepted, paid, pack_id, terminal}; terminal means the dropped stack emptied.
 func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
-	var rejected := {"accepted": false, "paid": int(vendor_payments.get(pack_guid, 0)), "pack_id": -1}
+	var rejected := {"accepted": false, "paid": int(vendor_payments.get(pack_guid, 0)), "pack_id": -1, "terminal": false}
 	var definition: Dictionary = catalog.get_definition(pack_guid)
 	if not stacks.has(stack_id) or definition.get("script_class", "") != "PackDefinition":
 		return rejected
 	if completed_quests < int(definition.fields.get("minQuests", 0)):
 		return rejected
-	var ids: Array = stacks[stack_id].card_ids.duplicate()
+	var dropped_stack = stacks[stack_id]
+	var ids: Array = dropped_stack.card_ids.duplicate()
 	for id in ids:
-		if int(catalog.fields(cards[id].definition_guid).get("category", 0)) != 7 and cards[id].stored_coins <= 0:
+		if not cards.has(id):
+			return rejected
+		if int(catalog.fields(cards[id].definition_guid).get("category", 0)) != 7 and not (world._is_chest(id) and cards[id].stored_coins > 0):
 			return rejected
 	var price: int = int(definition.fields.get("buyPrice", 3))
 	var paid: int = int(vendor_payments.get(pack_guid, 0))
 	var stats_changed := false
+	# Source BottomCard is the LAST member, not the first array element.
+	ids.reverse()
 	for id in ids:
 		if paid >= price:
 			break
 		var card = cards[id]
 		if int(catalog.fields(card.definition_guid).get("category", 0)) == 7:
+			# CardStack.DestroyCard stops crafting before removing a payment card.
+			dropped_stack.cancel_craft()
 			_remove_card(id)
 			paid += 1
 			stats_changed = true
 		else:
+			# ChestLogic.TryWithdrawCoin(false) refuses an unresolved currency.
+			if catalog.get_definition(world.currency_guid).is_empty():
+				break
 			var amount: int = mini(price - paid, card.stored_coins)
 			paid += amount
 			card.stored_coins -= amount
 			stats_changed = stats_changed or amount > 0
-			if paid < price:
-				break
+			# Chest remains BottomCard, so once empty it blocks earlier payment cards.
+			break
 	var pack_id: int = -1
 	if paid >= price:
 		var spawn: Variant = preload("res://scripts/model/scene_spawn.gd").vendor_position(catalog, scene_name, pack_guid, board_bounds, board_top_margin)
@@ -646,7 +662,7 @@ func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
 	if stats_changed:
 		_notify_stats_changed()
 	changed.emit()
-	return {"accepted": true, "paid": paid, "pack_id": pack_id}
+	return {"accepted": true, "paid": paid, "pack_id": pack_id, "terminal": dropped_stack.card_ids.is_empty()}
 
 ## Unity Mathf.RoundToInt rounds exact half values to the nearest even integer.
 func _round_to_even(value: float) -> int:

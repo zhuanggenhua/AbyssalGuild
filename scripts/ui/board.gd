@@ -1,9 +1,11 @@
 extends Node3D
+const CombatMergeGeometry = preload("res://scripts/model/combat_merge_geometry.gd")
 const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
+const SaveSlots = preload("res://scripts/model/save_slots.gd")
 const SaveCodec = preload("res://scripts/model/save_codec.gd")
 const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
 const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
@@ -18,6 +20,16 @@ var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
 var combat_rectangles: Dictionary = {}
 var feedback = AudioFeedback.new()
+var slot_root: String = "user://slots"
+var legacy_paths: Array[String] = ["user://session.json", "user://campaign.json"]
+var slots = SaveSlots.new()
+var active_slot: int = 0
+var selected_slot: int = 0
+var slot_picker: OptionButton
+var legacy_picker: OptionButton
+var legacy_button: Button
+var game_over_dialog: ConfirmationDialog
+var quit_dialog: ConfirmationDialog
 var friendly_choice: CheckBox
 var session = Session.new()
 var camera: Camera3D
@@ -66,7 +78,11 @@ func _ready() -> void:
 Visual and manual input acceptance are not complete."
 		vendor_guids = SceneConfig.offered_packs(catalog)
 		_build_shop()
-	continue_button.disabled = not _has_save()
+	get_tree().auto_accept_quit = false
+	if data_error == OK:
+		session.configure(catalog)
+		slots.configure(session.campaign, slot_root)
+		_refresh_slots()
 
 func _build_world() -> void:
 	var world := WorldEnvironment.new()
@@ -194,8 +210,8 @@ func _build_ui() -> void:
 	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title_panel = PanelContainer.new()
 	layer.add_child(title_panel)
-	title_panel.position = Vector2(380, 190)
-	title_panel.size = Vector2(680, 480)
+	title_panel.position = Vector2(380, 90)
+	title_panel.size = Vector2(680, 710)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 28)
@@ -217,8 +233,29 @@ func _build_ui() -> void:
 	friendly_choice = CheckBox.new()
 	friendly_choice.text = "Friendly mode (skip aggressive encounters)"
 	title.add_child(friendly_choice)
-	_button("New game", title, start_new)
-	continue_button = _button("Continue", title, _continue_game)
+	_label("Saved games · native slots", title)
+	slot_picker = OptionButton.new()
+	slot_picker.item_selected.connect(_select_slot)
+	title.add_child(slot_picker)
+	_button("New game · new slot", title, start_new)
+	continue_button = _button("Continue selected slot", title, _continue_game)
+	continue_button.disabled = true
+	legacy_picker = OptionButton.new()
+	title.add_child(legacy_picker)
+	legacy_button = _button("Copy legacy save into a new slot", title, _adopt_selected_legacy)
+	legacy_button.hide()
+	legacy_picker.hide()
+	game_over_dialog = ConfirmationDialog.new()
+	game_over_dialog.title = "Return to Title"
+	game_over_dialog.dialog_text = "This game has ended. Return to Title and move this slot, including backups, into the recoverable local archive?"
+	game_over_dialog.ok_button_text = "Archive slot & return"
+	game_over_dialog.confirmed.connect(_confirm_game_over_return)
+	add_child(game_over_dialog)
+	quit_dialog = ConfirmationDialog.new()
+	quit_dialog.title = "Quit during day-end?"
+	quit_dialog.dialog_text = "Day-end progress is not autosaved on quit. Your last checkpoint stays intact. Quit now?"
+	quit_dialog.confirmed.connect(func(): get_tree().quit())
+	add_child(quit_dialog)
 
 func _build_shop() -> void:
 	for child in shop.get_children():
@@ -230,18 +267,33 @@ func _build_shop() -> void:
 		_label("No Main scene vendors resolved.\nCheck imported scene configuration.", shop, 13)
 
 func start_new() -> void:
-	if data_error != OK:
-		return
-	session = Session.new()
-	session.configure(catalog, int(Time.get_unix_time_from_system()))
-	session.day_duration = duration.value
-	session.friendly_mode = friendly_choice.button_pressed
-	if session.start_new_game() < 0:
+	if data_error != OK: return
+	var candidate = Session.new()
+	candidate.configure(catalog, int(Time.get_unix_time_from_system()))
+	candidate.day_duration = duration.value
+	candidate.friendly_mode = friendly_choice.button_pressed
+	if candidate.start_new_game() < 0:
 		title_status.text = "Starter pack is absent from the source data. Reimport and verify data."
 		return
+	var candidate_slots = SaveSlots.new()
+	candidate_slots.configure(candidate.campaign, slot_root)
+	var result: Dictionary = candidate_slots.create_slot()
+	if not result.ok:
+		title_status.text = "Cannot create game slot: " + str(result.error)
+		notice.text = title_status.text
+		return
+	session = candidate
+	slots = candidate_slots
+	active_slot = int(result.slot)
+	selected_slot = active_slot
 	_enter_game()
+	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	slots.configure(session.campaign, slot_root)
+	session.campaign.before_travel = _departure_checkpoint
+	session.combat.start_overlap_selector = _combat_start_overlaps
+	session.combat.resize_overlap_selector = _combat_resize_overlaps
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
 	combat_rectangles.clear()
 	combat_layouts.clear()
@@ -393,7 +445,9 @@ func _finish_drag(screen: Vector2) -> void:
 	var id: int = dragging
 	session.combat.dragged.clear()
 	dragging = -1
-	if not session.cards.has(id): return
+	if not _allows_card_actions() or not session.cards.has(id):
+		drag_delta = Vector2.ZERO
+		return
 	feedback.play_event("CardDrop")
 	if session.combat.membership.has(id):
 		_sync_combat_layouts()
@@ -456,7 +510,7 @@ func _refresh() -> void:
 		var minimum: int = int(fields.get("minQuests", 0))
 		var price: int = maxi(0, int(fields.get("buyPrice", 3)) - int(session.vendor_payments.get(guid, 0)))
 		vendor_buttons[guid].text = "%s · %d coins%s" % [_name(guid), price, " · locked" if session.completed_quests < minimum else ""]
-		vendor_buttons[guid].disabled = session.phase != "playing" or session.completed_quests < minimum or stats.currency < price
+		vendor_buttons[guid].disabled = not _allows_card_actions() or session.completed_quests < minimum or stats.currency < price
 	inspection.text = "Select a card"
 	if session.cards.has(selected):
 		var card = session.cards[selected]
@@ -498,60 +552,188 @@ func _toggle_pause() -> void:
 func _advance_day() -> void:
 	match session.phase:
 		"playing", "feeding": session.end_day()
-		"ready": session.start_day()
+		"ready":
+			if session.start_day(): _checkpoint("Day %d started" % session.day)
 		"game_over": _return_title()
 	_refresh()
 
 func _buy(guid: String) -> void:
-	if session.phase != "playing" or not vendor_guids.has(guid): return
+	if not _allows_card_actions() or not vendor_guids.has(guid): return
 	var id: int = session.buy_pack(guid)
 	notice.text = "Purchased " + _name(guid) if id >= 0 else "Pack unavailable: check currency and completed quests."
 	_refresh()
 
 func _sell_selected() -> void:
-	if session.phase == "game_over" or session.combat.membership.has(selected): return
+	if not _allows_card_actions() or session.combat.membership.has(selected): return
 	notice.text = "Card sold." if session.sell_card(selected) else "Select a sellable card. Empty coin storage first."
 	_refresh()
 
 func _sell_selected_stack() -> void:
-	if session.phase == "game_over" or not session.cards.has(selected) or session.combat.membership.has(selected): return
+	if not _allows_card_actions() or not session.cards.has(selected) or session.combat.membership.has(selected): return
 	notice.text = "Stack sold." if session.sell_stack(session.cards[selected].stack_id) else "This stack contains a card that cannot be sold."
 	_refresh()
 
+func _allows_card_actions() -> bool:
+	return running and session.phase in ["playing", "selling"]
+
+func _active_slot_path() -> String:
+	return slots.slot_path(active_slot)
+
 func _has_save() -> bool:
-	return FileAccess.file_exists("user://session.json") or FileAccess.file_exists("user://session.json.bak")
+	return selected_slot > 0 and slots._inspect(selected_slot).valid
+
+func _refresh_slots() -> void:
+	var inventory: Dictionary = slots.list_slots()
+	slot_picker.clear()
+	if not inventory.ok:
+		title_status.text = "Cannot read saves: " + str(inventory.error)
+		continue_button.disabled = true
+		return
+	var selected_index: int = -1
+	for entry in inventory.slots:
+		var label: String = "Slot %d · unavailable (files preserved)" % entry.slot
+		if entry.valid:
+			label = "Slot %d · %s · %d%% · %s UTC%s" % [entry.slot, entry.scene, entry.quest_progress, Time.get_datetime_string_from_unix_time(int(entry.modified_unix)).replace("T", " "), " · backup" if entry.recovered else ""]
+		slot_picker.add_item(label, int(entry.slot))
+		var index: int = slot_picker.item_count - 1
+		slot_picker.set_item_metadata(index, entry)
+		if int(entry.slot) == selected_slot: selected_index = index
+	if selected_index < 0:
+		for index in slot_picker.item_count:
+			if slot_picker.get_item_metadata(index).valid:
+				selected_index = index
+				break
+	if selected_index < 0 and slot_picker.item_count > 0: selected_index = 0
+	selected_slot = 0
+	if selected_index >= 0:
+		slot_picker.select(selected_index)
+		_select_slot(selected_index)
+	else:
+		slot_picker.add_item("No saved slots")
+		slot_picker.set_item_disabled(0, true)
+		continue_button.disabled = true
+	legacy_picker.clear()
+	for path in legacy_paths:
+		if FileAccess.file_exists(path) or FileAccess.file_exists(path + ".bak"):
+			legacy_picker.add_item(path.get_file())
+			legacy_picker.set_item_metadata(legacy_picker.item_count - 1, path)
+	legacy_picker.visible = legacy_picker.item_count > 0
+	legacy_button.visible = legacy_picker.visible
+
+func _select_slot(index: int) -> void:
+	var entry: Variant = slot_picker.get_item_metadata(index)
+	if not entry is Dictionary:
+		selected_slot = 0
+		continue_button.disabled = true
+		return
+	selected_slot = int(entry.slot)
+	continue_button.disabled = not bool(entry.valid)
+	if not entry.valid:
+		title_status.text = "Slot %d is unavailable. Existing files were kept. %s" % [selected_slot, str(entry.errors)]
+
+func _save_active_slot() -> Dictionary:
+	if active_slot <= 0: return {"ok": false, "error": "No active save slot"}
+	slots.configure(session.campaign, slot_root)
+	return slots.save_slot(active_slot)
+
+func _checkpoint(reason: String) -> Dictionary:
+	var result: Dictionary = _save_active_slot()
+	notice.text = reason + (" · saved." if result.ok else " · SAVE FAILED: " + str(result.error) + ". Live game kept open; retry Save.")
+	return result
 
 func _save_game() -> void:
-	var result: Dictionary = session.campaign.save_file("user://session.json")
+	if session.phase == "game_over":
+		notice.text = "Game over: confirm Return to Title to archive this slot."
+		return
+	var result: Dictionary = _save_active_slot()
 	notice.text = "Saved locally." if result.ok else "Save failed: " + str(result.get("error", "Unknown error"))
 
 func _continue_game() -> void:
-	if data_error != OK: return
+	if data_error != OK or selected_slot <= 0: return
 	var candidate = Session.new()
 	candidate.configure(catalog)
-	var result: Dictionary = candidate.campaign.load_file("user://session.json")
+	var candidate_slots = SaveSlots.new()
+	candidate_slots.configure(candidate.campaign, slot_root)
+	var result: Dictionary = candidate_slots.load_slot(selected_slot)
 	if not result.ok:
-		title_status.text = "Cannot continue: " + str(result.get("error", "Unknown error"))
+		title_status.text = "Cannot continue slot %d: %s" % [selected_slot, result.get("error", "Unknown error")]
 		return
 	session = candidate
+	slots = candidate_slots
+	active_slot = int(result.slot)
 	_enter_game()
-	notice.text = "Save restored." + (" Recovered from backup." if result.get("recovered", false) else "")
+	notice.text = "Slot %d restored." % active_slot + (" Recovered from backup." if result.get("recovered", false) else "")
+
+func _adopt_selected_legacy() -> void:
+	if legacy_picker.item_count <= 0: return
+	_adopt_legacy(str(legacy_picker.get_item_metadata(legacy_picker.selected)))
+
+func _adopt_legacy(path: String) -> void:
+	if data_error != OK or path not in legacy_paths: return
+	var candidate = Session.new()
+	candidate.configure(catalog)
+	var loaded: Dictionary = candidate.campaign.load_file(path)
+	if not loaded.ok:
+		title_status.text = "Legacy copy failed; original kept: " + str(loaded.error)
+		return
+	var candidate_slots = SaveSlots.new()
+	candidate_slots.configure(candidate.campaign, slot_root)
+	var created: Dictionary = candidate_slots.create_slot()
+	if not created.ok:
+		title_status.text = "Cannot create legacy-copy slot; original kept: " + str(created.error)
+		return
+	session = candidate
+	slots = candidate_slots
+	active_slot = int(created.slot)
+	selected_slot = active_slot
+	_enter_game()
+	notice.text = "Copied legacy save into slot %d. Original and backup were kept.%s" % [active_slot, " Recovered from legacy backup." if loaded.get("recovered", false) else ""]
 
 func _return_title() -> void:
-	var result: Dictionary = session.campaign.save_file("user://session.json")
+	if session.phase == "game_over":
+		game_over_dialog.popup_centered()
+		return
+	var result: Dictionary = _save_active_slot()
 	if not result.ok:
 		notice.text = "Could not save; session kept open: " + str(result.get("error", "Unknown error"))
 		return
+	_show_title()
+
+func _confirm_game_over_return() -> void:
+	if not running or session.phase != "game_over": return
+	var result: Dictionary = slots.delete_slot(active_slot)
+	if not result.ok:
+		notice.text = "Could not archive ended slot; game kept open: " + str(result.error)
+		return
+	active_slot = 0
+	selected_slot = 0
+	_show_title()
+	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
+
+func _show_title() -> void:
 	running = false
 	dragging = -1
 	hud.hide()
 	title_panel.show()
-	continue_button.disabled = not _has_save()
+	_refresh_slots()
 	for view in views.values(): view.hide()
 	for rectangle in combat_rectangles.values(): rectangle.hide()
 
+func _prepare_quit() -> bool:
+	# Source IsEndingCycle stays set from feeding through ready/game-over.
+	if not running or session.phase != "playing": return true
+	var result: Dictionary = _checkpoint("Quit checkpoint")
+	return result.ok
+
+func _notification(what: int) -> void:
+	if what != NOTIFICATION_WM_CLOSE_REQUEST: return
+	if running and session.phase != "playing":
+		quit_dialog.popup_centered()
+	elif _prepare_quit():
+		get_tree().quit()
+
 func _unequip_selected() -> void:
-	if session.phase != "playing" or not session.cards.has(selected) or session.combat.membership.has(selected): return
+	if not _allows_card_actions() or not session.cards.has(selected) or session.combat.membership.has(selected): return
 	session.equipment.unequip_all(selected)
 	_refresh()
 
@@ -580,7 +762,7 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 	if kind == "combat_ended": _release_combat_layout(int(payload.combat_id))
 	if kind == "scene_changed":
 		_enter_game()
-		notice.text = "Arrived at " + session.scene_name
+		_checkpoint("Arrived at " + session.scene_name)
 	elif kind == "travel_failed":
 		notice.text = "Travel failed: " + str(payload.get("error", ""))
 	if kind == "pack_purchased": feedback.play_event("CashRegister")
@@ -595,7 +777,7 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 		notice.text = "Event: " + str(payload.get("message", ""))
 
 func _withdraw_selected() -> void:
-	if session.phase != "playing" or not session.world.can_click_chest(selected):
+	if not _allows_card_actions() or not session.world.can_click_chest(selected):
 		notice.text = "Select an unstacked chest to withdraw a coin."
 		return
 	var position: Vector2 = session.cards[selected].position + Vector2(_card_footprint(selected).x, 0)
@@ -844,6 +1026,7 @@ func _draw_combat_rectangle(id: int, state: Dictionary) -> void:
 	rectangle.mesh = mesh
 
 func _can_drag_card(id: int) -> bool:
+	if not _allows_card_actions(): return false
 	if not session.cards.has(id): return false
 	if not session.combat.membership.has(id): return true
 	var task: Dictionary = session.combat.tasks[session.combat.membership[id]]
@@ -918,3 +1101,14 @@ func _try_equip_drop(id: int, destination: Vector2) -> bool:
 		notice.text = "Equipped."
 		return true
 	return false
+
+func _departure_checkpoint() -> Dictionary:
+	return _checkpoint("Travel departure")
+
+func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
+	_sync_combat_layouts()
+	return CombatMergeGeometry.before_start(_fighter_records(attackers), _fighter_records(defenders), combat_layouts)
+
+func _combat_resize_overlaps(task_id: int) -> Array:
+	_sync_combat_layouts()
+	return CombatMergeGeometry.after_resize(task_id, combat_layouts)

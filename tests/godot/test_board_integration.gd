@@ -28,6 +28,8 @@ func state(board, id: int) -> Dictionary:
 
 func run() -> void:
 	var board = Board.new()
+	board.slot_root = "user://ui-test-slots-%d-%d" % [Time.get_unix_time_from_system(), Time.get_ticks_usec()]
+	board.legacy_paths.clear()
 	root.add_child(board)
 	await process_frame
 	check(board.data_error == OK, "real source data required for board integration")

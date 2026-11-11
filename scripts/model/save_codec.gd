@@ -26,7 +26,7 @@ static func capture(session) -> Dictionary:
 		"next_id": session._next_id, "rng_seed": str(session.rng.seed), "rng_state": str(session.rng.state),
 		"cards": card_rows, "stacks": stack_rows, "discovered_recipes": session.discovered_recipes.duplicate(true),
 		"vendor_payments": session.vendor_payments.duplicate(true), "quests": session.quest_tracker.save_state()}}
-	for key in ["equipment", "combat", "world", "ai"]:
+	for key in ["equipment", "combat", "world", "ai", "collection"]:
 		var helper = session.get(key)
 		if helper != null and helper.has_method("save_state"):
 			snapshot.session[key] = helper.save_state()
@@ -146,7 +146,7 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 		stacks[stack.id] = stack
 		all_ids[stack.id] = true
 	var helpers := {}
-	for key in ["equipment", "combat", "world", "ai"]:
+	for key in ["equipment", "combat", "world", "ai", "collection"]:
 		var helper = session.get(key)
 		if data.has(key):
 			if helper == null or not helper.has_method("stage_state"):
@@ -159,6 +159,8 @@ static func _stage(session, snapshot: Variant) -> Dictionary:
 					return _fail("Conflicting " + key + " card membership")
 				membership[id] = true
 			helpers[key] = staged
+	if not helpers.has("collection"):
+		helpers.collection = session.collection.infer_legacy(cards)
 	if helpers.has("ai") and not session.ai.validate_combat_state(helpers.ai, helpers.get("combat", {}).get("membership", {})):
 		return _fail("AI state conflicts with active combat")
 	if membership.size() != cards.size():
@@ -199,7 +201,7 @@ static func restore(session, snapshot: Variant) -> Dictionary:
 	session._next_id = int(data.next_id)
 	session.rng.seed = data.rng_seed.to_int()
 	session.rng.state = data.rng_state.to_int()
-	for key in ["equipment", "combat", "world", "ai"]:
+	for key in ["equipment", "combat", "world", "ai", "collection"]:
 		var helper = session.get(key)
 		if helper != null:
 			if staged.helpers.has(key):
