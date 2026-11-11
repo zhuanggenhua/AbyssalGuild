@@ -2,6 +2,7 @@ extends RefCounted
 ## Engine-independent gameplay slice. No nodes, imported art, or Unity code.
 const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
+const SpecialRecipes = preload("res://scripts/model/special_recipes.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)
@@ -278,8 +279,8 @@ func _check_recipe(stack) -> void:
 	var matches: Array = []
 	var total: float = 0.0
 	for entry in catalog.data.get("recipes", []):
-		# Specialized recipe actions are intentionally not silently treated as standard crafts.
-		if entry.get("script_class", "") != "RecipeDefinition":
+		# Travel remains unsupported; supported specials share selection and timing only.
+		if entry.get("script_class", "") != "RecipeDefinition" and not SpecialRecipes.supports(str(entry.get("script_class", ""))):
 			continue
 		if matches_recipe(stack, entry.fields):
 			matches.append(entry)
@@ -318,30 +319,28 @@ func tick(delta: float) -> void:
 	changed.emit()
 
 func _complete_recipe(stack) -> void:
-	var recipe: Dictionary = catalog.fields(stack.recipe_guid)
+	var entry: Dictionary = catalog.get_definition(stack.recipe_guid)
+	var recipe: Dictionary = entry.get("fields", {})
 	var repeatable: bool = bool(recipe.get("isContinuous", false))
 	for ingredient in recipe.get("requiredIngredients", []):
-		var remaining: int = int(ingredient.count)
-		var mode: int = int(ingredient.get("consumptionMode", 0))
-		if mode != 1:
+		if int(ingredient.get("consumptionMode", 0)) != 1:
 			repeatable = true
-		for id in stack.card_ids.duplicate():
-			if remaining <= 0:
-				break
-			if cards[id].base_definition_guid != catalog.ref_guid(ingredient.card):
-				continue
-			remaining -= 1
-			if mode == 0:
-				cards[id].uses_left -= 1
-			if mode == 2 or (mode == 0 and cards[id].uses_left <= 0):
-				_remove_card(id)
 	var output: String = catalog.ref_guid(recipe.get("resultingCard", {}))
-	# Spawn outside the processing stack, as source spawn excludes that stack.
-	var spawned: int = spawn_card(output, stack.position)
-	if spawned >= 0:
-		event_occurred.emit("crafted", {"card_id": spawned, "definition_guid": output})
+	if SpecialRecipes.supports(str(entry.get("script_class", ""))):
+		SpecialRecipes.execute(self, stack, entry)
+	elif entry.get("script_class", "RecipeDefinition") == "RecipeDefinition":
+		SpecialRecipes.consume(self, stack, recipe)
+		# Spawn excludes the processing stack, as in the source.
+		var spawned: int = spawn_card(output, stack.position)
+		if spawned >= 0:
+			event_occurred.emit("crafted", {"card_id": spawned, "definition_guid": output})
+	else:
+		# Never interpret unsupported Travel as ordinary crafting, even if forced.
+		stack.cancel_craft()
+		return
 	stack.cancel_craft()
 	_notify_stats_changed()
+	# Source checks the declared result, NOT a random exploration loot result.
 	var category: int = int(catalog.fields(output).get("category", 0))
 	if repeatable and category != 2 and category != 9 and stacks.has(stack.id):
 		_check_recipe(stack)
