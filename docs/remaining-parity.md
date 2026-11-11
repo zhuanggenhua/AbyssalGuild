@@ -175,3 +175,21 @@ recipe. Legal source-card assembly reproduces Cow departure unblocking Fruit
 Salad, and verifies authoritative task activation and normal completion. See
 [AI placement and ordering](ai-placement-order.md). These are headless runtime
 corrections, not a claim of rendered motion or physical-pointer acceptance.
+
+
+## Drag decisions and lifecycle ordering
+
+Captured drags now move without a screen-pixel dead zone and use final world-space
+displacement plus the source click threshold. Returning to the origin, clamped
+grab offsets and camera-only movement are covered. Held cards can reach the
+source trade header; only final ordinary placement applies its restricted margin. Source-height/current-pose
+limitations remain documented in [drag input](card-drag-input.md).
+
+Combat maintains historical participant order independently of faction lists,
+including native save continuation, so a later same-faction join cannot skip an
+earlier tied opponent. Legacy files lacking this history use their prior
+deterministic order; see [combat order](combat-order.md).
+
+Growth seeds resolve before output selection, and returned equipment resolves
+immediately rather than waiting for a view refresh. Crowded-board callback order
+and all six real growth recipes are covered in [placement lifecycle](placement-lifecycle.md).

@@ -86,6 +86,10 @@ func unequip(wearer_id: int, slot: int) -> int:
 		if session.cards.has(wearer_id):
 			session.cards[item_id].position = session.card_target_position(wearer_id)
 		return_to_board(session, item_id)
+		# Only equipment follows source CardManager.ReturnCardToBoard. Combat
+		# and AI reuse the registration helper but own their placement timing.
+		if session.spawn_layout_resolver.is_valid():
+			session.spawn_layout_resolver.call()
 	session.changed.emit()
 	return item_id
 

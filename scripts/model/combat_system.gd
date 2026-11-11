@@ -3,6 +3,8 @@ extends RefCounted
 const Equipment = preload("res://scripts/model/equipment_system.gd")
 var _session: WeakRef
 var equipment
+# Each task retains historical combatants order independently of faction lists.
+# Stable equal-progress selection follows join order, including later additions.
 var tasks: Dictionary = {}
 var membership: Dictionary = {}
 var dragged: Dictionary = {}
@@ -107,7 +109,7 @@ func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool
 	var positions: Dictionary = session.capture_card_targets(attackers + defenders)
 	var task_id: int = _next_id
 	_next_id += 1
-	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}}
+	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}, "combatants": []}
 	for id in attackers + defenders:
 		_enter(task_id, id, positions.get(id))
 	session.event_occurred.emit("combat_started", {"combat_id": task_id})
@@ -117,6 +119,7 @@ func _enter(task_id: int, card_id: int, position: Variant = null) -> void:
 	var session = _session.get_ref()
 	Equipment.detach(session, card_id, position)
 	membership[card_id] = task_id
+	tasks[task_id].combatants.append(card_id)
 	tasks[task_id].progress[card_id] = session.rng.randf_range(0.0, 0.5)
 
 func add_combatants(task_id: int, card_ids: Array) -> bool:
@@ -159,7 +162,7 @@ func tick(delta: float, real_delta: float = -1.0) -> void:
 		if not tasks.has(task_id):
 			continue
 		var task: Dictionary = tasks[task_id]
-		for id in task.attackers + task.defenders:
+		for id in task.combatants.duplicate():
 			if not session.cards.has(id):
 				remove_combatant(id, false)
 			elif session.cards[id].health > 0: # CardCombatant.AddActionProgress guard.
@@ -207,7 +210,7 @@ func resolve_turn(task_id: int) -> void:
 		return
 	var actor: int = -1
 	var best: float = -INF
-	for id in task.attackers + task.defenders:
+	for id in task.combatants:
 		if not dragged.get(id, false) and float(task.progress[id]) > best:
 			actor = id
 			best = task.progress[id]
@@ -253,6 +256,7 @@ func _after_return(task_id: int) -> void:
 		task.attackers.erase(target)
 		task.defenders.erase(target)
 		task.progress.erase(target)
+		task.combatants.erase(target)
 		membership.erase(target)
 		dragged.erase(target)
 		task.execution.phase = "death_wait"
@@ -305,6 +309,7 @@ func remove_combatant(card_id: int, return_to_board: bool = true) -> void:
 	task.attackers.erase(card_id)
 	task.defenders.erase(card_id)
 	task.progress.erase(card_id)
+	task.combatants.erase(card_id)
 	if task.has("execution") and card_id in [task.execution.actor, task.execution.target]:
 		task.erase("execution") # Safety: cancel dangling attack; never reroll a replacement.
 	membership.erase(card_id)
@@ -372,7 +377,7 @@ func save_state() -> Dictionary:
 		var progress: Array = []
 		for card_id in task.attackers + task.defenders:
 			progress.append({"card": card_id, "value": task.progress[card_id]})
-		var record := {"id": id, "attackers": task.attackers.duplicate(), "defenders": task.defenders.duplicate(), "player_is_attacker": task.player_is_attacker, "timer": task.timer, "progress": progress}
+		var record := {"id": id, "attackers": task.attackers.duplicate(), "defenders": task.defenders.duplicate(), "player_is_attacker": task.player_is_attacker, "timer": task.timer, "progress": progress, "combatants": task.combatants.duplicate()}
 		if task.has("execution"):
 			if task.execution is Dictionary:
 				var execution: Dictionary = task.execution.duplicate(true)
@@ -456,6 +461,19 @@ func stage_state(raw: Variant, cards: Dictionary, scene_name: String = "") -> Di
 			task.progress[card_id] = value
 		if task.progress.size() != task.attackers.size() + task.defenders.size():
 			return invalid
+		# Native v1 predates historical join order. Its deterministic fallback is
+		# the old attackers-then-defenders order, not fabricated source history.
+		var order: Variant = record.get("combatants", task.attackers + task.defenders)
+		if not order is Array or order.size() != task.progress.size():
+			return invalid
+		task["combatants"] = []
+		for raw_card in order:
+			if not Equipment.valid_integer(raw_card, 1):
+				return invalid
+			var card_id: int = int(raw_card)
+			if not task.progress.has(card_id) or card_id in task.combatants:
+				return invalid
+			task.combatants.append(card_id)
 		if record.has("execution"):
 			var raw_execution = record.execution
 			if not raw_execution is Dictionary or raw_execution.size() != 7:

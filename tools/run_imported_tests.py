@@ -36,6 +36,7 @@ SUITES = (
     ("test_ai_placement_board", r"AI placement board: [1-9]\d*/[1-9]\d* passed"),
     ("test_crafting_order_board", r"Crafting order board clock: [1-9]\d*/[1-9]\d* passed"),
     ("test_card_feedback_board", r"Card feedback board checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_card_drag_board", r"Card drag board: [1-9]\d*/[1-9]\d* passed"),
     ("test_held_stack_board", r"Held stack board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_cycle_action_visibility", r"Cycle action visibility: [1-9]\d* passed / [1-9]\d* total"),
     ("test_cycle_board", r"Cycle board checks: [1-9]\d* passed / [1-9]\d* total"),

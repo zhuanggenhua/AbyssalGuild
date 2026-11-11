@@ -83,6 +83,10 @@ static func _grow(session, stack, recipe: Dictionary) -> void:
 		for id in separate.card_ids:
 			session.cards[id].stack_id = separate.id
 			session.cards[id].position = separate.position
+		# Source resolves the translated seed before the output performs its
+		# nearby-attachment query, not only after creating that output.
+		if session.spawn_layout_resolver.is_valid():
+			session.spawn_layout_resolver.call()
 	if not output.is_empty():
 		session.spawn_card(output, stack.position, -1, {"ignored_stack_id": stack.id})
 

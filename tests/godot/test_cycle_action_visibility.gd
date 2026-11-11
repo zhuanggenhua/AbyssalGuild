@@ -147,7 +147,8 @@ func run() -> void:
 	chest = chest_fixture(board)
 	press(board, chest); board.drag_moved = true; board.drag_delta = Vector2.ZERO
 	board._finish_drag(Vector2.ZERO)
-	check(board.session.cards[chest].stored_coins == 2, "drag returned to press origin is not misclassified as click")
+	check(board.session.cards[chest].stored_coins == 1, "source final displacement treats returned chest as click")
+	chest = chest_fixture(board)
 	press(board, chest); board.drag_moved = true; board.drag_delta = Vector2(2,0)
 	board._finish_drag(Vector2.ZERO)
 	check(board.session.cards[chest].stored_coins == 2, "ordinary chest movement does not withdraw")

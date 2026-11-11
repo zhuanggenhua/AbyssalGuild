@@ -437,6 +437,7 @@ func combat_execution_checkpoints() -> void:
 	bad.session.next_id += 1
 	bad.session.cards.append(extra)
 	bad.session.combat.tasks[0].attackers.append(extra.id)
+	bad.session.combat.tasks[0].combatants.append(extra.id)
 	bad.session.combat.tasks[0].progress.append({"card": extra.id, "value": 0.0})
 	check(Codec.restore(target, bad).ok and target.cards[int(extra.id)].health == 0, "source-legal extra merged zero-health participant retained")
 	bad = travel.duplicate(true)

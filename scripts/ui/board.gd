@@ -10,6 +10,7 @@ const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
+const CardDragInput = preload("res://scripts/ui/card_drag_input.gd")
 const CardView = preload("res://scripts/ui/card_view.gd")
 const CardInteraction = preload("res://scripts/ui/card_interaction_descriptors.gd")
 const CardHoverView = preload("res://scripts/ui/card_hover_view.gd")
@@ -89,8 +90,10 @@ var dragging: int = -1
 var press_position := Vector2.ZERO
 var drag_grant: int = -1
 var drag_origin := Vector2.ZERO
+var drag_anchor := Vector2.ZERO
 var drag_delta := Vector2.ZERO
 var drag_moved: bool = false
+var drag_start_position := Vector3.ZERO
 var hud: Control
 var title_panel: PanelContainer
 var title_status: Label
@@ -478,6 +481,8 @@ func _process(delta: float) -> void:
 	var scaled_delta: float = delta * session.speed if session.phase == "playing" and not session.paused and not external_pause else 0.0
 	_advance_puffs(delta, scaled_delta)
 	_update_camera_motion(delta)
+	# Source recomputes the held target each frame, including camera-only motion.
+	if dragging >= 0 and _card_pointer_known: _update_drag_position(_card_pointer)
 	vendor_unlock.advance(delta)
 	combat_presentation.advance(delta)
 	if external_pause:
@@ -715,9 +720,13 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 		dragging = id # Lock the just-detached stack before placement can move its visible pose.
 		_sync_views()
 	dragging = id if _can_drag_card(id) else -1
+	if dragging >= 0:
+		drag_start_position = session.card_target_position_3d(id)
 	if dragging >= 0 and not session.combat.membership.has(id):
 		var lifted: Vector2 = session.card_target_position(id)
 		if views.has(id): lifted = Vector2(views[id].global_position.x, -views[id].global_position.z)
+		drag_start_position.x = lifted.x
+		drag_start_position.z = lifted.y
 		if not session.drag.begin(id, lifted).ok: dragging = -1
 	drag_grant = dragging
 	if dragging >= 0:
@@ -725,6 +734,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 		feedback.play_event("CardPick")
 	press_position = screen
 	drag_origin = _board_point(screen)
+	drag_anchor = session.card_target_position(dragging) if session.cards.has(dragging) else Vector2.ZERO
 	drag_delta = Vector2.ZERO
 	drag_moved = false
 	_sync_card_feedback()
@@ -789,17 +799,16 @@ func _input(event: InputEvent) -> void:
 			_finish_drag(event.position)
 
 func _update_drag_position(screen: Vector2) -> void:
-	if not session.cards.has(dragging): return
-	drag_moved = drag_moved or screen.distance_to(press_position) > 7
-	if not drag_moved: return
+	if not session.cards.has(dragging) or not screen.is_finite(): return
+	_record_card_pointer(screen)
 	var point := _board_point(screen)
 	drag_delta = point - drag_origin
 	if session.drag.active() and not session.combat.membership.has(dragging):
 		# Move the registered split, not only its drawing: saves/other systems
 		# observe the real held position. Combat keeps its separate drag offset.
-		_set_board_card_position(dragging, _clamp_stack_position(dragging, session.card_target_position(dragging) + drag_delta))
-		drag_origin = point
+		_set_board_card_position(dragging, _clamp_stack_position(dragging, drag_anchor + drag_delta, false))
 		drag_delta = Vector2.ZERO
+	drag_moved = not CardDragInput.is_click(drag_start_position, session.card_target_position(dragging) + drag_delta, CardDragInput.source_settings(catalog, session.scene_name))
 
 func _finish_drag(screen: Vector2) -> void:
 	if pressed_panel >= 0:
@@ -839,7 +848,10 @@ func _finish_drag(screen: Vector2) -> void:
 	var destination: Vector2 = session.card_target_position(id) + drag_delta
 	_set_board_card_position(id, destination)
 	var click_handled := false
-	if not drag_moved:
+	# Captured presses use the final world displacement, not whether the pointer
+	# ever crossed a pixel threshold. Returning to the origin can be a click.
+	var is_click: bool = CardDragInput.is_click(drag_start_position, destination, CardDragInput.source_settings(catalog, session.scene_name)) if carried_press else not drag_moved
+	if is_click:
 		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
 			var pack_stack: int = session.cards[id].stack_id
 			layout_locks[pack_stack] = true
@@ -1394,12 +1406,13 @@ func _update_board_geometry() -> void:
 		_apply_layout(BoardLayout.enforce_board_limits(_layout_states(), [], bounds, session.board_top_margin, int(catalog.settings("CardSettings").get("maxIterations", 8))))
 	_clamp_camera()
 
-func _clamp_stack_position(card_id: int, point: Vector2) -> Vector2:
+func _clamp_stack_position(card_id: int, point: Vector2, placement_rules: bool = true) -> Vector2:
 	if not session.board_bounds is Rect2 or not session.cards.has(card_id): return point
 	var stack = session.stacks.get(session.cards[card_id].stack_id)
 	var count: int = 1 if stack == null else stack.card_ids.size() - stack.card_ids.find(card_id)
 	var state: Dictionary = BoardLayout.stack_state(-1, point, _card_footprint(card_id), count, false, _stack_step())
-	return BoardLayout.enforce_placement(point, state, session.board_bounds, session.board_top_margin)
+	# Held cards can enter the source trade header; ordinary placement cannot.
+	return BoardLayout.enforce_placement(point, state, session.board_bounds, session.board_top_margin) if placement_rules else BoardLayout.clamp_to_bounds(point, state, session.board_bounds)
 
 func _ai_point_valid(point: Vector2, stack_id: int) -> bool:
 	if not session.board_bounds is Rect2 or not session.stacks.has(stack_id): return false

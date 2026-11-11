@@ -21,6 +21,7 @@ MARKERS = {
     "test_card_feedback_board": "Card feedback board checks: 1 passed / 1 total",
     "test_vendor_unlock_board": "Vendor unlock board checks: 1 passed / 1 total",
     "test_navigation_ui": "Navigation UI checks: 1 passed / 1 total",
+    "test_card_drag_board": "Card drag board: 18/18 passed",
     "test_held_stack_board": "Held stack board checks: 1 passed / 1 total",
     "test_cycle_action_visibility": "Cycle action visibility: 1 passed / 1 total",
     "test_imported_resources": "Private imported resources: PASS (1 PNG, 1 WAV, 1 FBX)",
