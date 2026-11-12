@@ -337,3 +337,11 @@ Day 8 file remains unchanged. This reduces the natural economy/progression gap,
 but does not establish Acolyte acquisition, the Altar/Demon Lord/Core chain,
 natural portal construction or natural Island arrival. Controlled travel and
 combat fixtures remain explicitly separate from natural campaign completion.
+
+A bounded continuation then opened two naturally purchased Blacksmith packs,
+defeated both actual Goblin draws, healed through normal feeding and reached
+Day 12 with four full-health adults, 15 Coins and 17 nutrition. Three additional
+checkpoints passed native restore/capture validation and 36 read-only evidence
+checks passed. Neither pack supplied the probabilistic Acolyte prerequisite.
+See the [bounded Blacksmith continuation](gui-smoke.md#bounded-natural-blacksmith-combat-continuation)
+for the remaining random-grind cost; this does not close natural endgame acceptance.

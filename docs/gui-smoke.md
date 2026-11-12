@@ -424,3 +424,31 @@ Both native processes exited normally; logs contained only the known VSync
 warning. This Linux llvmpipe/Dummy-audio run does not establish listening or
 other-platform acceptance. Raw screenshots, saves, audits and licensed media
 remain private.
+
+## Bounded natural Blacksmith combat continuation
+
+The preserved Day 11 slot was copied unchanged into separate user data on
+`573b0ea88b7336d97c5d9c03105bcf07b87e6ebc`. Two ordinary Blacksmith purchases
+spent 30 Coins. Their actual draws were Berry Bush/Goblin/Brick and
+Chainmail recipe/Goblin/Plank. Neither yielded an Acolyte; no save, random
+state or card outcome was edited or rerolled.
+
+Normal dragging engaged one Goblin with the existing club-equipped Warrior;
+the other approached automatically. Both were defeated in real combat and
+dropped one Coin each. Warrior health fell from 20 to 13. Ordinary day-end
+feeding restored it to 20, and selling eight surplus Wood, the learned recipe
+and three Eggs cleared the twelve-card excess. The campaign advanced normally
+to Day 12. Further natural harvesting and three renewed Soil plantings left
+a paused checkpoint with 15 Coins, 17 nutrition for eight required, all four
+original adults at full health, and 26 completed quests. Save & Title and
+confirmed Quit completed normally.
+
+Three checkpoints passed native restore/capture validation and 36 independent
+read-only evidence checks passed. The original Day 8 and Day 11 inputs remain
+byte-identical. No runtime defect was found. This bounded continuation stopped
+before another random pack grind: at the locked 8% Acolyte rate, the mean wait
+from any fresh attempt is 12.5 packs (187.5 gross Coins); 36 packs give over
+95% probability, not a guarantee. Construction and boss preparation would still
+follow. Natural endgame completion remains unverified; the controlled portal
+and combat acceptance above is separate. Raw saves, screenshots and logs remain
+private, and this run again used Linux llvmpipe with Dummy audio.
