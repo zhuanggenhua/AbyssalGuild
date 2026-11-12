@@ -15,11 +15,13 @@ The full private source and assets now pass the 1327-file source lock.
    further fault-injection testing remain.
 2. **Phase action locks are connected.** Playing/selling permit card mutation;
    feeding/encounter/ready/game-over block new presses; a drag granted before the
-   boundary may finish, matching source pointer-down behavior. Still requires manual input acceptance.
+   boundary may finish, matching source pointer-down behavior. A bounded natural
+   campaign exercised day-end locks and feeding; complete boundary/input acceptance remains.
 3. **Trade drop zones are connected.** Source-positioned buyer/vendor colliders,
    nearest-zone validation order, tail-only sales, installment payments and
-   nonterminal fallthrough have 43 focused UI checks. Manual drag acceptance is
-   still outstanding.
+   nonterminal fallthrough have focused UI checks. A native natural campaign
+   exercised buyer sales, rejected mixed sales and installment purchases;
+   broader scene/currency acceptance remains.
 4. **Discovery presentation is connected.** Vendor collection totals and completed
    trackers update without side effects. Individually hovered recipe/quest rows
    mark source raw IDs as read, including completed quest history.
@@ -47,7 +49,8 @@ The full private source and assets now pass the 1327-file source lock.
   and compact equipment occupancy panels are now bound, including chest coin
   overrides. Expanded equipment cards now use imported slot poses, source click/day
   rules and independent presentation motion; exact Unity Perlin phases, original
-  fonts and rendered interaction remain unverified.
+  fonts and broader rendered interaction remain unverified. A bounded natural
+  native run did exercise club crafting, equip/class change and unequip dragging.
 - Nearby attachment currently uses deterministic target-pose collider geometry,
   not Unity Physics overlap ordering or animated transforms. Source target-layout
   math is covered, but cross-engine physics equivalence is not established.

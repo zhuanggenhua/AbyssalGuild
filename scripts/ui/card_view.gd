@@ -54,25 +54,19 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 	collision.add_child(shape)
 	add_child(collision)
 	caption = Label3D.new()
-	caption.text = title
-	caption.font_size = 36
-	caption.pixel_size = 0.007
 	caption.modulate = Color("162b33")
 	caption.outline_size = 0
 	caption.no_depth_test = false
 	caption.rotation_degrees.x = -90
 	caption.position = Vector3(0, mesh.size.y / 2.0 + 0.01, -mesh.size.z * 0.34)
-	caption.pixel_size = mesh.size.x / 200.0
-	caption.width = 175
-	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var title_data: Dictionary = appearance.get("prefab", {}).get("title", {})
 	if source_material != null:
-		var title_data: Dictionary = appearance.get("prefab", {}).get("title", {})
 		var pose: Dictionary = preload("res://scripts/ui/source_camera.gd").reflected_pose(title_data.get("transform_chain", []))
 		if not pose.is_empty():
 			caption.transform = pose.transform
 			caption.position.y += 0.01 # Avoid coplanar text on the source flat mesh.
 			caption.modulate = visual_assets.source_color(title_data.get("color", {}))
-			caption.pixel_size = float(title_data.get("rect_size", {}).get("x", mesh.size.x)) / 200.0
+	preload("res://scripts/ui/card_title_label.gd").fit(caption, title, title_data, Vector2(mesh.size.x * 0.875, mesh.size.z * 0.1))
 	add_child(caption)
 	if visual_assets != null and source_material == null:
 		var art: Texture2D = visual_assets.texture(appearance.get("art_guid", ""))

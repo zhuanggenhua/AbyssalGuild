@@ -15,7 +15,8 @@ import sys
 
 ANSI_ESCAPE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 FAILURE = re.compile(
-    rb"(?:^|\s)(?:SCRIPT\s+ERROR\s*:|ERROR\s*:|FAIL\s*:|Assertion\s*failed)",
+    rb"(?:^|\s)(?:SCRIPT\s+ERROR\s*:|ERROR\s*:|FAIL\s*:|Assertion\s*failed|"
+    rb"ObjectDB\s+instances\s+leaked\s+at\s+exit|Resource\s+still\s+in\s+use\s*:)",
     re.IGNORECASE,
 )
 

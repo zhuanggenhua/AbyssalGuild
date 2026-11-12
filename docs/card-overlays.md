@@ -46,6 +46,22 @@ explicitly not TextMeshPro font, baseline, auto-sizing or rasterization parity.
 Original colors are used with source card materials; generated card fallback uses
 dark text and a raised label plane so numbers remain readable.
 
+Card titles also use native font metrics rather than a fixed wrapping width. The
+locked card and pack text components enable auto-sizing and disable word wrapping.
+The importer now retains those settings, font-size limits, overflow mode and
+margins. Titles stay on one line and fit both dimensions of the padded source
+rectangle, with the source horizontal alignment. Short titles use the available
+line height; longer titles shrink without truncation. The source transform, card
+mesh and picking collider are unchanged. Older manifests without margins still
+fit their known rectangle; missing dimensions use a generated title region.
+Regenerate the ignored visual manifest to include the source padding.
+
+This is a native containment/readability fix, not a conversion of TMP point sizes
+or its minimum font size. Font, baseline, vertical alignment and rasterization
+remain native approximations; unusually long titles may shrink further than TMP
+rather than overflowing onto a neighboring card. No source font assets are copied
+into the public project.
+
 The compact panel is hidden when no valid slots are occupied. Its actual private
 FBX uses the same handedness bridge as card meshes and retains its own source
 pose. The independent, opaque, double-sided unlit shader splits horizontal U into
@@ -71,11 +87,18 @@ and typography still do not claim exact Unity rendering.
 ```sh
 python3 -m unittest discover -s tests -p 'test_card_visual_metadata.py' -v
 bash tools/test_godot.sh res://tests/godot/test_card_overlays.gd
+bash tools/test_godot.sh res://tests/godot/test_card_title_label.gd
 ```
 
-Five synthetic Python tests verify explicit references, anchored coordinate
+Seven synthetic Python tests verify explicit references, anchored coordinate
 resolution, no mutation, unknown/nested-parent rejection and correct panel owner
-selection. The Godot suite covers label values/positions/colors, zero/negative
+selection, including retention of title sizing/wrapping/margin metadata. The Godot
+title suite checks shaped Label3D bounds for long multiword and unbroken text,
+short titles, empty titles, explicit line breaks, three horizontal alignments,
+asymmetric margins, old/invalid metadata, unchanged mesh/collider, and every
+imported card/pack display name in both gameplay scenes. It is included in both
+the public aggregate and mandatory private imported runner.
+The overlay suite covers label values/positions/colors, zero/negative
 values, long-number fitting, chest override clearing, all three slot mappings,
 repeated updates, source and missing-cache fallback paths, material parameters
 and CPU composition reference samples.
@@ -87,5 +110,7 @@ bounds, UV direction, source pose and texture binding. Use the real-project
 headless command and writable HOME/XDG setup in `docs/card-mesh-binding.md`,
 substituting `test_card_overlays.gd` as the script.
 
-No GPU shader, screenshot, pixel comparison or human mouse/visual acceptance was
+The bounded native title retest in [GUI smoke](gui-smoke.md) confirmed that
+Berry Bush and Wooden Stick stay within their title strips during ordinary
+stacking and crafting. No pixel comparison or full panel/shader acceptance was
 performed. Headless resource/logic checks do not establish rendered parity.

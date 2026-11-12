@@ -40,6 +40,12 @@ def annotations(documents, owner):
                             'color': copy.deepcopy(text['m_fontColor']),
                             'rect_size': copy.deepcopy(rect.get('m_SizeDelta', {})),
                             'font_size': text.get('m_fontSize'),
+                            'auto_size': text.get('m_enableAutoSizing'),
+                            'font_size_min': text.get('m_fontSizeMin'),
+                            'font_size_max': text.get('m_fontSizeMax'),
+                            'word_wrap': text.get('m_enableWordWrapping'),
+                            'overflow_mode': text.get('m_overflowMode'),
+                            'margin': copy.deepcopy(text.get('m_margin', {})),
                             'horizontal_alignment': text.get('m_HorizontalAlignment'),
                             'vertical_alignment': text.get('m_VerticalAlignment'),
                             'anchor_resolution': 'plain_transform_parent'}

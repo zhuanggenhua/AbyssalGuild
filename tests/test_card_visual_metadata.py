@@ -52,6 +52,28 @@ class CardVisualMetadataTests(unittest.TestCase):
         self.assertEqual(len(result['transform_chain']), 2)
         self.assertEqual(result['size']['x'], 9)
 
+    def test_title_fit_settings_are_preserved_without_mutation(self):
+        docs = self.fixture()
+        docs[1]['fields']['titleText'] = docs[1]['fields'].pop('priceText')
+        docs[4]['fields'].update(m_enableAutoSizing=1, m_enableWordWrapping=0,
+                                 m_fontSizeMin=3, m_fontSizeMax=9, m_overflowMode=0,
+                                 m_margin={'x': .1, 'y': .2, 'z': .3, 'w': .4},
+                                 m_HorizontalAlignment=2, m_VerticalAlignment=512)
+        original = copy.deepcopy(docs)
+        title = annotations(docs, {'fileID': '1'})['labels']['title']
+        self.assertEqual((title['auto_size'], title['word_wrap'], title['overflow_mode']), (1, 0, 0))
+        self.assertEqual((title['font_size_min'], title['font_size_max']), (3, 9))
+        self.assertEqual(title['margin'], {'x': .1, 'y': .2, 'z': .3, 'w': .4})
+        self.assertEqual(title['horizontal_alignment'], 2)
+        title['margin']['x'] = 99
+        self.assertEqual(docs, original)
+
+    def test_older_text_settings_remain_explicitly_unknown(self):
+        price = annotations(self.fixture(), {'fileID': '1'})['labels']['price']
+        self.assertIsNone(price['auto_size'])
+        self.assertIsNone(price['word_wrap'])
+        self.assertEqual(price['margin'], {})
+
     def test_unreferenced_same_name_is_not_a_display(self):
         docs = self.fixture()
         docs[1]['fields']['priceText'] = {'fileID': '0'}

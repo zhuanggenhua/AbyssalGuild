@@ -32,6 +32,7 @@ const VendorUnlockPresenter = preload("res://scripts/ui/vendor_unlock_presenter.
 const SaveSlots = preload("res://scripts/model/save_slots.gd")
 const SaveCodec = preload("res://scripts/model/save_codec.gd")
 const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
+const QUIT_AUDIO_DRAIN_SECONDS := 0.5
 const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
 var catalog = Catalog.new()
@@ -1490,7 +1491,24 @@ func _execute_quit() -> void:
 	if quit_dispatched: return
 	quit_dispatched = true
 	if quit_callback.is_valid():
+		# Request-only seam for navigation tests; those tests retain the live board.
 		quit_callback.call()
+	else:
+		# Stopping during _exit_tree is too late: AudioServer releases its queued
+		# playback references on the mix thread, after SceneTree.quit has returned.
+		# Freeze this subtree only after save/confirmation succeeded, close audio
+		# admission, and keep the engine alive briefly for that release to finish.
+		process_mode = Node.PROCESS_MODE_DISABLED
+		feedback.shutdown()
+		_finish_quit(Time.get_ticks_usec() + int(QUIT_AUDIO_DRAIN_SECONDS * 1000000))
+
+func _finish_quit(deadline_usec: int) -> void:
+	if not is_inside_tree() or not quit_dispatched: return
+	var remaining := float(deadline_usec - Time.get_ticks_usec()) / 1000000.0
+	if remaining > 0:
+		# A new timer can consume the current frame's entire delta, including a
+		# slow frame before shutdown began. Check wall time before actually exiting.
+		get_tree().create_timer(remaining, true, false, true).timeout.connect(_finish_quit.bind(deadline_usec))
 	else:
 		get_tree().quit()
 

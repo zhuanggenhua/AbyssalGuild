@@ -65,7 +65,8 @@ func run() -> void:
 	assert(card.body.basis.is_equal_approx(Basis(Vector3.UP, PI)))
 	assert(not card.has_node("SourceArt"))
 	assert(card.caption.position.is_equal_approx(Vector3(0,0.01,-0.75)))
-	assert(is_equal_approx(card.caption.pixel_size, 3.0 / 200.0))
+	assert(card.caption.autowrap_mode == TextServer.AUTOWRAP_OFF)
+	assert(card.caption.font.get_height(card.caption.font_size) * card.caption.pixel_size <= 0.20001)
 	assert(card.caption.modulate.is_equal_approx(Color(0.8,0.7,0.6,1)))
 	assert(card.material is StandardMaterial3D) # Public fallback/highlight state stays compatible.
 	assert(card.source_material.resource_name == "SyntheticSurface")

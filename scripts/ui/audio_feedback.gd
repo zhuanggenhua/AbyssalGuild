@@ -12,8 +12,10 @@ var next_player: int = 0
 var cooldown: float = 0.05
 var user_sfx_db: float = 0.0
 var user_bgm_db: float = 0.0
+var shutting_down: bool = false
 
 func configure(catalog, visual_assets) -> void:
+	shutting_down = false
 	assets = visual_assets
 	next_player = 0
 	clips.clear()
@@ -54,6 +56,7 @@ func stream_for_event(event_name: String) -> AudioStream:
 	return _stream(str(clips.get(event_name, "")))
 
 func _stream(guid: String) -> AudioStream:
+	if shutting_down: return null
 	if stream_cache.has(guid):
 		return stream_cache[guid]
 	if assets == null:
@@ -79,7 +82,7 @@ func _stream(guid: String) -> AudioStream:
 	return stream
 
 func play_event(event_name: String) -> bool:
-	if pool.is_empty() or not is_inside_tree():
+	if shutting_down or pool.is_empty() or not is_inside_tree():
 		return false
 	var now: float = Time.get_ticks_msec() / 1000.0
 	if now - float(last_played.get(event_name, -INF)) < cooldown:
@@ -122,7 +125,7 @@ func _stop_slot(player: AudioStreamPlayer) -> void:
 		voice.stream = null
 
 func play_music() -> bool:
-	if not is_inside_tree():
+	if shutting_down or not is_inside_tree():
 		return false
 	var stream := _stream(str(source_settings.get("_BGMClip", {}).get("guid", "")))
 	if stream == null:
@@ -130,14 +133,19 @@ func play_music() -> bool:
 	if music == null:
 		music = AudioStreamPlayer.new()
 		add_child(music)
-		music.finished.connect(func(): music.play())
+		music.finished.connect(_restart_music)
 	music.stream = stream
 	music.volume_linear = music_gain_linear()
 	music.play()
 	return true
 
-func _exit_tree() -> void:
-	# Stop playback and release stream references before the audio server shuts down.
+func _restart_music() -> void:
+	if not shutting_down and is_instance_valid(music): music.play()
+
+func shutdown() -> void:
+	# Close admission before stopping voices. A modal action requests Click after
+	# its callback, and a queued music-finished signal must not restart playback.
+	shutting_down = true
 	for player in pool:
 		if is_instance_valid(player):
 			_stop_slot(player)
@@ -147,6 +155,9 @@ func _exit_tree() -> void:
 	stream_cache.clear()
 	last_played.clear()
 	assets = null
+
+func _exit_tree() -> void:
+	shutdown()
 
 func music_gain_linear() -> float:
 	# Source per-clip gain and user mixer gain multiply once, never accumulate.

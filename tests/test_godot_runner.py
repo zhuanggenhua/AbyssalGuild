@@ -74,6 +74,8 @@ class GodotRunnerTests(unittest.TestCase):
     def test_logged_errors_fail_even_with_zero_engine_exit(self):
         for message in ("SCRIPT ERROR: synthetic", "ERROR: synthetic", "FAIL: synthetic",
                         "Assertion failed: synthetic", "Assertionfailed: synthetic",
+                        "WARNING: ObjectDB instances leaked at exit",
+                        "Resource still in use: synthetic.wav (AudioStreamWAV)",
                         "\x1b[31mSCRIPT ERROR:\x1b[0m synthetic"):
             with self.subTest(message=message):
                 result = self.run_engine("error", FAKE_GODOT_ERROR=message)

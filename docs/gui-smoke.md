@@ -157,3 +157,57 @@ Both native runs used isolated user settings/saves and Dummy audio. They do not
 establish listening, full combat/travel/day-cycle interaction, Windows,
 controller, export/install or final parity acceptance. Screenshots and imported
 assets stayed private and are not part of this repository.
+
+## Natural campaign and title fitting follow-up
+
+A fresh isolated native Linux run starting from `83e8648`, on official Godot
+4.6.3 with the verified private import, used only the ordinary game UI. No
+injected cards, edited saves or test callbacks drove the campaign. It covered:
+
+- All four Starter draws, camera recovery, stacking and tail splitting.
+- Berry harvesting, rock mining and tree chopping through resource depletion.
+- The first vendor unlock, 3D buyer sales and three separate coin installments
+  for a Beginning pack, followed by ordinary pack draws and another purchase.
+- Rejected mixed-content sales without losing cards, manual and timed day ends,
+  three feeding/next-day cycles, and automatic new-day checkpoints.
+- Save & Title, a normal Quit/relaunch, and Continue preserving Day 3, card
+  contents and the outstanding two-coin vendor price.
+- Wood → Timber → Wooden Stick → Wooden Club crafting in Day 4; equipping
+  the club changed Villager to Warrior, dragging its expanded equipment card
+  unequipped it back to Villager, and the club could be equipped again.
+
+This exposed a separate title-layout defect: the native Berry Bush label wrapped
+into the next stacked card's title. The source TMP title disables wrapping and
+fits text to its padded rectangle. The native implementation now uses a
+single line and native font metrics inside those imported bounds. A real-window
+retest confirmed separated Berry Bush/Villager titles at both zoom levels;
+Wooden Stick remained on one line too. See [card overlays](card-overlays.md).
+It does not reproduce the unavailable source font or claim TMP pixel parity.
+
+The normal baseline Quit also logged retained audio resources. The production
+shutdown follow-up below addresses that observed exit defect. These runs used
+Dummy audio. Hearing, natural combat and late-game travel, Windows, controller,
+export/install and whole-game acceptance remain outside this bounded result.
+Original screenshots, save files, logs and licensed assets remain private.
+
+## Production Quit cleanup
+
+The follow-up closes audio admission only after a successful quit checkpoint or
+confirmation, stops/releases active music and overlapping SFX, then allows at
+least 0.5 seconds of monotonic wall time for AudioServer to release queued
+playbacks before SceneTree exits. Gameplay and input are disabled during that
+brief drain. Failed saves and canceled/stale confirmations leave the game and
+its audio alive. Callback-before-Click ordering cannot restart audio after quit.
+
+`test_native_quit.gd` exercises actual process shutdown, rather than replacing
+Quit with a test callback. It covers paused/zero-time-scale shutdown, repeated
+requests, active overlapping audio, save failure, cancellation and checkpoint
+preservation. The ordinary watchdog now treats ObjectDB/resource leak diagnostics
+as failures. The private runner requires the actual cached-WAV branch. This is
+exit-resource validation, not listening or an exact source-audio timing claim.
+
+A fresh native-window launch with the combined fixes restored the natural Day 4
+save, its Warrior/equipment and partial vendor payment. Save & Title followed by
+confirmed Quit closed normally; the completed verbose log contained no script,
+resource-in-use or ObjectDB leak diagnostics. Ten repeated cache-backed
+real-process quit regressions also exited cleanly. This retest used Dummy audio.
