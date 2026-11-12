@@ -1,5 +1,6 @@
 extends Control
 ## Original options presentation. Persistence and application are separate steps.
+const MenuFocus = preload("res://scripts/ui/menu_focus.gd")
 const UserOptions = preload("res://scripts/model/user_options.gd")
 signal closed
 var model = UserOptions.new()
@@ -15,6 +16,8 @@ var sliders: Dictionary = {}
 var volume_labels: Dictionary = {}
 var reset_dialog: ConfirmationDialog
 var last_application: Dictionary = {}
+var focus_controls: Array = []
+var restore_focus: WeakRef
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -48,6 +51,7 @@ func _ready() -> void:
 		slider.value_changed.connect(_volume_changed.bind(channel))
 		box.add_child(slider)
 		sliders[channel] = slider
+		focus_controls.append(slider)
 	for key in ["resolution", "fullscreen", "vsync", "fps_cap", "shadow_preset"]:
 		buttons[key] = _button(box, "", _cycle.bind(key))
 	status_label = Label.new()
@@ -69,6 +73,7 @@ func _button(parent: Node, label: String, action: Callable) -> Button:
 	button.custom_minimum_size.y = 34
 	button.configure(action, _sound, func(): return is_visible_in_tree() and not reset_dialog.visible)
 	parent.add_child(button)
+	focus_controls.append(button)
 	return button
 
 func configure(apply_adapter: Callable, hardware_modes: Array = [], save_path: String = "user://options.json") -> Dictionary:
@@ -94,8 +99,17 @@ func configure(apply_adapter: Callable, hardware_modes: Array = [], save_path: S
 	return result
 
 func open() -> void:
+	if visible: return
+	var previous := get_viewport().gui_get_focus_owner()
+	restore_focus = weakref(previous) if previous != null else null
 	_refresh_controls()
 	show()
+	MenuFocus.loop(focus_controls)
+	sliders.sfx.grab_focus()
+
+func _input(event: InputEvent) -> void:
+	if visible and not reset_dialog.visible:
+		MenuFocus.recover_navigation(event, focus_controls, get_viewport())
 
 func _refresh_controls() -> void:
 	for channel in sliders:
@@ -114,6 +128,7 @@ func _refresh_controls() -> void:
 	buttons.fps_cap.disabled = not bool(capabilities.get("fps_cap", false))
 	buttons.shadow_preset.text = "Shadows · " + ["Off", "Low", "Medium", "High", "Ultra"][int(values.shadow_preset)] + (" (URP mapping unavailable)" if not capabilities.get("shadow_presets", false) else "")
 	buttons.shadow_preset.disabled = not bool(capabilities.get("shadow_presets", false))
+	if visible: MenuFocus.loop(focus_controls)
 
 func _application_summary() -> String:
 	if not last_application.get("ok", false): return "Application failed: " + str(last_application.get("error", "Unknown adapter error"))
@@ -149,8 +164,7 @@ func _apply_and_save() -> void:
 func request_close() -> void:
 	# Invalid-file fallback is not an implicit request to overwrite evidence.
 	if load_warning and not dirty:
-		hide()
-		closed.emit()
+		_finish_close()
 		return
 	var result: Dictionary = model.save_file(path)
 	if not result.ok:
@@ -158,7 +172,12 @@ func request_close() -> void:
 		status_label.text = "Could not save options: " + str(result.error) + ". Options remain open."
 		return
 	dirty = false
+	_finish_close()
+
+func _finish_close() -> void:
 	hide()
+	MenuFocus.restore(restore_focus)
+	restore_focus = null
 	closed.emit()
 
 func _request_reset() -> void:

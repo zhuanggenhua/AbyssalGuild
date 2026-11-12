@@ -19,6 +19,7 @@ const CardHoverView = preload("res://scripts/ui/card_hover_view.gd")
 const CraftProgressView = preload("res://scripts/ui/craft_progress_view.gd")
 const NavigationInput = preload("res://scripts/ui/navigation_input.gd")
 const OptionsPanel = preload("res://scripts/ui/options_panel.gd")
+const MenuFocus = preload("res://scripts/ui/menu_focus.gd")
 const MenuSlide = preload("res://scripts/ui/menu_slide.gd")
 const DayClock = preload("res://scripts/ui/day_clock.gd")
 const SceneTransition = preload("res://scripts/ui/scene_transition.gd")
@@ -61,6 +62,8 @@ var options_hardware_modes: Array = []
 var native_options_adapter = OptionsAdapter.new()
 var options_panel
 var pause_overlay: Control
+var pause_controls: Array = []
+var pause_restore_focus: WeakRef
 var trade_zones: Array = []
 var trade_views: Dictionary = {}
 var trade_activated: Dictionary = {}
@@ -963,6 +966,8 @@ func _input(event: InputEvent) -> void:
 	if scene_transition.blocks_input():
 		get_viewport().set_input_as_handled()
 		return
+	if running and pause_overlay.visible and not options_panel.visible and not _navigation_modal_active():
+		if MenuFocus.recover_navigation(event, pause_controls, get_viewport()): return
 	# Gameplay owns Space before native GUI ui_accept can consume it. Keep
 	# title, menu, options and modal activation on Godot's normal input route.
 	if event is InputEventKey and event.keycode == KEY_SPACE and running and session.phase == "playing" and not _ui_pause_active() and not _navigation_modal_active():
@@ -1990,9 +1995,11 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	var box := _panel(pause_overlay, Rect2(500, 270, 440, 330))
 	_label("PAUSED · MENU", box, 26)
 	_label("Your selected time pace is preserved.", box, 15)
-	_button("Continue [Escape]", box, _toggle_pause_menu, true)
-	_button("Options", box, _open_options, true)
-	_button("Save & return to title", box, _request_return_title, true)
+	pause_controls = [
+		_button("Continue [Escape]", box, _toggle_pause_menu, true),
+		_button("Options", box, _open_options, true),
+		_button("Save & return to title", box, _request_return_title, true),
+	]
 	pause_overlay.hide()
 	options_panel = OptionsPanel.new()
 	options_panel.play_click = _play_ui_click
@@ -2004,16 +2011,26 @@ func _ui_pause_active() -> bool:
 func _toggle_pause_menu() -> void:
 	if scene_transition.blocks_input(): return
 	if not running or session.phase != "playing" or options_panel.visible: return
-	pause_overlay.visible = not pause_overlay.visible
+	var opening: bool = not pause_overlay.visible
+	if opening:
+		var previous := get_viewport().gui_get_focus_owner()
+		pause_restore_focus = weakref(previous) if previous != null else null
+	pause_overlay.visible = opening
 	# External pause changes time, not an already captured pointer.
 	_refresh()
+	if opening:
+		MenuFocus.loop(pause_controls)
+		pause_controls[0].grab_focus()
+	else:
+		MenuFocus.restore(pause_restore_focus, day_clock)
+		pause_restore_focus = null
 
 func _open_options() -> void:
 	if scene_transition.blocks_input(): return
 	if quit_dispatched or _navigation_modal_active(): return
 	if running:
 		if session.phase != "playing": return
-		pause_overlay.show()
+		if not pause_overlay.visible: _toggle_pause_menu()
 	options_panel.open()
 	if running: _refresh()
 
