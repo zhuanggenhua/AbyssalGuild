@@ -21,6 +21,7 @@ MARKERS = {
     "test_crafting_order_board": "Crafting order board clock: 1/1 passed",
     "test_card_feedback_board": "Card feedback board checks: 1 passed / 1 total",
     "test_vendor_unlock_board": "Vendor unlock board checks: 1 passed / 1 total",
+    "test_pause_input": "Pause input: 1 checks, 0 failures",
     "test_navigation_ui": "Navigation UI checks: 1 passed / 1 total",
     "test_day_clock_board": "Day clock private resource bindings: verified\nDay clock board: 1 checks, 0 failures",
     "test_journal_groups": "Journal groups: 1/1 checks passed",

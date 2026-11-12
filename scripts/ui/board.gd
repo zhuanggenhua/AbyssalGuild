@@ -935,8 +935,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if not running or _ui_pause_active(): return
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_SPACE:
-		_toggle_pause()
 	if event is InputEventMouseButton:
 		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
 			_zoom_camera(1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0)
@@ -963,6 +961,13 @@ func _unhandled_input(event: InputEvent) -> void:
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
 	if scene_transition.blocks_input():
+		get_viewport().set_input_as_handled()
+		return
+	# Gameplay owns Space before native GUI ui_accept can consume it. Keep
+	# title, menu, options and modal activation on Godot's normal input route.
+	if event is InputEventKey and event.keycode == KEY_SPACE and running and session.phase == "playing" and not _ui_pause_active() and not _navigation_modal_active():
+		if event.pressed and not event.echo: _toggle_pause()
+		# Consume release and autorepeat too, without toggling or pressing a HUD control.
 		get_viewport().set_input_as_handled()
 		return
 	if running and (event is InputEventMouseMotion or event is InputEventMouseButton):

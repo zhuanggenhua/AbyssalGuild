@@ -89,3 +89,26 @@ The retest also found a separate keyboard issue: after focusing a 1x button,
 Space reactivated that button rather than pausing. Actual Viewport event routing
 confirmed that removing focus restores Space pause. This is a subsequent input
 fix, not a passing result or part of this layout/title checkpoint.
+
+## Space input ownership follow-up
+
+The focused-HUD problem has a separate regression: `test_pause_input.gd` sends
+press, echo and release events through the actual Godot Viewport, not directly
+to `_unhandled_input`. The public baseline reproduced the defect with all six
+focused controls: 1x, 2x, Pause, day clock, day action and journal toggle.
+
+Gameplay Space is now intercepted before native GUI acceptance. Its first
+non-echo press toggles manual pause once while retaining the selected speed;
+release and autorepeat cannot activate the focused HUD control. Title, pause
+menu, options and confirmation dialogs retain their normal Space handling,
+and Enter still activates focused HUD controls. Day-end phases do not change
+manual pause. No global `ui_accept` mapping or control focus mode is removed.
+
+The 35-check source-free regression passes on Godot 4.6.3 and is included in
+both ordinary and private imported runners. The test deliberately uses an empty
+catalog only as an isolated routing fixture. Production still requires the
+licensed import and never substitutes this fixture. This reimplementation was
+verified independently from the earlier unuploaded local candidate; it does
+not claim that candidate or its private-data/native-window checks were recovered.
+Current full private-data, physical input, rendered, audio and Windows acceptance
+remain separate. Pause-menu focus containment is not part of this checkpoint.
