@@ -32,7 +32,7 @@ func run() -> void:
 			check(texture != null and texture.get_width() > 0, scene + " private pace texture " + guid)
 	board.start_new()
 	board.set_process(false)
-	check(board.day_clock.visible and board.status.visible and not board.market_panel.visible, "clock and stats accessible while market hidden")
+	check(board.day_clock.visible and board.stats_box.visible and not board.market_panel.visible, "clock and stats accessible while market hidden")
 	if has_media:
 		check(board.day_clock.icon != null, "live private source pace icon")
 		if failures == resource_failures: print("Day clock private resource bindings: verified")
@@ -59,7 +59,7 @@ func run() -> void:
 	board._refresh()
 	board.detail_panel.show()
 	board.session.cycle.request_end_day()
-	check(board.journal_slide.is_animating and not board.day_clock.visible and not board.status.visible, "actual day-ended event begins journal close and hides source status immediately")
+	check(board.journal_slide.is_animating and not board.day_clock.visible and not board.stats_box.visible, "actual day-ended event begins journal close and hides source status immediately")
 	board.journal_slide.advance(0.5)
 	check(not board.detail_panel.visible, "journal closes after source half-second slide")
 	board._refresh()
@@ -73,7 +73,7 @@ func run() -> void:
 	board.session.phase = "ready"
 	board.session.start_day()
 	board._refresh()
-	check(board.day_clock.visible and board.status.visible and board.session.time_pace() == 1, "new day restores clock stats and normal pace")
+	check(board.day_clock.visible and board.stats_box.visible and board.session.time_pace() == 1, "new day restores clock stats and normal pace")
 	board.session.scene_name = "Island"
 	board._refresh()
 	check(board.market_heading.text == "STACKCRAFT / ISLAND", "live scene identity replaces literal Main")

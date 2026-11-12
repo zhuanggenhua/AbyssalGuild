@@ -31,12 +31,12 @@ func run() -> void:
 	await process_frame
 	board.set_process(false)
 	check(board.title_home.visible and not board.title_preferences.visible and not board.title_saves.visible, "initial separate home")
-	check(board.duration.get_parent() == board.title_preferences and board.slot_picker.get_parent() == board.title_saves and board.archive_picker.get_parent() == board.title_saves and board.legacy_picker.get_parent() == board.title_saves, "controls preserved in destinations")
+	check(board.title_preferences.is_ancestor_of(board.duration) and board.title_saves.is_ancestor_of(board.slot_picker) and board.title_saves.is_ancestor_of(board.archive_picker) and board.title_saves.is_ancestor_of(board.legacy_picker), "controls preserved in destinations")
 	var error: int = board.data_error
 	for east in [false, true]:
 		board.title_new_button.pressed.emit()
 		board.title_new_button.pressed.emit()
-		check(board.title_preferences.visible and not board.title_home.visible and board.active_slot == 0 and not board.running and not FileAccess.file_exists(board.slots.slot_path(1)), "repeated New Game allocates nothing")
+		check(board.title_preferences.visible and board.title_home.visible == (board.source_title != null) and board.active_slot == 0 and not board.running and not FileAccess.file_exists(board.slots.slot_path(1)), "repeated New Game allocates nothing")
 		board._unhandled_input(cancel(east))
 		board.title_confirm_button.pressed.emit()
 		check(board.title_home.visible and not board.running and board.active_slot == 0, "cancel invalidates stale Confirm")
@@ -46,7 +46,8 @@ func run() -> void:
 	check(board.title_home.visible and board.active_slot == 0, "explicit Cancel invalidates Confirm")
 	board.title_load_button.pressed.emit()
 	board.title_load_button.pressed.emit()
-	check(board.title_saves.visible and not board.title_home.visible and not board.title_preferences.visible, "Load only opens saved games")
+	check(board.title_saves.visible and board.title_home.visible == (board.source_title != null) and not board.title_preferences.visible, "Load overlays saved games above source Home")
+	check(board.source_title == null or (not board._text_button_allowed(board.title_new_button) and board.title_new_button.focus_mode == Control.FOCUS_NONE), "visible Home behind overlay cannot receive activation/focus")
 	board.title_status.text = "Shared diagnostic"
 	board.title_back_button.pressed.emit()
 	check(board.title_home.visible and board.title_status.is_visible_in_tree() and board.title_status.text == "Shared diagnostic", "Back preserves shared errors")

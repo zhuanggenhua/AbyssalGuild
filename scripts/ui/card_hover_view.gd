@@ -5,16 +5,17 @@ var header: Label
 var body: RichTextLabel
 var descriptor: Dictionary = {}
 var font_scale: float = 1.0
-const PADDING = 12.0
+var bottom_anchor := Vector2.ZERO
+const PADDING = 20.0
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	clip_contents = true
 	var background := StyleBoxFlat.new()
-	background.bg_color = Color("172b32")
+	background.bg_color = Color(0, 0, 0, 0.9019608)
 	background.border_color = Color("78969e")
-	background.set_border_width_all(1)
-	background.set_corner_radius_all(6)
+	background.set_border_width_all(0)
+	background.set_corner_radius_all(0)
 	add_theme_stylebox_override("panel", background)
 	header = Label.new()
 	header.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -46,22 +47,25 @@ func set_descriptor(value: Dictionary) -> void:
 func set_bounds(rect: Rect2, scale_factor: float = 1.0) -> void:
 	if not rect.position.is_finite() or not rect.size.is_finite(): return
 	font_scale = clampf(scale_factor, 0.5, 3.0) if is_finite(scale_factor) else 1.0
+	bottom_anchor = rect.position
 	position = rect.position
 	size = Vector2(maxf(0, rect.size.x), maxf(0, rect.size.y))
 	_layout_content()
 
 func _layout_content() -> void:
 	if header == null or body == null: return
-	var padding: float = minf(PADDING, minf(size.x, size.y) / 2.0)
-	var width: float = maxf(0, size.x - padding * 2)
-	var height: float = maxf(0, size.y - padding * 2)
-	var header_size: int = maxi(1, roundi(22 * font_scale))
-	var body_size: int = maxi(1, roundi(18 * font_scale))
-	header.add_theme_font_size_override("font_size", header_size)
-	body.add_theme_font_size_override("normal_font_size", body_size)
-	var title_height: float = minf(height, ThemeDB.fallback_font.get_height(header_size) * 2)
-	header.position = Vector2(padding, padding)
-	header.size = Vector2(width, title_height)
-	body.position = Vector2(padding, padding + title_height)
-	body.size = Vector2(width, maxf(0, height - title_height))
-	body.visible = height > title_height
+	var width: float = maxf(0, size.x-PADDING*2)
+	header.add_theme_font_size_override("font_size", 34)
+	body.add_theme_font_size_override("normal_font_size", 30)
+	var font := ThemeDB.fallback_font
+	var header_height: float = font.get_multiline_string_size(header.text, HORIZONTAL_ALIGNMENT_LEFT, width, 34).y if not header.text.is_empty() else 0.0
+	var body_height: float = font.get_multiline_string_size(body.text, HORIZONTAL_ALIGNMENT_LEFT, width, 30).y if not body.text.is_empty() else 0.0
+	var action_height: float = 40.0 if not str(descriptor.get("action", "")).is_empty() else 0.0
+	var preferred := minf(header_height+body_height+PADDING*2+action_height, maxf(60, bottom_anchor.y-30))
+	if not is_equal_approx(size.y, preferred): size.y = preferred
+	position = bottom_anchor-Vector2(0, preferred)
+	header.position = Vector2(PADDING, PADDING)
+	header.size = Vector2(width, header_height)
+	body.position = Vector2(PADDING, PADDING+header_height)
+	body.size = Vector2(width, maxf(0, preferred-header_height-PADDING*2-action_height))
+	body.visible = body_height > 0 and width > 0 and body.size.y > 0

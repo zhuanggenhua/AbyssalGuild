@@ -292,7 +292,7 @@ func check_renderers(session) -> void:
 		check(hover.clip_contents and hover.header.clip_text and hover.body.scroll_active, "long text bounded with scroll at every scale")
 		check(hover.header.position.x + hover.header.size.x <= hover.size.x + 0.01, "header width clipped at requested size")
 		check(hover.body.position.x + hover.body.size.x <= hover.size.x + 0.01, "body width does not force panel outside HUD")
-		check(hover.body.text.length() > 1000 and hover.body.get_theme_font_size("normal_font_size") == roundi(18 * factor), "long body retained at readable requested UI scale")
+		check(hover.body.text.length() > 1000 and hover.body.get_theme_font_size("normal_font_size") == 30, "source logical font size retained independently of CanvasScaler")
 	hover.body.get_v_scroll_bar().value = 80
 	var scroll: float = hover.body.get_v_scroll_bar().value
 	hover.set_descriptor(hover.descriptor)

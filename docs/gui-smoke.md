@@ -452,3 +452,37 @@ from any fresh attempt is 12.5 packs (187.5 gross Coins); 36 packs give over
 follow. Natural endgame completion remains unverified; the controlled portal
 and combat acceptance above is separate. Raw saves, screenshots and logs remain
 private, and this run again used Linux llvmpipe with Dummy audio.
+
+
+## Source-mapping correction run (2026-11-12)
+
+Actual cloud-native Godot 4.6.3, OpenGL Compatibility / Mesa llvmpipe was used,
+not Unity and not an HTML reconstruction. The fresh process rendered at 1280x800
+(the earlier pre-fix check was 1233x771). Private reference images and original
+assets are not included in the public repository.
+
+Observed through real pointer/keyboard input:
+
+- Original Title artwork/logo and left Home rendered; Gameplay Preferences and
+  Saved Games appeared as independent overlays with Home behind them.
+- New game, source-sized day/stats/journal, first-hover red-dot removal and quest
+  information appeared at the source-derived coordinates.
+- Ordinary zoom exposed the restored grass plane around the original board.
+  Initial camera/spawn framing was not changed to imitate screenshot placement.
+- After restart, the corrected grayscale-alpha import removed black card-art
+  rectangles. Villager, Berry Bush, Rock, Wood and Berry rendered their card
+  backgrounds and tinted line art without changing the card shader's colors.
+- Buyer currency icon, Sell text and inactive vendor `???` rendered; buyer hover
+  displayed the source information. A real Villager-to-Berry-Bush drag harvested
+  food and advanced the quest. The transient outline was not captured framewise,
+  so this does not certify its edge/pixel equivalence.
+- Natural day-end feeding and Start Day used the bottom-left source action panel;
+  Day 2 resumed. Save & return to Title succeeded, and the new slot appeared in
+  Saved Games. The optional native debug control no longer overlaps the panel;
+  diagnostics are only exposed by F3 in debug builds.
+
+The native desktop reported unsupported VSync switching and audio-driver failure
+with dummy-audio fallback; no listening acceptance is claimed. Engine warnings
+about names shadowing built-ins remain. Missing TMP glyph metrics, the separate
+Chinese variant, source control/slot templates, exact tween/noise math and
+Unity/Godot lighting/color-space equivalence remain separate open work.

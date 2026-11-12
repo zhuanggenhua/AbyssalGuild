@@ -20,6 +20,12 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_texture_alpha_imported", r"Imported texture alpha cached pixels: PASS"),
+    ("test_trade_hover_board", r"Trade hover board: PASS"),
+    ("test_source_world_board", r"Source world scene lifecycle: PASS"),
+    ("test_source_hud", r"Source HUD failures: 0"),
+    ("test_source_title_view", r"Source Title view: PASS"),
+    ("test_trade_source_imported", r"Private trade source: PASS \([1-9]\d* cached original zones\)"),
     ("test_imported_resources", r"Private imported resources: PASS \([1-9]\d* PNG, [1-9]\d* WAV, [1-9]\d* FBX\)"),
     ("test_source_board_mesh", r"Source board mesh: PASS \([1-9]\d* models,"),
     ("test_card_mesh_binding", r"Source card/pack mesh: PASS \([1-9]\d* bindings; actual cached FBX"),
@@ -220,7 +226,8 @@ def run(root=ROOT):
         run_step(command + ["--editor", "--import"], "Import private resources",
                  timeout=os.environ.get("GODOT_IMPORT_TIMEOUT", "180"))
         for name, expected in SUITES:
-            run_step(command + ["--script", f"res://tests/godot/{name}.gd"], name, expected)
+            run_step(command + ["--script", f"res://tests/godot/{name}.gd"], name, expected,
+                     timeout=os.environ.get("GODOT_TEST_TIMEOUT", "180") if name in ("test_texture_alpha_imported", "test_imported_resources") else None)
         print(f"\nPRIVATE IMPORTED VALIDATION: PASS ({len(SUITES)} suites; no GPU/manual/listening acceptance)")
 
 

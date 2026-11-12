@@ -121,4 +121,9 @@ func _refresh_notice() -> void:
 	info_label.text = "%s\n%s" % [info.header, info.body] if not info.is_empty() else ""
 	# End-cycle has the source's higher Modal priority. Ordinary/save-error
 	# notices stay in their existing independent label and are never overwritten.
-	info_panel.visible = board != null and board.running and board.session.phase == "playing" and not info.is_empty()
+	if board != null and board.has_method("_sync_source_info"):
+		info_panel.hide()
+		board._sync_source_info()
+	else:
+		# Standalone presenter hosts without the shared InfoPanel keep their adapter.
+		info_panel.visible = board != null and board.running and board.session.phase == "playing" and not info.is_empty()

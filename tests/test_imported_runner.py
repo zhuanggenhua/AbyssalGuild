@@ -16,6 +16,12 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_texture_alpha_imported": "Imported texture alpha cached pixels: PASS (115 textures)",
+    "test_trade_hover_board": "Trade hover board: PASS",
+    "test_source_world_board": "Source world scene lifecycle: PASS",
+    "test_source_hud": "Source HUD failures: 0",
+    "test_source_title_view": "Source Title view: PASS",
+    "test_trade_source_imported": "Private trade source: PASS (11 cached original zones)",
     "test_starter_framing": "Starter framing: 1/1 passed (synthetic, no private data or rendered acceptance)",
     "test_gui_layout": "GUI layout and title reset: 1 checks, 0 failures",
     "test_ai_placement_board": "AI placement board: 1/1 passed",
@@ -170,6 +176,11 @@ class ImportedRunnerTests(unittest.TestCase):
         self.assertEqual([], list(self.base.glob("abyssal-imported-*")), "disposable project is removed")
         calls = [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
         return result, calls
+
+    def test_synthetic_markers_cover_every_required_suite(self):
+        self.assertEqual(set(MARKERS), {name for name, _ in runner.SUITES})
+        for name, pattern in runner.SUITES:
+            self.assertRegex(MARKERS[name], pattern)
 
     def test_import_then_all_suites_share_disposable_cache(self):
         result, calls = self.run_fixture()

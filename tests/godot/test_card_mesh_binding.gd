@@ -79,7 +79,7 @@ func run() -> void:
 	assert(collision_size(card).is_equal_approx(Vector3(4,0.02,2)))
 	card.highlight(true)
 	assert(card.material.emission_enabled)
-	assert(card.source_material.get_shader_parameter("selection_emission").length() > 0)
+	assert(card.source_material.get_shader_parameter("selection_emission") == Vector3.ZERO) # No invented source emission.
 	card.highlight(false)
 	assert(not card.material.emission_enabled)
 	assert(card.source_material.get_shader_parameter("selection_emission") == Vector3.ZERO)

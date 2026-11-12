@@ -35,10 +35,22 @@ const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
 const QUIT_AUDIO_DRAIN_SECONDS := 0.5
 const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
+var source_hud: Control
+var hud_layout = preload("res://scripts/ui/source_hud_layout.gd").new()
+var info_requests = preload("res://scripts/ui/info_request_queue.gd").new()
+var stats_background: Panel
+var stats_box: HBoxContainer
+var stat_labels: Array[Label] = []
+var journal_tabs: HBoxContainer
+var watermark: Label
+var ledger_info: Dictionary = {}
+var info_action: Button
 var catalog = Catalog.new()
 var visual_assets = VisualAssets.new()
 var board_mesh: MeshInstance3D
 var original_board: Node3D
+var source_background: Node3D
+var world_environment: Environment
 var geometry_key: String = ""
 var layout_key: String = ""
 var layout_locks: Dictionary = {}
@@ -117,15 +129,17 @@ var scene_transition = SceneTransition.new()
 var scene_shade: ColorRect
 var _transition_pause_frame: bool = false
 var title_navigation = TitleNavigation.new()
-var title_home: VBoxContainer
-var title_preferences: VBoxContainer
-var title_saves: VBoxContainer
+var title_home: Control
+var title_preferences: Control
+var title_saves: Control
 var title_new_button: Button
 var title_load_button: Button
 var title_confirm_button: Button
 var title_cancel_button: Button
 var title_back_button: Button
-var title_panel: PanelContainer
+var title_panel: Control
+var source_title
+var title_options_button: Button
 var title_status: Label
 var day_clock
 var market_heading: Label
@@ -151,6 +165,7 @@ var refresh_clock: float = 0.0
 var active_tab: String = "quests"
 var card_hover
 var craft_progress
+var hovered_trade_index: int = -1
 var hovered_card_id: int = -1
 var hovered_panel_owner: int = -1
 var card_drag_targets: Dictionary = {}
@@ -185,13 +200,15 @@ func _ready() -> void:
 	friendly_choice.button_pressed = gameplay_prefs.friendly
 	friendly_choice.text = TitleGameplayPrefs.friendly_text(friendly_choice.button_pressed)
 	visual_assets.load_manifest()
+	_configure_source_title()
+	hud_layout.configure(catalog.data)
+	_configure_source_hud()
 	feedback.configure(catalog, visual_assets)
 	feedback.play_music()
 	if data_error != OK:
 		title_status.text = "Source data is missing or invalid.\nImport your licensed StackCraft copy first:\npython tools/import_stackcraft.py --source /path/to/Assets/StackCraft --output data\nThen restart. See docs/data-import.md.\nNo replacement/mock game is loaded."
 	else:
-		title_status.text = "Original Godot geometry • source-backed rules\nMain and Island • native saves • optional original assets
-Visual and manual input acceptance are not complete."
+		title_status.text = "" if source_title != null else "Source-backed rules; native fallback presentation."
 		vendor_guids = SceneConfig.offered_packs(catalog)
 		_build_shop()
 	if not gameplay_prefs.source_backed: title_status.text += "\n" + gameplay_prefs.warning
@@ -208,6 +225,7 @@ Visual and manual input acceptance are not complete."
 func _build_world() -> void:
 	var world := WorldEnvironment.new()
 	world.environment = Environment.new()
+	world_environment = world.environment
 	world.environment.background_mode = Environment.BG_COLOR
 	world.environment.background_color = Color("10242c")
 	world.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -238,13 +256,17 @@ func _restore_title_world() -> void:
 		original_board.hide()
 		original_board.queue_free()
 	original_board = null
+	_replace_scene_background("Title")
+	# Title remains a separately documented native shell until its scene port.
+	world_environment.ambient_light_color = Color("b7ced0")
+	world_environment.ambient_light_energy = 0.8
 	geometry_key = ""
 	board_mesh.mesh.size = Vector3(28, 0.2, 22)
 	board_mesh.position = Vector3(0, -0.2, 0)
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Color("25434a")
 	board_mesh.material_override = material
-	board_mesh.show()
+	board_mesh.visible = source_title == null
 	source_light.transform = Transform3D.IDENTITY
 	source_light.rotation_degrees = Vector3(-65, -20, 0)
 	source_light.light_color = Color.WHITE
@@ -290,7 +312,9 @@ func _play_ui_click() -> void:
 func _text_button_allowed(button: Button) -> bool:
 	if scene_transition.blocks_input() or quit_dispatched or _navigation_modal_active(): return false
 	if options_panel != null and options_panel.visible: return false
-	if title_panel != null and title_panel.is_ancestor_of(button): return _title_navigation_allowed()
+	if title_panel != null and title_panel.is_ancestor_of(button):
+		if source_title != null and title_home.is_ancestor_of(button) and title_navigation.destination != TitleNavigation.HOME: return false
+		return _title_navigation_allowed()
 	if pause_overlay != null and pause_overlay.is_ancestor_of(button): return running and session.phase == "playing"
 	return running and not _ui_pause_active()
 
@@ -328,23 +352,25 @@ func _build_ui() -> void:
 	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.add_child(hud)
 	hud.hide()
-	var top := _panel(hud, Rect2(18, 16, 1404, 70))
-	var summary := HBoxContainer.new()
-	summary.add_theme_constant_override("separation", 18)
-	top.add_child(summary)
+	source_hud = Control.new()
+	source_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(source_hud)
 	day_clock = DayClock.new()
-	summary.add_child(day_clock)
+	source_hud.add_child(day_clock)
 	day_clock.pressed.connect(_cycle_clock_pace)
-	status = _label("", summary, 19)
-	status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# Keep the one day action outside both collapsible sidebars. Critical cycle
-	# confirmations must remain discoverable even with the market closed.
-	day_button = _button("", summary, _advance_day, true)
-	day_button.custom_minimum_size.x = 300
+	stats_background = Panel.new()
+	stats_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	source_hud.add_child(stats_background)
+	stats_box = HBoxContainer.new()
+	source_hud.add_child(stats_box)
+	stats_box.add_theme_constant_override("separation", 0)
+	status = _label("", hud)
+	status.hide() # Legacy diagnostic text, never source HUD chrome.
 	var left := _panel(hud, Rect2(18, 100, 248, 600))
 	market_panel = left.get_parent().get_parent()
 	market_panel.hide()
-	market_heading = _label("STACKCRAFT", left, 22)
+	market_heading = _label("NATIVE DEBUG CONTROLS", left, 22)
+	# Natural day end is the source trigger; no duplicate End Day control.
 	pause_button = _button("Pause [Space]", left, _toggle_pause)
 	var speeds := HBoxContainer.new()
 	left.add_child(speeds)
@@ -363,39 +389,36 @@ func _build_ui() -> void:
 	shop.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	market_scroll.add_child(shop)
 	_label("Select a card to inspect.\nClick a pack to draw.\nDrag a card and its tail.\nDrop on another stack to craft.\nDrop on empty board to split.\nRight-click to inspect a pack.\nWheel: zoom · WASD: pan", left, 13)
-	var right := _panel(hud, Rect2(1174, 100, 248, 710))
-	detail_panel = right.get_parent().get_parent()
-	detail_panel.hide()
-	_label("INSPECT", right, 20)
+	# Native convenience actions remain opt-in diagnostics, not the source journal.
+	var right := left
 	inspection = _label("Select a card", right)
 	inspection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	inspection.custom_minimum_size.y = 125
-	_button("Sell selected card", right, _sell_selected)
-	_button("Sell selected stack", right, _sell_selected_stack)
-	_button("Withdraw chest coin", right, _withdraw_selected).tooltip_text = "Withdraw selected chest coin"
-	_button("Unequip character", right, _unequip_selected).tooltip_text = "Unequip selected character"
-	_button("Engage enemy", right, _engage_selected).tooltip_text = "Engage selected enemy"
+	for entry in [["Sell selected card", _sell_selected], ["Sell selected stack", _sell_selected_stack], ["Withdraw chest coin", _withdraw_selected], ["Unequip character", _unequip_selected], ["Engage enemy", _engage_selected]]:
+		_button(entry[0], right, entry[1])
+	detail_panel = Panel.new()
+	source_hud.add_child(detail_panel)
 	var tabs := HBoxContainer.new()
-	right.add_child(tabs)
+	detail_panel.add_child(tabs)
+	journal_tabs = tabs
 	for tab in ["quests", "recipes"]:
 		var tab_button := _button(tab.capitalize(), tabs, _show_journal_tab.bind(tab))
 		tab_button.clip_text = false
 		tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	ledger = RichTextLabel.new()
 	ledger.meta_hover_started.connect(_on_ledger_hover)
+	ledger.meta_hover_ended.connect(func(_meta): info_requests.submit("journal", 0, {}))
 	ledger.custom_minimum_size = Vector2(210, 260)
 	ledger.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	right.add_child(ledger)
-	var market_toggle := _button("Market & controls", hud, func(): market_panel.visible = not market_panel.visible)
-	market_toggle.position = Vector2(18, 835)
-	market_toggle.size = Vector2(248, 40)
-	detail_toggle = _button("Inspect & journal", hud, func(): journal_slide.toggle())
+	detail_panel.add_child(ledger)
+	# Optional native diagnostics have no source HUD button; F3 reveals them.
+	detail_toggle = _button(">>", source_hud, func(): journal_slide.toggle())
 	detail_toggle.position = Vector2(1174, 835)
 	detail_toggle.size = Vector2(248, 40)
 	journal_slide.configure(detail_panel, detail_toggle, func(): feedback.play_event("Click"))
 	notice = _label("", hud, 16)
-	notice.position = Vector2(285, 835)
-	notice.size = Vector2(865, 50)
+	notice.position = Vector2(400, 770)
+	notice.size = Vector2(650, 60)
+	notice.visible = false
 	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	# Native status chrome, not source styling: bright Island geometry must
 	# never wash out save/travel feedback. Keep the existing board input route.
@@ -414,8 +437,14 @@ func _build_ui() -> void:
 	# Its whole rectangle owns GUI input, including header/background. Scrolling
 	# must not zoom the camera or start a card drag through the information panel.
 	card_hover.mouse_filter = Control.MOUSE_FILTER_STOP
-	hud.add_child(card_hover)
-	hud.resized.connect(_layout_card_hover)
+	source_hud.add_child(card_hover)
+	info_action = _button("", source_hud, _advance_day, true)
+	day_button = info_action
+	info_action.hide()
+	watermark = _label("", source_hud, 24)
+	watermark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	watermark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.resized.connect(_configure_source_hud)
 	_layout_card_hover()
 	title_panel = PanelContainer.new()
 	layer.add_child(title_panel)
@@ -499,18 +528,67 @@ func _build_ui() -> void:
 	quit_dialog.dialog_text = "Day-end progress is not autosaved on quit. Your last checkpoint stays intact. Quit now?"
 	preload("res://scripts/ui/text_button_feedback.gd").bind_modal(quit_dialog, _confirm_quit, _cancel_quit, _play_ui_click)
 	add_child(quit_dialog)
-	_button("Options", title_home, _open_options, true)
+	title_options_button = _button("Options", title_home, _open_options, true)
 	title_quit_button = _button("Quit Game", title_home, _request_title_quit, true)
 	_build_pause_options(layer)
 	_sync_title_destination()
+
+func _configure_source_title() -> void:
+	if source_title != null: return
+	var candidate = preload("res://scripts/ui/source_title_view.gd").new()
+	candidate.name = "SourceTitle"
+	title_panel.get_parent().add_child(candidate)
+	title_panel.get_parent().move_child(candidate, title_panel.get_index())
+	candidate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if not candidate.configure(catalog.data, visual_assets):
+		candidate.queue_free()
+		return
+	source_title = candidate
+	var old_panel := title_panel
+	var native_saves := title_saves
+	for pair in [["new", title_new_button], ["load", title_load_button], ["options", title_options_button], ["quit", title_quit_button], ["duration_label", duration_label], ["duration", duration], ["friendly", friendly_choice], ["confirm", title_confirm_button], ["cancel", title_cancel_button], ["saves_close", title_back_button], ["saves_clear", archive_all_button]]:
+		candidate.mount(pair[0], pair[1])
+	title_confirm_button.text = "Confirm"
+	title_cancel_button.text = "Cancel"
+	title_back_button.text = "Close"
+	archive_all_button.text = "Archive All"
+	archive_all_button.tooltip_text = "Move all listed slots into a recoverable archive; originals are retained."
+	# Recoverable archive/legacy transactions remain native, within the source
+	# saved-games viewport. They are not relabelled as permanent source deletes.
+	var scroll_host: Control = candidate.nodes[candidate.layout.resolve("SavedGamesUI/MainPanel/ScrollView")]
+	for child in scroll_host.get_children(): child.hide()
+	var scroll := ScrollContainer.new()
+	scroll.name = "NativeSaveTransactions"
+	scroll_host.add_child(scroll)
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	native_saves.reparent(scroll)
+	native_saves.show()
+	native_saves.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var diagnostic: Control = candidate.nodes[candidate.layout.resolve("MenuPanel/Version")]
+	title_status.reparent(diagnostic)
+	title_status.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	title_status.add_theme_font_size_override("font_size", 16)
+	title_status.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title_panel = candidate
+	title_home = candidate.home
+	title_preferences = candidate.preferences_overlay
+	title_saves = candidate.saves_overlay
+	old_panel.hide()
+	old_panel.queue_free()
+	_sync_title_destination()
+	board_mesh.hide() # Source Title is Canvas artwork, not a generated 3D board.
 
 func _title_navigation_allowed() -> bool:
 	return not scene_transition.active() and not running and not quit_dispatched and not options_panel.visible and not _navigation_modal_active()
 
 func _sync_title_destination() -> void:
-	title_home.visible = title_navigation.destination == TitleNavigation.HOME
+	title_home.visible = source_title != null or title_navigation.destination == TitleNavigation.HOME
 	title_preferences.visible = title_navigation.destination == TitleNavigation.PREFS
 	title_saves.visible = title_navigation.destination == TitleNavigation.SAVES
+	if source_title != null:
+		for button in [title_new_button, title_load_button, title_options_button, title_quit_button]:
+			button.focus_mode = Control.FOCUS_ALL if title_navigation.destination == TitleNavigation.HOME else Control.FOCUS_NONE
 
 func _open_title_preferences() -> void:
 	if not _title_navigation_allowed(): return
@@ -619,6 +697,8 @@ func _enter_game() -> void:
 	camera_motion.configure(camera.position, CameraMotion.source_settings(catalog.data, session.scene_name))
 	panning = false
 	visual_assets.apply_source_light(source_light, session.scene_name)
+	visual_assets.apply_source_environment(world_environment, session.scene_name)
+	_replace_scene_background(session.scene_name)
 	# Original mesh is optional; validated source vertex bounds remain the fallback.
 	geometry_key = ""
 	_update_board_geometry()
@@ -642,6 +722,7 @@ func _enter_game() -> void:
 	if not focus.is_empty(): _focus_camera_position(focus.target_position, float(focus.duration))
 
 func _process(delta: float) -> void:
+	_sync_source_info()
 	_transition_pause_frame = scene_transition.blocks_input()
 	if _transition_pause_frame:
 		# Finish the departing world's unscaled frame before committing at black.
@@ -766,8 +847,8 @@ func _pick_target(screen: Vector2) -> Dictionary:
 	var origin := camera.project_ray_origin(screen)
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + camera.project_ray_normal(screen) * 100)
 	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	if hit.is_empty(): return {"card_id": -1, "panel_owner": -1}
-	return {"card_id": int(hit.collider.get_meta("card_id", -1)), "panel_owner": int(hit.collider.get_meta("equipment_panel_owner", -1))}
+	if hit.is_empty(): return {"card_id": -1, "panel_owner": -1, "trade_zone_index": -1}
+	return {"card_id": int(hit.collider.get_meta("card_id", -1)), "panel_owner": int(hit.collider.get_meta("equipment_panel_owner", -1)), "trade_zone_index": int(hit.collider.get_meta("trade_zone_index", -1))}
 
 func _pick(screen: Vector2) -> int:
 	return int(_pick_target(screen).card_id)
@@ -782,14 +863,102 @@ func _sync_equipment_display() -> void:
 		if not panel.is_empty(): metadata[id] = panel
 	equipment_display.sync(session.equipment.equipped, views, metadata, session.phase == "playing")
 
+func _configure_source_hud() -> void:
+	if source_hud == null: return
+	var factor: float = hud.size.y / hud_layout.reference_height
+	if factor <= 0: return
+	source_hud.scale = Vector2.ONE * factor
+	source_hud.size = hud.size / factor
+	var extent := source_hud.size
+	var day: Rect2 = hud_layout.rect("DayTimeUI", extent, Rect2(30, 30, 300, 50))
+	day_clock.position = day.position
+	day_clock.size = day.size
+	var stats: Rect2 = hud_layout.rect("CardStatsUI", extent, Rect2(360, 30, 0, 50))
+	stats_box.position = stats.position
+	stats_box.size.y = stats.size.y
+	if stat_labels.is_empty() and not hud_layout.documents.is_empty():
+		for field in ["Nutrition", "Currency", "Card"]:
+			var icon := TextureRect.new()
+			icon.texture = visual_assets.texture(str(hud_layout.field(field + "Icon", "m_Sprite", {}).get("guid", "")))
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			var asset: Dictionary = visual_assets.manifest.get("assets", {}).get(str(hud_layout.field(field + "Icon", "m_Sprite", {}).get("guid", "")), {})
+			var sprite: Dictionary = asset.get("sprite", {})
+			var preferred_width: float = float(sprite.get("pixel_size", {}).get("x", 64)) * 100.0 / float(sprite.get("pixels_per_unit", 100))
+			icon.custom_minimum_size = Vector2(preferred_width, 30)
+			icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			stats_box.add_child(icon)
+			var stat_label := _label("", stats_box, int(hud_layout.field(field + "Label", "m_fontSize", 30)))
+			stat_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			stat_labels.append(stat_label)
+	var stats_style := StyleBoxFlat.new()
+	stats_style.bg_color = hud_layout.color("CardStatsUI", Color(0, 0, 0, 0.8))
+	stats_background.add_theme_stylebox_override("panel", stats_style)
+	var menu: Rect2 = hud_layout.rect("MenuPanel", extent, Rect2(extent.x-400, 0, 400, extent.y))
+	var was_open: bool = journal_slide.target_x <= 0
+	detail_panel.position = menu.position
+	detail_panel.size = menu.size
+	journal_slide.open_position = menu.position
+	journal_slide.reset(was_open)
+	var header: Rect2 = hud_layout.rect("Header", menu.size, Rect2(0, 0, menu.size.x, 60))
+	journal_tabs.position = header.position
+	journal_tabs.size = header.size
+	journal_tabs.add_theme_constant_override("separation", 0)
+	for tab in journal_tabs.get_children(): tab.add_theme_font_size_override("font_size", 32)
+	ledger.position = Vector2(20, header.size.y+10)
+	ledger.size = Vector2(menu.size.x-40, menu.size.y-header.size.y-20)
+	ledger.add_theme_font_size_override("normal_font_size", 30)
+	var backdrop := StyleBoxFlat.new()
+	backdrop.bg_color = hud_layout.color("MenuToggle", Color(0, 0, 0, 0.9019608))
+	detail_panel.add_theme_stylebox_override("panel", backdrop)
+	var wm: Rect2 = hud_layout.rect("Watermark", extent, Rect2(extent.x/2-300, extent.y-40, 600, 40))
+	watermark.position = wm.position
+	watermark.size = wm.size
+	watermark.text = str(hud_layout.field("Watermark", "m_text", ""))
+	_layout_card_hover()
+
 func _layout_card_hover() -> void:
-	if card_hover == null or hud == null: return
-	var available: Vector2 = hud.size
-	var top: float = 100.0 if available.y > 180 else minf(12, available.y)
-	var bottom: float = 80.0 if available.y > 240 else 12.0
-	var extent := Vector2(maxf(0, minf(400, available.x - 24)), maxf(0, minf(315, available.y - top - bottom)))
-	var origin := Vector2(clampf(285, 12, maxf(12, available.x - extent.x - 12)), maxf(top, available.y - bottom - extent.y))
-	card_hover.set_bounds(Rect2(origin, extent))
+	if card_hover == null or source_hud == null: return
+	var area: Rect2 = hud_layout.rect("InfoPanel", source_hud.size, Rect2(30, source_hud.size.y-30, 400, 0))
+	card_hover.set_bounds(Rect2(area.position, Vector2(area.size.x, 0)))
+
+func _sync_source_info() -> void:
+	if source_hud == null or not running: return
+	for index in journal_tabs.get_child_count():
+		var tab: Button = journal_tabs.get_child(index)
+		var tab_style := StyleBoxFlat.new()
+		tab_style.bg_color = hud_layout.color("QuestsToggle", Color(0.22, 0.65, 0.88)) if index == (0 if active_tab == "quests" else 1) else hud_layout.color("Header", Color(0.5, 0.5, 0.5, 0.9))
+		for state in ["normal", "hover", "pressed", "focus"]: tab.add_theme_stylebox_override(state, tab_style)
+	stats_background.position = stats_box.position
+	stats_background.size = stats_box.size + Vector2(34, 0)
+	stats_background.visible = stats_box.visible
+	var toggle_rect: Rect2 = hud_layout.rect("MenuToggle", detail_panel.size, Rect2(-60, 60, 60, 60))
+	detail_toggle.position = detail_panel.position + toggle_rect.position
+	detail_toggle.size = toggle_rect.size
+	detail_toggle.add_theme_font_size_override("font_size", 32)
+	info_requests.submit("vendor", 1, vendor_unlock.sequence.info())
+	var modal: Dictionary = {}
+	match session.phase:
+		"feeding":
+			modal = {"header": "End of Day %d" % session.day, "body": "Your people are hungry!", "action": "Feed People"} if session.cycle.stage == "await_feed" else {"header": "Feeding People", "body": "Distributing food..."}
+		"selling":
+			var excess: int = session.stats().excess
+			modal = {"header": "Sell Excess Cards", "body": "You must sell %d excess %s to continue." % [excess, "cards" if excess > 1 else "card"]}
+		"encounter":
+			var state: Dictionary = session.cycle.save_state()
+			var message: String = str(catalog.fields(str(state.get("encounter_guid", ""))).get("notificationMessage", ""))
+			if not message.is_empty(): modal = {"header": "Event", "body": message}
+		"ready": modal = {"header": "Start of Day %d" % (session.day+1), "body": "Everything is ready.", "action": "Start Day"}
+		"game_over": modal = {"header": "Game Over", "body": "You have no people left.", "action": "Return to Title"}
+	info_requests.submit("day_cycle", 2, modal)
+	card_hover.set_descriptor(info_requests.current())
+	notice.visible = market_panel.visible
+	var action: String = str(info_requests.current().get("action", ""))
+	info_action.text = action
+	info_action.visible = not action.is_empty()
+	info_action.add_theme_font_size_override("font_size", 30)
+	info_action.position = card_hover.position + Vector2(20, card_hover.size.y-40)
+	info_action.size = Vector2(card_hover.size.x-40, 40)
 
 func _record_card_pointer(screen: Vector2) -> void:
 	if not screen.is_finite(): return
@@ -797,11 +966,15 @@ func _record_card_pointer(screen: Vector2) -> void:
 	_card_pointer_known = true
 
 func _clear_card_hover() -> void:
+	hovered_trade_index = -1
+	info_requests.submit("trade", 0, {})
 	hovered_card_id = -1
 	hovered_panel_owner = -1
 	_hover_view_instance = 0
 	_hover_definition = ""
-	if is_instance_valid(card_hover): card_hover.set_descriptor({})
+	if is_instance_valid(card_hover):
+		info_requests.submit("card", 0, {})
+		_sync_source_info()
 
 func _clear_drag_target_feedback() -> void:
 	card_drag_targets = {}
@@ -834,6 +1007,17 @@ func _sync_card_hover(gui: Control) -> void:
 	if gui != null and gui != hud and not _own_hover_control(gui):
 		_clear_card_hover()
 		return
+	var trade_index: int = hovered_trade_index if _own_hover_control(gui) else int(_pick_target(_card_pointer).get("trade_zone_index", -1))
+	if trade_index >= 0:
+		var view = trade_views.get(trade_index)
+		var info: Dictionary = view.get_info() if is_instance_valid(view) and view.is_visible_in_tree() and not view.is_queued_for_deletion() and view.pick_body.collision_layer != 0 else {}
+		_clear_card_hover()
+		hovered_trade_index = trade_index if not info.is_empty() else -1
+		info_requests.submit("trade", 0, info)
+		_sync_source_info()
+		return
+	hovered_trade_index = -1
+	info_requests.submit("trade", 0, {})
 	var id: int = hovered_panel_owner if hovered_panel_owner >= 0 else hovered_card_id
 	var panel: bool = hovered_panel_owner >= 0
 	if _own_hover_control(gui):
@@ -854,7 +1038,9 @@ func _sync_card_hover(gui: Control) -> void:
 		_hover_definition = session.cards[id].definition_guid
 	var info: Dictionary = CardInteraction.equipment_panel_info(session, id) if panel else CardInteraction.hover_info(session, id)
 	if info.is_empty(): _clear_card_hover()
-	else: card_hover.set_descriptor(info)
+	else:
+		info_requests.submit("card", 0, info)
+		_sync_source_info()
 
 func _sync_card_feedback() -> void:
 	if not is_instance_valid(card_hover) or not is_instance_valid(craft_progress): return
@@ -976,6 +1162,10 @@ func _unhandled_input(event: InputEvent) -> void:
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
+	if OS.is_debug_build() and running and event is InputEventKey and event.keycode == KEY_F3 and event.pressed and not event.echo and not _ui_pause_active():
+		market_panel.visible = not market_panel.visible
+		get_viewport().set_input_as_handled()
+		return
 	if scene_transition.blocks_input():
 		get_viewport().set_input_as_handled()
 		return
@@ -1114,7 +1304,12 @@ func _refresh() -> void:
 	day_clock.sync(session, running, _ui_pause_active())
 	market_heading.text = "STACKCRAFT / " + session.scene_name.to_upper()
 	status.text = "Coins %d  ·  Food %d / %d  ·  Cards %d / %d\n%s" % [stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit, "PAUSED" if session.paused else "%.0fx" % session.speed]
-	status.visible = running and session.phase == "playing"
+	status.hide()
+	stats_box.visible = running and session.phase == "playing"
+	if stat_labels.size() == 3:
+		stat_labels[0].text = "%d/%d" % [stats.nutrition, stats.nutrition_need]
+		stat_labels[1].text = str(stats.currency)
+		stat_labels[2].text = "%d/%d" % [stats.cards_owned, stats.card_limit]
 	pause_button.text = "Resume [Space]" if session.paused else "Pause [Space]"
 	pause_button.disabled = not running or _ui_pause_active() or session.phase != "playing"
 	for button in speed_buttons.values(): button.disabled = pause_button.disabled
@@ -1141,6 +1336,7 @@ func _refresh() -> void:
 		var stack = session.stacks.get(card.stack_id)
 		if stack != null and not stack.recipe_guid.is_empty(): inspection.text += "\nCraft: %.1f / %.1f s" % [stack.progress, float(catalog.fields(stack.recipe_guid).get("craftingDuration", 5))]
 	_refresh_ledger()
+	_sync_source_info()
 
 func _refresh_ledger() -> void:
 	if not ledger.meta_clicked.is_connected(_on_ledger_group_clicked):
@@ -1159,6 +1355,7 @@ func _refresh_ledger() -> void:
 	var scroll: float = ledger.get_v_scroll_bar().value
 	ledger.clear()
 	ledger_visible_ids.clear()
+	ledger_info.clear()
 	ledger_visible_groups.clear()
 	for row in rows:
 		if not row.group.is_empty():
@@ -1168,8 +1365,16 @@ func _refresh_ledger() -> void:
 			ledger.push_color(preload("res://scripts/ui/journal_groups.gd").header_color(catalog, active_tab))
 		elif not row.id.is_empty():
 			ledger_visible_ids[row.id] = true
+			ledger_info[row.id] = row.get("info", {})
 			ledger.push_meta(row.id, RichTextLabel.META_UNDERLINE_ON_HOVER)
-		ledger.add_text(("NEW · " if row.unread else "") + row.text + "\n")
+		ledger.push_font_size(35 if not row.group.is_empty() else 30)
+		ledger.add_text(row.text)
+		if row.unread:
+			ledger.push_color(Color.RED)
+			ledger.add_text(" ●")
+			ledger.pop()
+		ledger.add_text("\n")
+		ledger.pop()
 		if not row.group.is_empty(): ledger.pop()
 		if not row.id.is_empty() or not row.group.is_empty(): ledger.pop()
 	ledger.get_v_scroll_bar().value = scroll
@@ -1184,6 +1389,7 @@ func _on_ledger_group_clicked(meta: Variant) -> void:
 
 func _on_ledger_hover(meta: Variant) -> void:
 	if not meta is String or not ledger.is_visible_in_tree() or not ledger_visible_ids.has(meta): return
+	info_requests.submit("journal", 0, ledger_info.get(meta, {}))
 	session.collection.mark_seen(meta)
 
 func _collection_changed() -> void:
@@ -1206,7 +1412,7 @@ func _pack_tracker(guid: String) -> String:
 	if guid.is_empty(): return ""
 	var progress: Dictionary = session.collection.pack_progress(guid, session.discovered_recipes)
 	if int(progress.total) <= 0: return ""
-	return "COMPLETED" if progress.complete else "%d / %d found" % [progress.found, progress.total]
+	return "COMPLETED" if progress.complete else "Discovered:\n%d/%d" % [progress.found, progress.total]
 
 func _refresh_market_labels() -> void:
 	var currency: int = int(session.stats().currency)
@@ -1556,6 +1762,8 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 		journal_slide.day_ended()
 		day_clock.hide()
 		status.hide()
+		stats_box.hide()
+		stats_background.hide()
 		call_deferred("_refresh")
 	if kind == "cycle_focus_requested":
 		_focus_camera_position(payload.target_position, float(payload.duration))
@@ -1638,6 +1846,14 @@ func _card_footprint(id: int) -> Vector2:
 	if size == Vector3.ZERO: return Vector2.ZERO
 	var margin: Dictionary = catalog.settings("CardSettings").get("margin", {})
 	return BoardLayout.card_size(size, Vector2(float(margin.get("x", 0.1)), float(margin.get("y", 0.1))))
+
+func _replace_scene_background(scene_name: String) -> void:
+	if is_instance_valid(source_background):
+		source_background.hide()
+		source_background.queue_free()
+	source_background = visual_assets.create_scene_background(scene_name)
+	if source_background != null:
+		add_child(source_background)
 
 func _update_board_geometry() -> void:
 	if session.catalog == null: return
@@ -1966,6 +2182,7 @@ func _sync_trade_zones() -> void:
 		if zone.kind == "vendor" and zone.active: trade_activated[str(zone.pack_guid)] = true
 		if not trade_views.has(index):
 			var view = TradeZoneView.new()
+			view.bind_source(visual_assets, catalog)
 			add_child(view)
 			trade_views[index] = view
 		trade_views[index].configure(zone, _pack_tracker(str(zone.pack_guid)))

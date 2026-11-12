@@ -164,7 +164,7 @@ func run() -> void:
 	# Vendor tracker uses Collection, including recipe entries, without marking them seen.
 	var tracked: String = board.vendor_guids[0]
 	var progress: Dictionary = board.session.collection.pack_progress(tracked, board.session.discovered_recipes)
-	check(board._pack_tracker(tracked) == ("COMPLETED" if progress.complete else "%d / %d found" % [progress.found, progress.total]), "vendor tracker matches source unique collection totals")
+	check(board._pack_tracker(tracked) == ("COMPLETED" if progress.complete else "Discovered:\n%d/%d" % [progress.found, progress.total]), "vendor tracker matches source unique collection totals")
 	for entry in board.catalog.data.cards: board.session.collection.mark_card(str(entry.guid))
 	for entry in board.catalog.data.recipes: board.session._discover_recipe(str(entry.fields.id))
 	board._refresh_collection_presentation()

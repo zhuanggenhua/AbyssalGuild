@@ -32,20 +32,27 @@ static func resolve(source: Dictionary, scene_name: String) -> Dictionary:
 
 func _init() -> void:
 	name = "DayClock"
-	custom_minimum_size = Vector2(210, 50)
+	custom_minimum_size = Vector2(300, 50)
 	expand_icon = true
-	add_theme_constant_override("icon_max_width", 24)
+	add_theme_constant_override("icon_max_width", 30)
 	progress = ProgressBar.new()
 	progress.name = "DayProgress"
 	progress.show_percentage = false
 	progress.max_value = 1.0
 	progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(progress)
-	progress.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
-	progress.offset_top = -7
-	progress.offset_bottom = -2
-	progress.offset_left = 5
-	progress.offset_right = -5
+	progress.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	progress.show_behind_parent = true
+	add_theme_font_size_override("font_size", 30)
+	alignment = HORIZONTAL_ALIGNMENT_LEFT
+	icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	var clear := StyleBoxEmpty.new()
+	clear.content_margin_left = 10
+	clear.content_margin_right = 10
+	for state in ["normal", "hover", "pressed", "disabled", "focus"]: add_theme_stylebox_override(state, clear)
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color(0, 0, 0, 0.8)
+	progress.add_theme_stylebox_override("background", background)
 
 func configure(source: Dictionary, scene_name: String, visual_assets) -> void:
 	source_config = resolve(source, scene_name)
@@ -58,7 +65,7 @@ func sync(session, is_running: bool, blocked: bool) -> void:
 	visible = is_running and session.phase == "playing"
 	disabled = not visible or blocked
 	var pace: int = session.time_pace()
-	text = "Day %d · %s" % [session.day, ["Paused", "Normal", "Fast"][pace]]
+	text = "Day %d" % session.day
 	progress.value = clampf(session.elapsed / maxf(session.day_duration, 0.001), 0.0, 1.0)
 	icon = null
 	if source_config.get("source_backed", false) and assets != null:

@@ -26,12 +26,12 @@ func run() -> void:
 	session.day_duration = 100
 	session.elapsed = 25
 	view.sync(session, true, false)
-	check(view.visible and not view.disabled and view.progress.value == 0.25 and view.text.contains("Normal"), "normal day quarter fill")
+	check(view.visible and not view.disabled and view.progress.value == 0.25 and view.text == "Day %d" % session.day, "normal day quarter fill")
 	check(view.icon == null and view.tooltip_text.contains("fallback"), "honest text fallback")
 	for pace in [2, 0, 1]:
 		session.cycle_time_pace()
 		view.sync(session, true, false)
-		check(session.time_pace() == pace and view.text.contains(["Paused", "Normal", "Fast"][pace]), "source pace cycle %d" % pace)
+		check(session.time_pace() == pace and view.text == "Day %d" % session.day, "source pace cycle %d" % pace)
 	session.elapsed = 200
 	view.sync(session, true, true)
 	check(view.disabled and view.progress.value == 1.0 and session.time_pace() == 1, "external lock does not rewrite pace; fill clamps")

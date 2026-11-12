@@ -99,7 +99,9 @@ func run() -> void:
 	board._confirm_archive_slots()
 	check(FileAccess.file_exists(board.slots.slot_path(5)), "interrupted confirmation cannot remove its old target")
 	board._return_title()
-	check(board.title_panel.find_child("TitleScroll",true,false) != null, "title save controls remain accessible in a scroll container")
+	var ancestor: Node = board.slot_picker.get_parent()
+	while ancestor != null and not ancestor is ScrollContainer: ancestor = ancestor.get_parent()
+	check(ancestor is ScrollContainer and board.title_panel.is_ancestor_of(ancestor), "title save controls remain accessible in a scroll container")
 	board.queue_free(); await process_frame; await create_timer(0.5).timeout
 	print("Slot management UI checks: %d passed / %d total" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)

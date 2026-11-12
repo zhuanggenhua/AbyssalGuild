@@ -165,7 +165,7 @@ func private_checks() -> void:
 		card.set_hurt_flash(0.75)
 		if card.source_material != null:
 			check(is_equal_approx(card.source_material.get_shader_parameter("flash_amount"),0.75),"actual cached card flash binding")
-			check(card.source_material.get_shader_parameter("selection_emission") != Vector3.ZERO,"actual selected flash coexistence")
+			check(card.source_material.get_shader_parameter("selection_emission") == Vector3.ZERO,"source flash does not add invented selection emission")
 		else:
 			print("Private card flash shader: SKIP (FBX cache unavailable; fallback tested)")
 		card.free()

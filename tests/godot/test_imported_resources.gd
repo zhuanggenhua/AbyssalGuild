@@ -27,7 +27,13 @@ func run() -> void:
 		match str(entry.kind):
 			"png":
 				assert(resource is CompressedTexture2D, "PNG must load through cache, not ImageTexture fallback")
-				assert(assets.texture(guid) == resource, "Runtime texture binding must use imported PNG")
+				var runtime: Texture2D = assets.texture(guid)
+				assert(runtime != null and runtime.get_size() == resource.get_size(), "Runtime texture retains imported dimensions")
+				if int(entry.get("texture_importer", {}).get("alpha_usage", 1)) == 1:
+					assert(runtime == resource, "FromInput alpha retains the cached PNG resource")
+				else:
+					assert(runtime is ImageTexture and runtime != resource, "Source-generated alpha is derived from imported pixels")
+					assert(assets.texture(guid) == runtime, "Converted texture is cached and reused")
 			"wav":
 				assert(resource is AudioStreamWAV and resource.get_length() > 0, "WAV must import as nonempty audio")
 			"fbx":

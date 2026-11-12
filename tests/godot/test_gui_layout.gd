@@ -125,7 +125,7 @@ func run() -> void:
 	board.panning = true
 	board._show_title()
 	check(title_state(board) == initial, "title restores first-launch camera, board and light")
-	check(board.board_mesh.visible and board.original_board == null and not old_board.visible and old_board.is_queued_for_deletion(), "old private board hidden and released")
+	check(board.board_mesh.visible == (board.source_title == null) and board.original_board == null and not old_board.visible and old_board.is_queued_for_deletion(), "old private board hidden and released")
 	check(board.camera.h_offset == 0 and board.camera.v_offset == 0 and board.camera_motion.focus.is_empty() and board.camera_motion.target == board.camera.position and not board.panning, "title clears shake, pending focus and panning")
 	check(board.title_home.visible and not board.hud.visible, "title visibility reset")
 	board._show_title()

@@ -12,6 +12,7 @@ var _unflashed_color: Color = Color.WHITE
 var hurt_flash: float = 0.0
 var drag_target: Node3D
 var _feedback_footprint := Vector3.ZERO
+var _outline_metadata: Dictionary = {}
 
 func configure(id: int, title: String, category: int, is_pack: bool, visual_assets = null, fields: Dictionary = {}, scene_name: String = "Main", collider_size: Vector3 = Vector3.ZERO) -> void:
 	card_id = id
@@ -29,6 +30,7 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 	var appearance: Dictionary = {}
 	if visual_assets != null:
 		appearance = visual_assets.appearance(category, is_pack, fields, scene_name)
+		_outline_metadata = visual_assets.scene_configuration(scene_name).get("card_outline", {})
 		var source_size: Dictionary = appearance.get("prefab", {}).get("size", {})
 		if source_size.has("x") and source_size.has("z"):
 			mesh.size = Vector3(float(source_size.x), maxf(float(source_size.get("y", 0)), 0.02), float(source_size.z))
@@ -118,7 +120,8 @@ func highlight(value: bool) -> void:
 	material.emission = Color("31666b")
 	material.emission_energy_multiplier = 0.25
 	if source_material != null:
-		source_material.set_shader_parameter("selection_emission", Vector3(0.192, 0.4, 0.42) * (0.25 if value else 0.0))
+		# Source has no selected-card emission. Eligible stack targets use Highlight.
+		source_material.set_shader_parameter("selection_emission", Vector3.ZERO)
 
 func set_hurt_flash(amount: float) -> void:
 	# A presentation-only input. Selection emission and root/pick pose are untouched.
@@ -135,8 +138,10 @@ func set_hurt_flash(amount: float) -> void:
 func set_drag_target(value: bool) -> void:
 	# Lazy independent overlay: neither selected-card emission nor hurt flash changes.
 	if drag_target == null and value:
-		drag_target = preload("res://scripts/ui/card_target_outline.gd").new()
+		drag_target = preload("res://scripts/ui/source_card_outline.gd").create(body, _outline_metadata)
+		if drag_target == null:
+			drag_target = preload("res://scripts/ui/card_target_outline.gd").new()
+			drag_target.configure(_feedback_footprint)
 		drag_target.name = "DragTargetOutline"
-		drag_target.configure(_feedback_footprint)
 		add_child(drag_target)
 	if drag_target != null: drag_target.visible = value

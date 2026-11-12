@@ -4,6 +4,29 @@ This is a source-audit checklist, not a claim that the game is complete. Referen
 StackCraft `a11a89b04cea8370476f2559b639bb9b4cbc08d8`. No Unity execution was used.
 The full private source and assets now pass the 1327-file source lock.
 
+## Source-backed presentation audit (2026-11-12)
+
+The supplied reference image exposed implementation omissions, not merely a need
+for visual polish. This batch restores scene-authored Grass/Water planes and flat
+ambient fields, Unity height-matched HUD geometry, shared information requests,
+source trade meshes/icon/text fields/hover, same-mesh highlights and the Title
+artwork/overlay hierarchy. See [world rendering](source-world-rendering.md),
+[HUD mapping](source-hud-mapping.md), [trade presentation](source-trade-presentation.md),
+[card surface audit](card-surface-source-audit.md) and [Title container](title-source-container.md).
+
+Most importantly, the original card-art PNGs are opaque black-and-white files:
+Unity's `alphaUsage=2` generates alpha from grayscale. Copying their stored PNG
+alpha was wrong. The adapter now applies that importer semantic to both cached
+and raw loads, retaining byte-identical originals. All 115 affected locked-source
+textures are grayscale, so this does not guess colored luminance coefficients.
+
+These are not a claim of global one-to-one completion. Actual remaining code
+work includes source slider/text-toggle components, slot-template/scroll/footer
+composition, Options/Pause tree mapping, exact dependency tween/noise behavior,
+and particle/built-in-shader/lighting differences. The source TMP font is absent
+from the accessible imported source; the provided Chinese screenshot and locked
+English catalog are different variants, so no invented localization is supplied.
+
 ## Implemented behavior awaiting broader acceptance
 
 1. **Save lifecycle UI is now connected.** Slot selection, safe explicit legacy
@@ -131,8 +154,8 @@ These fixes use locked original paths and isolated Godot probes, not Unity
 execution. Headless input and resource checks do not establish rendered/manual
 acceptance or close the presentation gaps listed above.
 
-Required day-cycle actions now remain in the persistent header, independent of
-collapsed sidebars. Singleton chest clicks share the existing withdrawal path
+Required day-cycle actions now use the source bottom-left InfoPanel priority/action path, independent of
+collapsed sidebars. The earlier persistent-header native substitute has been removed. Singleton chest clicks share the existing withdrawal path
 with repeated-release and phase protections. Only supported Normal/Fast pace
 controls remain. Recipe cards now share one pure scene-aware definition builder
 for packs, research, cold saves and traveler restoration; ingredient text and

@@ -11,6 +11,9 @@ from visual_scene_metadata import apply_overrides, camera_records, light_records
 from card_visual_metadata import annotations
 from combat_visual_metadata import combat_metadata, sprite_metadata
 from puff_visual_metadata import scene_puff_metadata
+from world_visual_metadata import world_metadata
+from trade_visual_metadata import trade_metadata
+from outline_visual_metadata import outline_metadata
 
 SUPPORTED = {'.png', '.wav', '.fbx'}
 
@@ -58,7 +61,8 @@ def build(source, catalog, output):
                 result['assets'][guid]['texture_importer'] = {'filter_mode': importer.get('textureSettings', {}).get('filterMode'),
                     'wrap_u': importer.get('textureSettings', {}).get('wrapU'), 'wrap_v': importer.get('textureSettings', {}).get('wrapV'),
                     'mipmaps': importer.get('mipmaps', {}).get('enableMipMap'), 'srgb': importer.get('mipmaps', {}).get('sRGBTexture'),
-                    'alpha_is_transparency': importer.get('alphaIsTransparency')}
+                    'alpha_is_transparency': importer.get('alphaIsTransparency'),
+                    'alpha_usage': importer.get('alphaUsage')}
                 result['inputs'][relative + '.meta'] = sha256(meta)
                 sprite = sprite_metadata(importer, path.read_bytes())
                 if sprite:
@@ -111,12 +115,23 @@ def build(source, catalog, output):
     for scene in catalog.get('scenes', []):
         docs = scene['documents']
         config = {'categories': {}, 'boards': [], 'cameras': camera_records(docs), 'lights': light_records(docs)}
+        config.update(world_metadata(docs))
         for doc in docs:
             f = doc['fields']
             if any(key in f for key in ('arrowProjectile', 'magicProjectile', 'hitUIPrefab')):
                 config['combat'] = combat_metadata(f, read)
+            if 'buyerPrefab' in f and 'vendorPrefab' in f:
+                config['trading'] = trade_metadata(f, read, index, source)
+                for zone in config['trading'].values():
+                    graph_path = zone.get('outline', {}).get('shader_source_path', '')
+                    if graph_path:
+                        result['inputs'][graph_path] = sha256(inside(source, graph_path))
             if 'cardPrefabs' in f:
                 config['puff'] = scene_puff_metadata(f, read)
+                config['card_outline'] = outline_metadata(f, read, index, source)
+                if config['card_outline']:
+                    graph_path = config['card_outline']['shader_source_path']
+                    result['inputs'][graph_path] = sha256(inside(source, graph_path))
                 config['categories'] = {str(e['category']): prefab(e['prefab']['guid']) for e in f['cardPrefabs']}
                 for field in ('packPrefab', 'aggressiveMobPrefab'):
                     if f.get(field, {}).get('guid'):

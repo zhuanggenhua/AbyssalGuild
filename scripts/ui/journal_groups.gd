@@ -24,8 +24,8 @@ static func describe(catalog, session, tab: String, expansion: Dictionary, quest
 				groups.append({"key": "recipes:%d" % category, "title": title, "rows": []})
 			var ingredients: Array[String] = []
 			for ingredient in fields.get("requiredIngredients", []):
-				ingredients.append("%d %s" % [int(ingredient.get("count", 1)), _name(catalog, catalog.ref_guid(ingredient.get("card", {})))])
-			groups[by_category[category]].rows.append(_row(session, id, "• %s\n%s" % [_name(catalog, result), " + ".join(ingredients)]))
+				ingredients.append("%s x%d" % [_name(catalog, catalog.ref_guid(ingredient.get("card", {}))), int(ingredient.get("count", 1))])
+			groups[by_category[category]].rows.append(_row(session, id, "• %s" % _name(catalog, result), {"header": "Recipe: " + _name(catalog, result), "body": ", ".join(ingredients) + ("." if not ingredients.is_empty() else "")}))
 	else:
 		var tracker = session.quest_tracker
 		var ordered_ids: Array = reconcile_quest_order(tracker, quest_order)
@@ -48,8 +48,10 @@ static func describe(catalog, session, tab: String, expansion: Dictionary, quest
 				var fields: Dictionary = tracker.definitions.get(id, {})
 				var complete: bool = tracker.completed_ids.has(id)
 				var title := "• " + str(fields.get("title", id))
-				title += " √" if complete else "  (%d/%d)" % [int(instance.current_amount), int(fields.get("targetAmount", 1))]
-				rows.append(_row(session, id, title + "\n" + str(fields.get("description", ""))))
+				title += " √" if complete else ""
+				var body := str(fields.get("description", ""))
+				if not complete: body += "\n\nProgress: %d / %d" % [int(instance.current_amount), int(fields.get("targetAmount", 1))]
+				rows.append(_row(session, id, title, {"header": str(fields.get("title", id)), "body": body}))
 			if not rows.is_empty():
 				groups.append({"key": "quests:%s:%d" % [session.scene_name, index], "title": str(group.get("GroupName", "Quests")), "rows": rows})
 	var result: Array = []
@@ -60,8 +62,8 @@ static func describe(catalog, session, tab: String, expansion: Dictionary, quest
 	if result.is_empty(): result.append({"id": "", "group": "", "text": "Discover recipes by combining cards or opening packs." if tab == "recipes" else "No quests yet.", "unread": false})
 	return result
 
-static func _row(session, id: String, text: String) -> Dictionary:
-	return {"id": id, "group": "", "text": text, "unread": session.collection.is_unread(id)}
+static func _row(session, id: String, text: String, info: Dictionary = {}) -> Dictionary:
+	return {"id": id, "group": "", "text": text, "unread": session.collection.is_unread(id), "info": info}
 
 static func _name(catalog, guid: String) -> String:
 	return str(catalog.fields(guid).get("displayName", catalog.get_definition(guid).get("name", guid)))

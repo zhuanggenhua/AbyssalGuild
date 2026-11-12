@@ -86,7 +86,7 @@ func run() -> void:
 	board._sync_views()
 	check(board.views[fighter] != old_view and board.card_hover.descriptor.header == "Mage", "class-change rebuild replaces stale view and tooltip")
 	# Bounded panel cannot cover the fixed day action or ordinary notice.
-	check(not board.card_hover.get_global_rect().intersects(board.day_button.get_global_rect()) and not board.card_hover.get_global_rect().intersects(board.notice.get_global_rect()), "native hover placement leaves action and notice unobscured")
+	check(not board.day_button.visible and not board.card_hover.get_global_rect().intersects(board.notice.get_global_rect()), "source hover has no simultaneous modal action and leaves diagnostic notice unobscured")
 	var fields: Dictionary = board.catalog.fields(board.session.cards[fighter].definition_guid)
 	var original_description: String = fields.description
 	fields.description = "Readable long description. ".repeat(100)
@@ -239,11 +239,11 @@ func test_craft_and_lifecycle(board) -> void:
 	board.notice.text = "SAVE FAILED: independent notice"
 	for phase in ["feeding", "selling", "encounter", "ready", "game_over"]:
 		board.session.phase = phase; board._sync_card_feedback()
-		check(not board.card_hover.visible and board.craft_progress.bars.has(stack.id) and board.notice.text == "SAVE FAILED: independent notice", phase + " information outranks hover without losing frozen craft bar or notice")
+		check((not board.card_hover.visible if phase == "encounter" else board.card_hover.visible and board.card_hover.descriptor.header in ["End of Day 1", "Feeding People", "Sell Excess Cards", "Start of Day 2", "Game Over"]) and board.craft_progress.bars.has(stack.id) and board.notice.text == "SAVE FAILED: independent notice", phase + " information outranks hover without losing frozen craft bar or notice")
 	board.session.phase = "playing"; point(board, ids[0])
 	var zones: Array = board.trade_zones.duplicate(true); zones[1].active = true
 	board.vendor_unlock.sequence.on_quest_completed(zones); board._sync_card_feedback()
-	check(board.vendor_unlock.is_active() and board.vendor_unlock.info_panel.visible and not board.card_hover.visible, "source vendor reveal owns information priority")
+	check(board.vendor_unlock.is_active() and not board.vendor_unlock.info_panel.visible and board.card_hover.visible and board.card_hover.descriptor.header == "Pack Unlocked", "source vendor reveal owns information priority")
 	check(board.craft_progress.bars[stack.id].root.get_meta("paused") and board.notice.text == "SAVE FAILED: independent notice", "vendor reveal preserves bar and ordinary save-error notice")
 	board.vendor_unlock.cancel(); point(board, ids[0])
 	board.game_over_dialog.popup_centered()

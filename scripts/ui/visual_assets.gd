@@ -42,16 +42,54 @@ func texture(guid: String) -> Texture2D:
 	if has_cache and ResourceLoader.exists(path, "Texture2D"):
 		var resource = ResourceLoader.load(path, "Texture2D")
 		if resource is Texture2D:
-			texture_cache[guid] = resource
-			return resource
+			var mapped: Texture2D = _imported_texture(resource, entry.get("texture_importer", {}))
+			if mapped != null:
+				texture_cache[guid] = mapped
+			return mapped
 	if not FileAccess.file_exists(path):
 		return null
 	var image := Image.new()
 	if image.load_png_from_buffer(FileAccess.get_file_as_bytes(path)) != OK:
 		return null
-	var loaded := ImageTexture.create_from_image(image)
+	var mapped_image := apply_texture_alpha(image, entry.get("texture_importer", {}))
+	if mapped_image == null:
+		return null
+	var loaded := ImageTexture.create_from_image(mapped_image)
 	texture_cache[guid] = loaded
 	return loaded
+
+func _imported_texture(resource: Texture2D, importer: Dictionary) -> Texture2D:
+	var usage: int = int(importer.get("alpha_usage", 1)) if importer.get("alpha_usage") != null else 1
+	if usage == 1:
+		return resource
+	var mapped := apply_texture_alpha(resource.get_image(), importer)
+	return ImageTexture.create_from_image(mapped) if mapped != null else null
+
+static func apply_texture_alpha(image: Image, importer: Dictionary) -> Image:
+	# Unity TextureImporterAlphaSource: None=0, FromInput=1, FromGrayScale=2.
+	# Run for cached Texture2D images AND uncached PNGs, never mutate private originals.
+	if image == null:
+		return null
+	var usage: int = int(importer.get("alpha_usage", 1)) if importer.get("alpha_usage") != null else 1
+	if usage == 1:
+		return image
+	if usage not in [0, 2]:
+		return null
+	var result := image.duplicate() as Image
+	if result.is_compressed() and result.decompress() != OK:
+		return null
+	result.clear_mipmaps()
+	result.convert(Image.FORMAT_RGBA8)
+	var pixels := result.get_data()
+	for index in range(0, pixels.size(), 4):
+		if usage == 2 and (pixels[index] != pixels[index + 1] or pixels[index] != pixels[index + 2]):
+			# Audited source inputs are grayscale; do not invent colored luminance weights.
+			return null
+		pixels[index + 3] = pixels[index] if usage == 2 else 255
+	result = Image.create_from_data(result.get_width(), result.get_height(), false, Image.FORMAT_RGBA8, pixels)
+	if bool(importer.get("mipmaps", false)):
+		result.generate_mipmaps()
+	return result
 
 func scene_configuration(scene_name: String = "Main") -> Dictionary:
 	return manifest.get("scenes", {}).get(scene_name, {})
@@ -176,7 +214,10 @@ func _apply_board_materials(node: Node, references: Array) -> void:
 			var material := StandardMaterial3D.new()
 			material.resource_name = str(source.get("name", "SourceMaterial"))
 			material.albedo_color = source_color(source.get("colors", {}).get("_Color", {}))
-			# Source board shader is not recreated; preserve material-slot/color mapping.
+			# SimpleLit graph: _Color -> BaseColor; fixed smoothness 0, metallic 0.
+			# StandardMaterial preserves these inputs, not Unity/Godot BRDF parity.
+			material.roughness = 1.0
+			material.metallic = 0.0
 			node.set_surface_override_material(surface, material)
 	for child in node.get_children():
 		_apply_board_materials(child, references)
@@ -267,3 +308,9 @@ func create_puff(scene_name: String, presentation_seed: int) -> Node3D:
 		view.free()
 		return null
 	return view
+
+func create_scene_background(scene_name: String) -> Node3D:
+	return preload("res://scripts/ui/source_world.gd").background(self, scene_configuration(scene_name))
+
+func apply_source_environment(environment: Environment, scene_name: String) -> bool:
+	return preload("res://scripts/ui/source_world.gd").environment(environment, scene_configuration(scene_name))

@@ -33,6 +33,7 @@ static func create(assets, appearance: Dictionary) -> MeshInstance3D:
 	var bridge := Transform3D(Basis(Vector3.UP, PI), Vector3.ZERO)
 	result.transform = pose.transform * bridge * meshes[0].transform
 	result.material_override = surface
+	result.set_meta("mesh_to_card", bridge * meshes[0].transform)
 	result.set_meta("source_mesh_guid", str(prefab.get("mesh", {}).get("guid", "")))
 	result.set_meta("source_coordinate_conversion", "fbx_to_reflected_unity")
 	instance.free()

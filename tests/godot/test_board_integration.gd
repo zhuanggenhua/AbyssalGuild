@@ -45,19 +45,19 @@ func run() -> void:
 	board.session.spawn_layout_resolver = Callable()
 	var starter: String = board.session.cards.values()[0].definition_guid
 	check(not board.market_panel.visible and board.detail_panel.visible, "journal initial open state follows source while native market stays hidden")
-	var toggles: Dictionary = {}
-	for node in board.hud.get_children():
-		if node is Button and node.tooltip_text in ["Market & controls", "Inspect & journal"]: toggles[node.tooltip_text] = node
-	check(toggles.size() == 2, "both sidebar toggle buttons available")
-	for caption in toggles:
-		var button: Button = toggles[caption]
-		check(button.visible and not button.disabled and button.position.y == 835, "sidebar toggle accessible at bottom: " + caption)
-		button.pressed.emit()
+	check(board.detail_toggle.get_parent() == board.source_hud and board.detail_toggle.visible, "source journal toggle belongs to height-scaled HUD")
+	check(board.detail_toggle.position.x == board.detail_panel.position.x-60, "source toggle follows panel left edge")
+	var debug_key := InputEventKey.new()
+	debug_key.keycode = KEY_F3
+	debug_key.pressed = true
+	board._input(debug_key)
+	board.detail_toggle.pressed.emit()
 	board.journal_slide.advance(0.5)
-	check(board.market_panel.visible and not board.detail_panel.visible, "sidebar buttons open market and close source-open journal")
-	for button in toggles.values(): button.pressed.emit()
+	check(board.market_panel.visible and not board.detail_panel.visible, "debug shortcut opens diagnostics and source toggle closes journal")
+	board._input(debug_key)
+	board.detail_toggle.pressed.emit()
 	board.journal_slide.advance(0.5)
-	check(not board.market_panel.visible and board.detail_panel.visible, "sidebar buttons close market and reopen journal without replacing board")
+	check(not board.market_panel.visible and board.detail_panel.visible, "debug shortcut hides diagnostics and source toggle reopens journal")
 	board.detail_panel.hide()
 	clear_board(board)
 	var wood_guid: String = board.catalog.find_by_name("Wood")

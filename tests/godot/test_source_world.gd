@@ -1,0 +1,28 @@
+extends SceneTree
+const Assets = preload("res://scripts/ui/visual_assets.gd")
+func _init() -> void:
+	var assets = Assets.new()
+	var image := Image.create(4, 4, false, Image.FORMAT_RGB8)
+	image.fill(Color.WHITE)
+	assets.texture_cache["synthetic"] = ImageTexture.create_from_image(image)
+	assets.manifest = {"assets": {"synthetic": {"texture_importer": {"wrap_u": 0, "wrap_v": 0, "filter_mode": 1, "mipmaps": 1}}}, "materials": {"ground": {"shader_reference": {"fileID": "10752", "guid": "0000000000000000f000000000000000"}, "textures": {"_MainTex": {"m_Texture": {"guid": "synthetic"}, "m_Scale": {"x": 3, "y": 4}, "m_Offset": {"x": 0.1, "y": 0.2}}}}}, "scenes": {"Test": {"render_settings": {"m_AmbientMode": 3, "m_Fog": 0, "m_AmbientSkyColor": {"r": 0.2, "g": 0.3, "b": 0.4}, "m_AmbientIntensity": 0.7}, "scene_meshes": [{"file_id": "123", "enabled": 1, "mesh": {"fileID": "10209", "guid": "0000000000000000e000000000000000"}, "materials": [{"guid": "ground"}], "transform_chain": [{"m_LocalPosition": {"x": 0, "y": -3, "z": 0}, "m_LocalRotation": {"x": 0, "y": 0, "z": 0, "w": 1}, "m_LocalScale": {"x": 2, "y": 1, "z": 2}}]}]}}}
+	var background = assets.create_scene_background("Test")
+	assert(background != null and background.get_child_count() == 1)
+	var mesh: MeshInstance3D = background.get_child(0)
+	assert(mesh.mesh.size == Vector2(10, 10))
+	assert(mesh.position == Vector3(0, -3, 0) and mesh.scale == Vector3(2, 1, 2))
+	assert(mesh.material_override.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED)
+	assert(mesh.material_override.uv1_scale == Vector3(3, 4, 1))
+	assert(mesh.material_override.uv1_offset.is_equal_approx(Vector3(0.1, 0.2, 0)))
+	assert(mesh.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+	var environment := Environment.new()
+	assert(assets.apply_source_environment(environment, "Test"))
+	assert(environment.ambient_light_color.is_equal_approx(Color(0.2, 0.3, 0.4)))
+	assert(is_equal_approx(environment.ambient_light_energy, 0.7))
+	assert(assets.create_scene_background("Absent") == null)
+	assert(not assets.apply_source_environment(environment, "Absent"))
+	assets.manifest.materials.ground.shader_reference.fileID = "unknown"
+	assert(assets.create_scene_background("Test") == null)
+	background.free()
+	print("Source world metadata bindings: PASS")
+	quit()

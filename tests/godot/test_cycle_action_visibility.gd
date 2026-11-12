@@ -65,11 +65,11 @@ func run() -> void:
 	board.start_new(); board.set_process(false)
 	await process_frame
 	check(not board.market_panel.visible and board.detail_panel.visible, "source journal starts open while native market stays collapsed")
-	check(board.day_button.is_visible_in_tree() and not board.day_button.disabled, "one End Day action remains available outside collapsed market")
+	check(not board.day_button.is_visible_in_tree(), "source has no manual End Day action while playing")
 	check(not board.market_panel.is_ancestor_of(board.day_button) and not board.detail_panel.is_ancestor_of(board.day_button), "day action has no collapsible sidebar ancestor")
 	check(action_count(board) == 1, "exactly one HUD button dispatches the day action")
 	var rect: Rect2 = board.day_button.get_global_rect()
-	check(Rect2(Vector2.ZERO, Vector2(1440,900)).encloses(rect) and rect.size.x >= 300 and rect.size.y >= 34, "day action stays inside logical viewport with usable bounds")
+	check(Rect2(Vector2.ZERO, Vector2(1440,900)).encloses(rect) and rect.size.x >= 290 and rect.size.y >= 32, "day action stays inside logical viewport with usable bounds")
 	check(not board.status.get_global_rect().intersects(rect), "two-line status and day action do not overlap")
 	check(board.speed_buttons.size() == 2 and board.speed_buttons.has(1.0) and board.speed_buttons.has(2.0), "pace controls expose only source Normal and Fast")
 	var invalid_buttons: Array = board.hud.find_children("*", "Button", true, false).filter(func(b): return b.text == "3x")
@@ -88,7 +88,7 @@ func run() -> void:
 	board.session.elapsed = board.session.day_duration
 	board._process(0.01); await process_frame
 	check(board.session.phase == "feeding" and board.session.cycle.stage == "await_feed", "natural clock boundary waits for explicit Feed")
-	check(board.day_button.text == "Feed villagers" and not board.day_button.disabled and board.day_button.is_visible_in_tree(), "natural boundary exposes enabled visible Feed without opening market")
+	check(board.day_button.text == "Feed People" and not board.day_button.disabled and board.day_button.is_visible_in_tree(), "natural boundary exposes enabled visible Feed without opening market")
 	check_panels(board, "Feed")
 	board.day_button.pressed.emit()
 	check(board.session.cycle.stage == "character_focus" and board.day_button.disabled, "Feed starts timeline and disables same action immediately")
@@ -99,7 +99,7 @@ func run() -> void:
 		if board.session.phase in ["ready", "selling", "game_over"]: break
 		board._process(0.1)
 	await process_frame
-	check(board.session.phase == "ready" and board.day_button.text == "Start next day" and not board.day_button.disabled, "completed cycle exposes Start Day")
+	check(board.session.phase == "ready" and board.day_button.text == "Start Day" and not board.day_button.disabled, "completed cycle exposes Start Day")
 	check_panels(board, "Start Day")
 	board.market_panel.hide(); board.detail_panel.hide()
 	board.day_button.pressed.emit()
@@ -188,7 +188,7 @@ func run() -> void:
 	board._return_title()
 	check(not board.day_button.is_visible_in_tree(), "return to title hides single gameplay action")
 	board._continue_game(); board.set_process(false)
-	check(board.day_button.is_visible_in_tree() and not board.day_button.disabled and action_count(board) == 1, "Continue restores exactly one reachable day action")
+	check(not board.day_button.is_visible_in_tree() and action_count(board) == 1, "Continue restores hidden source action until natural day end")
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
 	print("Cycle action visibility: %d passed / %d total" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)
