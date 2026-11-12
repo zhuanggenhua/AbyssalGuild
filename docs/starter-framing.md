@@ -45,6 +45,11 @@ performs two synthetic output registrations through the production overlap
 helper. It does not open real Starter slots, reproduce actual imported collider
 sizes, sample the source RNG, or assert the original game's exact draw outcomes.
 
+The fixture explicitly disables inherited canvas stretching so its requested
+logical viewport sizes mean the same thing in the blank-project runner and in
+the freshly imported runner, which preserves the production project settings.
+This does not change the game's own stretch configuration.
+
 At viewport sizes 1440x900 and 1233x771 it checks:
 
 - Godot projections against an independent Unity-space pinhole equation for

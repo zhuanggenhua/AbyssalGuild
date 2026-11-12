@@ -141,5 +141,8 @@ func run() -> void:
 			board._process(1)
 	board.queue_free()
 	await process_frame
+	# Cached WAV playback releases on the audio mix thread after node teardown.
+	# Let it drain before engine shutdown, as in the focused audio regression.
+	await create_timer(0.5).timeout
 	print("Scene transition board: %d / %d" % [checks-failures, checks])
 	quit(1 if failures else 0)

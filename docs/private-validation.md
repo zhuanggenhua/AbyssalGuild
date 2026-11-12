@@ -92,3 +92,31 @@ This is a separate local validation entry point. It does not change
 intentional source-free/no-import-cache behavior. Run the existing aggregate
 regressions as well when changes require them. Never commit private data, media,
 source snapshots, import caches or captured private artifacts.
+
+## Fresh-checkout harness corrections
+
+A fresh source recovery at the locked revision reverified all 1,327 hashes and
+regenerated the catalog plus 173 private assets. This exposed two validation
+harness differences that source-free checks alone did not cover:
+
+- The imported project retains production canvas stretching. The synthetic
+  Starter projection fixture now explicitly owns its logical viewport sizes,
+  so its independent equations do not confuse window and canvas coordinates.
+  Production stretch/camera settings are unchanged.
+- The scene-transition integration script can still have audio-server playback
+  references briefly after its board is removed. Six repeated cached-resource
+  runs reproduced exit diagnostics in three runs, despite 24/24 assertions.
+  It now allows the audio mix thread to drain after normal node teardown, using
+  the same half-second cleanup interval as the audio regression. Six consecutive
+  repeated runs then completed without leaked-resource or engine diagnostics.
+
+Neither fix suppresses diagnostics or relaxes the runner's fail-on-error and
+fail-on-skip behavior. Passing playback/resource checks is not listening
+acceptance, and no private source, image, model, sound or screenshot is published.
+
+With these corrections, the strict freshly imported run passed all **45 suites**
+on official Godot 4.6.3, with 150 PNG, 19 WAV and 4 FBX inputs. The source-free
+regression also passed 102 Python tests and 65 Godot suites. The full-data
+ordinary runner completed 105 Godot suites; the corrected transition cleanup
+was additionally exercised in the six repeated cached runs and strict private
+runner above. These remain automated coverage statements, not final acceptance.

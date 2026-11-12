@@ -52,6 +52,10 @@ func _init() -> void: call_deferred("run")
 
 func run() -> void:
 	root.gui_embed_subwindows = true
+	# The imported runner preserves the real project canvas stretch settings.
+	# This projection fixture owns logical viewport dimensions in both runners.
+	root.content_scale_size = Vector2i.ZERO
+	root.content_scale_mode = Window.CONTENT_SCALE_MODE_DISABLED
 	var board = Board.new()
 	var path := "user://starter-framing-%d" % Time.get_ticks_usec()
 	board.options_path = path + "/options.json"
@@ -118,5 +122,6 @@ func run() -> void:
 		check(card.position == original_pose and states[1].position == position, "camera recovery never changes fixture positions")
 	board.queue_free()
 	await process_frame
+	await create_timer(0.2).timeout
 	print("Starter framing: %d/%d passed (synthetic, no private data or rendered acceptance)" % [checks - failures, checks])
 	quit(0 if failures == 0 else 1)
