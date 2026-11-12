@@ -112,3 +112,18 @@ verified independently from the earlier unuploaded local candidate; it does
 not claim that candidate or its private-data/native-window checks were recovered.
 Current full private-data, physical input, rendered, audio and Windows acceptance
 remain separate. Pause-menu focus containment is not part of this checkpoint.
+
+## Further native follow-up checkpoints
+
+[Pause/options focus ownership](menu-focus.md) now has its own native keyboard
+loop and return-target checks, including lost focus, modal cancellation and
+failed settings saves. This is separate from the Space interception checkpoint.
+
+[Starter framing audit](starter-framing.md) found that the locked source camera,
+spawn extent and overlap rules can produce the observed initial crop. The
+source-consistent lens and placement behavior are unchanged. Independent
+perspective checks and actual Viewport middle-pan/wheel events recover a
+synthetic cropped card and retain physics picking at both tested viewport sizes.
+That source-free test is not a repeated private Starter draw or an actual
+rendered/HUD-usability acceptance pass. Audio, Windows and final gameplay
+acceptance remain open.
