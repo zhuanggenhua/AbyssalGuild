@@ -39,6 +39,9 @@ func run() -> void:
 	root.add_child(board)
 	await process_frame
 	board.set_process(false)
+	var options_surface: PanelContainer = board.options_panel.get_node("OptionsSurface")
+	var surface_style: StyleBox = options_surface.get_theme_stylebox("panel")
+	check(surface_style is StyleBoxFlat and is_equal_approx(surface_style.bg_color.a, 1.0), "options surface is opaque above the paused menu")
 	board.catalog.configure({})
 	board.session.configure(board.catalog)
 	board.title_panel.hide()

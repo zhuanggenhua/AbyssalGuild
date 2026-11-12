@@ -31,7 +31,7 @@ or keyboard behavior is a pixel/engine reproduction of the Unity Canvas.
 
 `bash tools/test_godot.sh res://tests/godot/test_menu_focus.gd`
 
-The focused suite passes **63 checks** on Godot 4.6.3, using actual Viewport
+The focused suite passes **64 checks** on Godot 4.6.3, using actual Viewport
 keyboard dispatch and an explicitly empty test catalog. It covers repeated
 open/close rounds, both traversal directions, directional keys, lost focus,
 slider adjustment, modal cancellation, save failure/retry, direct options entry,
@@ -41,3 +41,11 @@ runners both include it. The Space routing regression remains 35/35.
 These checks run headlessly and do not establish physical controller support,
 rendered focus visibility, audio listening, imported gameplay or Windows
 acceptance. Production still refuses to start gameplay without licensed data.
+
+## Options backdrop follow-up
+
+A native-window retest found the pause heading visible through the default
+translucent settings panel. The active options surface now uses its own opaque
+copy of the panel style, leaving the surrounding dimmer and theme defaults
+unchanged. A style assertion prevents this regression; focus/navigation and
+settings persistence are still exercised by the same suite.

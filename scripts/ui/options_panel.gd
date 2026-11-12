@@ -27,9 +27,18 @@ func _ready() -> void:
 	shade.color = Color(0.02, 0.04, 0.06, 0.9)
 	add_child(shade)
 	var panel := PanelContainer.new()
+	panel.name = "OptionsSurface"
 	panel.position = Vector2(420, 100)
 	panel.size = Vector2(600, 700)
 	add_child(panel)
+	# The default panel is translucent. Keep the active settings readable when
+	# the externally paused menu is still present beneath this overlay.
+	var surface := panel.get_theme_stylebox("panel").duplicate() as StyleBoxFlat
+	if surface == null:
+		surface = StyleBoxFlat.new()
+		surface.bg_color = Color(0.07, 0.08, 0.09)
+	surface.bg_color.a = 1.0
+	panel.add_theme_stylebox_override("panel", surface)
 	var margin := MarginContainer.new()
 	for side in ["left", "right", "top", "bottom"]: margin.add_theme_constant_override("margin_" + side, 24)
 	panel.add_child(margin)

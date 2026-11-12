@@ -127,3 +127,33 @@ synthetic cropped card and retain physics picking at both tested viewport sizes.
 That source-free test is not a repeated private Starter draw or an actual
 rendered/HUD-usability acceptance pass. Audio, Windows and final gameplay
 acceptance remain open.
+
+## Fresh native-window verification
+
+A new isolated Linux desktop run of `389c5796135f553f9b93f3839e916fc7dd0df6e5`
+with the reverified private import and official Godot 4.6.3 exercised real
+pointer and keyboard input. It confirmed:
+
+- Changed duration/Friendly preferences, Confirm, and two Starter draws.
+- Focused 1x followed by Space paused once and resumed at Normal/1x.
+- Escape focused Continue; forward/reverse menu boundaries stayed within the
+  active menu. Options boundaries and slider keyboard adjustment worked.
+- Closing options restored its opener. Space on Continue resumed only the
+  menu, and repeated open/close preserved an already selected manual pause.
+- Wheel zoom plus keyboard pan recovered the initially cropped Berry Bush and
+  Villager. The recovered Villager could be selected and dragged.
+- Save & return reached the restored title, and confirmed Quit closed the game.
+
+This run exposed a small separate presentation defect: the pause heading was
+visible through the default translucent options surface. The surface now has
+an opaque local copy of the panel style. A native retest of
+`options_panel.gd` SHA-256
+`04cb70b763cd70b973c5c581bcdc0145f34922045d46ba6a9943c59c471bffe2`
+confirmed no heading/subtitle behind Resolution or Window, legible settings,
+correct return focus, and one-time Continue behavior. Its focused suite is now
+64/64; the underlying Space suite remains 35/35.
+
+Both native runs used isolated user settings/saves and Dummy audio. They do not
+establish listening, full combat/travel/day-cycle interaction, Windows,
+controller, export/install or final parity acceptance. Screenshots and imported
+assets stayed private and are not part of this repository.
