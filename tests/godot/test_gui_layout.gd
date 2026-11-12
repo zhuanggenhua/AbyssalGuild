@@ -1,6 +1,11 @@
 extends SceneTree
 ## Container/text bounds and title lifecycle. Rendered acceptance is separate.
 const Board = preload("res://scripts/ui/board.gd")
+class PointerProbe extends Node:
+	var buttons: Array[int] = []
+	func _unhandled_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed:
+			buttons.append(event.button_index)
 var checks := 0
 var failures := 0
 func check(ok: bool, label: String) -> void:
@@ -21,6 +26,48 @@ func title_state(board) -> Array:
 		board.board_mesh.material_override.albedo_color, board.source_light.transform,
 		board.source_light.light_color, board.source_light.light_energy,
 		board.source_light.shadow_enabled, board.source_light.shadow_opacity]
+func check_notice_bounds(board, context: String) -> void:
+	var notice: Label = board.notice
+	var background: StyleBox = notice.get_theme_stylebox("normal")
+	check(board.hud.get_global_rect().encloses(notice.get_global_rect()), "notice fits HUD: " + context)
+	check(notice.get_line_count() * notice.get_line_height() <= notice.size.y - background.get_minimum_size().y, "notice text fits backing: " + context)
+	check(not notice.get_global_rect().intersects(board.detail_toggle.get_global_rect()), "notice leaves journal toggle clear: " + context)
+	check(not notice.get_global_rect().intersects(Rect2(18, 835, 248, 40)), "notice leaves market toggle clear: " + context)
+func test_notice(board) -> void:
+	var background: StyleBox = board.notice.get_theme_stylebox("normal")
+	check(background is StyleBoxFlat, "notice has a native flat backing on bright boards")
+	if background is StyleBoxFlat:
+		var foreground: Color = board.notice.get_theme_color("font_color")
+		var light: float = foreground.srgb_to_linear().get_luminance()
+		var dark: float = background.bg_color.srgb_to_linear().get_luminance()
+		check(background.bg_color.a == 1.0 and foreground.a == 1.0, "notice colors remain opaque over white and cream boards")
+		check((maxf(light, dark) + 0.05) / (minf(light, dark) + 0.05) >= 4.5, "notice style has at least 4.5:1 text contrast")
+	check(board.notice.mouse_filter == Control.MOUSE_FILTER_IGNORE, "notice backing does not own board input")
+	check(board.notice.focus_mode == Control.FOCUS_NONE, "notice is not an extra keyboard focus stop")
+	for message in ["Arrived at Island · saved.", "Arrived at Island · SAVE FAILED: Could not write save file. Live game kept open; retry Save."]:
+		board.notice.text = message
+		await process_frame
+		check_notice_bounds(board, message)
+	var probe := PointerProbe.new()
+	root.add_child(probe)
+	# Exercise native Viewport routing over both glyphs and backing padding.
+	for point in [board.notice.get_global_rect().position + Vector2(2, 2), board.notice.get_global_rect().get_center()]:
+		var motion := InputEventMouseMotion.new()
+		motion.position = point
+		root.push_input(motion)
+		await process_frame
+		check(root.gui_get_hovered_control() == null, "notice does not suppress board hover")
+		for button in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_WHEEL_DOWN]:
+			var event := InputEventMouseButton.new()
+			event.position = point
+			event.button_index = button
+			event.pressed = true
+			root.push_input(event)
+			event.pressed = false
+			root.push_input(event)
+		await process_frame
+	check(probe.buttons == [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_WHEEL_DOWN, MOUSE_BUTTON_LEFT, MOUSE_BUTTON_WHEEL_DOWN], "notice passes clicks and wheel through to unhandled board input")
+	probe.queue_free()
 func _init() -> void: call_deferred("run")
 func run() -> void:
 	root.size = Vector2i(1440, 900)
@@ -39,6 +86,7 @@ func run() -> void:
 	board.detail_panel.show()
 	await process_frame
 	await process_frame
+	await test_notice(board)
 	var tab_count := 0
 	for button in buttons(board.detail_panel) + board.speed_buttons.values():
 		var text_width: float = button.get_theme_font("font").get_string_size(button.text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")).x
@@ -56,6 +104,7 @@ func run() -> void:
 		root.size = size
 		await process_frame
 		await process_frame
+		check_notice_bounds(board, str(size))
 		for button in buttons(board.detail_panel):
 			check(button.size.x >= button.get_theme_font("font").get_string_size(button.text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")).x + button.get_theme_stylebox("normal").get_minimum_size().x, "scaled sidebar text fits: %s %s" % [size, button.text])
 	board.camera.projection = Camera3D.PROJECTION_PERSPECTIVE

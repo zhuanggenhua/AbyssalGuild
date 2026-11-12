@@ -264,3 +264,68 @@ fixtures and its enemies use direct death calls: this establishes model chain
 connectivity, not natural progression or combat victory.
 The natural Grand Portal route requires 5 Stone, 5 Brick, an Abyssal Core and
 3 Villagers; the Core is Demon Lord loot. That late-game route remains open.
+
+
+## Island travel and status legibility follow-up
+
+On baseline `1f40c9e94a4f306f04e8e828bfb0b95b446c6716`, the unchanged natural
+campaign advanced from Day 7 to a normally saved Day 8 with four adults and
+18 completed quests. It did not naturally reach the Grand Portal. The locked
+catalog gates Blacksmith at 26 completed quests and Adventure at 30; their
+Acolyte draws are probabilistic. Blacksmith costs 15 Coins with an 8% chance
+per fully opened pack. Adventure costs 20, with a 16.8% first-pack chance while
+Summoning Evil is unknown, then 20% once it is learned. These are not guaranteed
+completion times. The required Altar, Acolyte, Demon Lord and portal chain also
+needs substantial construction, food and combat preparation.
+
+To exercise the travel UI without presenting an injected setup as a natural
+win, a separate private slot was created through the native model's ordinary
+card factory and equipment APIs. It started paused in Main with an existing
+Grand Portal, a 17-health club-equipped Warrior, and a small retained base.
+No travel was triggered by the builder. This fixture used different user-data
+directories and never replaced or edited the natural Day 8 save.
+
+Real pointer/keyboard play then covered:
+
+- Dragging the Warrior onto the portal, the actual five-second travel recipe,
+  fade, first Island arrival and its automatic checkpoint.
+- Opening the default Island pack, harvesting Palm Tree and Basalt Columns,
+  obtaining Coconuts/Stone and unlocking the Survival vendor.
+- Save & Title, normal Quit, cold relaunch and Continue in Island with the
+  traveler, equipment and active resource work restored.
+- Return to Main, revisit to Island, and another round trip after paying Coral
+  to Survival. The vendor's remaining price stayed at two Coins on returning.
+  Read-only comparisons of actual arrival checkpoints verified retained cards
+  and frozen scene clocks, with exactly one traveler and its retained equipment.
+  The Warrior stayed at 17 health through all travel legs.
+- Island feeding using the four earned Coconuts, healing the Warrior to 20,
+  and the Day 2 automatic checkpoint with the partial vendor payment intact.
+
+The first Island arrival exposed unreadable white status text over its bright
+board. The native status label now has an opaque dark backing and white text,
+keeping the same bounds and mouse-ignore behavior. Actual native-window retests
+confirmed legible restored-slot, arrival, installment and next-day notices on
+both Main and Island, including manual pause. The backing is native UI chrome,
+not a claim of original source styling. The layout regression checks at least
+4.5:1 contrast, wrapped failure text, scaled bounds, and actual Viewport hover,
+click and wheel pass-through.
+
+These are controlled late-game UI observations, not natural portal crafting or
+Demon Lord victory. The separate natural campaign remains at Day 8. Native
+audio-device listening, projectile/merge acceptance, Windows, controller and
+export/install acceptance remain open. Licensed inputs, fixture builder, raw
+screenshots, saves and logs stay private.
+
+The combined correction passed 104 Python tests, 67 clean source-free Godot
+suites, 108 full-data Godot suites and 47 fresh private-import suites. Source
+lock verification passed all 1327 files, and source-to-data regeneration matched.
+The GUI checks pass 64/64 without source data and 72/72 with it.
+
+The first two full runs exposed a pre-existing test-only audio teardown race:
+`test_world_post_process_board.gd`'s 100 ms timer could consume the preceding
+slow frame's delta and exit after only 14–19 ms of wall time. Baseline comparisons
+reproduced retained AudioStreamWAV/playback objects. That test now closes audio
+admission using production shutdown, verifies voice/cache cleanup, and honors
+production's monotonic drain deadline before freeing its board. The strict
+leak watchdog and production audio behavior are unchanged. Ten focused runs
+and the final complete regressions passed; normal native Quit logs were clean.

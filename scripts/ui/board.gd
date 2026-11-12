@@ -397,6 +397,18 @@ func _build_ui() -> void:
 	notice.position = Vector2(285, 835)
 	notice.size = Vector2(865, 50)
 	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Native status chrome, not source styling: bright Island geometry must
+	# never wash out save/travel feedback. Keep the existing board input route.
+	notice.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	notice.add_theme_color_override("font_color", Color.WHITE)
+	var notice_background := StyleBoxFlat.new()
+	notice_background.bg_color = Color("20262b")
+	notice_background.set_corner_radius_all(3)
+	notice_background.content_margin_left = 12
+	notice_background.content_margin_right = 12
+	notice_background.content_margin_top = 6
+	notice_background.content_margin_bottom = 6
+	notice.add_theme_stylebox_override("normal", notice_background)
 	card_hover = CardHoverView.new()
 	card_hover.name = "CardHoverInfo"
 	# Its whole rectangle owns GUI input, including header/background. Scrolling

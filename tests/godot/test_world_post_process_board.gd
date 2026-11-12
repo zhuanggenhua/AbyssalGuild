@@ -61,11 +61,20 @@ func run() -> void:
 	board.session.scene_name = "missing"
 	board._enter_game()
 	check(not effect.rect.visible and not effect.config.source_backed, "unknown scene passthrough")
-	# Let dummy audio teardown drain; this test does not assess audio.
+	# Use production's shutdown contract before freeing the fixture. A timer
+	# alone can consume this slow frame's delta and leave no real audio drain.
+	board.process_mode = Node.PROCESS_MODE_DISABLED
+	board.feedback.shutdown()
+	check(board.feedback.shutting_down and board.feedback.stream_cache.is_empty() and board.feedback.last_played.is_empty(), "teardown closes audio admission and releases cached streams")
+	var voices_stopped := true
 	for player in board.feedback.find_children("*", "AudioStreamPlayer", true, false):
-		player.stop()
-		player.stream = null
-	await create_timer(0.1).timeout
+		voices_stopped = voices_stopped and not player.playing and player.stream == null
+	check(voices_stopped and not board.feedback.play_event("Click") and not board.feedback.play_music(), "teardown stops every voice and rejects late playback")
+	var deadline_usec: int = Time.get_ticks_usec() + int(Board.QUIT_AUDIO_DRAIN_SECONDS * 1000000)
+	var remaining: float = Board.QUIT_AUDIO_DRAIN_SECONDS
+	while remaining > 0:
+		await create_timer(remaining, true, false, true).timeout
+		remaining = float(deadline_usec - Time.get_ticks_usec()) / 1000000.0
 	board.queue_free()
 	await process_frame
 	check(effect.tracks.is_empty(), "teardown cancels all tracks")

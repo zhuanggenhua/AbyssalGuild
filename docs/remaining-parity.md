@@ -290,3 +290,13 @@ a Baby into a third adult in Day 7, unlocking Farmstead.
 See [native GUI continuation](gui-smoke.md#natural-combat-and-growth-continuation).
 This narrows the basic combat acceptance gap; projectile/merge behavior, natural
 late-game travel, audio listening and platform/export acceptance remain open.
+
+
+A separate controlled native UI run now covers five actual portal trips between
+Main and Island, Island pack/resource interaction, cold save restoration,
+retained scene cards/clocks, Coral installment persistence and Island feeding
+through Day 2. It found and corrected unreadable status text over the bright
+Island board, with native-window and contrast/input regression checks. See
+[Island UI acceptance](gui-smoke.md#island-travel-and-status-legibility-follow-up).
+The ordinary campaign reached Day 8 independently. The controlled portal setup
+is explicitly not natural late-game progression or Demon Lord combat victory.
