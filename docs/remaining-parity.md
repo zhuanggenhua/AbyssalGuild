@@ -281,3 +281,12 @@ container/world-lifecycle corrections and explicit regression coverage. See
 [GUI smoke and layout](gui-smoke.md) for the tested paths and remaining Starter
 edge-framing, audio-device and platform limitations. This is not full visual
 parity or final acceptance.
+
+
+A later natural campaign continued through basic melee combat, an autonomous
+Slime encounter, loot payment, full Berry growth and the Day 5 Villager encounter.
+It also restored an active fight, exercised reinforcement/flee/rejoin, and grew
+a Baby into a third adult in Day 7, unlocking Farmstead.
+See [native GUI continuation](gui-smoke.md#natural-combat-and-growth-continuation).
+This narrows the basic combat acceptance gap; projectile/merge behavior, natural
+late-game travel, audio listening and platform/export acceptance remain open.

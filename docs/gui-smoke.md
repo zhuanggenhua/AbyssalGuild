@@ -211,3 +211,56 @@ save, its Warrior/equipment and partial vendor payment. Save & Title followed by
 confirmed Quit closed normally; the completed verbose log contained no script,
 resource-in-use or ObjectDB leak diagnostics. Ten repeated cache-backed
 real-process quit regressions also exited cleanly. This retest used Dummy audio.
+
+
+## Natural combat and growth continuation
+
+A subsequent run on `04dd21f8a3a3174fa1f1c3ac4f986085b57a9ff9` continued
+the same normally saved Day 4 campaign through the ordinary native UI. It used
+no injected cards, modified saves, fixture callbacks, or Unity execution.
+
+- Mining, resource sales and earned Beginning packs provided two Chickens, Soil
+  and eventually a Slime. A paused drag of the equipped Warrior onto a Chicken
+  formed a combat rectangle. Resuming Normal pace completed the fight, removed
+  that Chicken and returned the equipped Warrior at 18/20 health.
+- A subsequent naturally drawn Slime approached the Warrior autonomously. With
+  no further combat input it was defeated, leaving one Coin; the Warrior stayed
+  at 18 health. The loot Coin was picked up and paid toward another pack.
+- Chicken production, the full 120-second Soil/Berry growth, the Revelations
+  vendor unlock, and harvesting the resulting Berry Bush ran naturally.
+  An ordinary Save reported success after the combat and growth progress.
+- The Day 5 cycle healed the equipped Warrior to 20 health and produced the
+  configured wandering Villager encounter. Starting Day 6 checkpointed the new
+  character and raised the normal food requirement from 2 to 4.
+- A new naturally initiated, manually paused Day 6 fight survived Save & Title
+  and Continue with its participants and equipment intact. A second Villager
+  joined the restored fight. Dragging the attacking Warrior out reported Fled
+  combat; dragging it back rejoined the surviving fight in the later row slot.
+  Resuming completed the fight with both characters returned to ordinary stacks
+  (Villager 15 health, Warrior 19), equipment retained and one Egg loot drop.
+- Earned materials then built a House with the equipped Warrior. House plus
+  the two characters produced a Baby; food demand rose to 6. Feeding at the
+  natural Day 6 boundary preserved the family and healed the Warrior to 20.
+  House/Baby growth completed in Day 7, producing a third adult and unlocking
+  Farmstead. No timer or save edits were used.
+
+Before/after screenshots and the native run log remain private. These observations
+cover basic melee initiation, autonomous hostile approach, completion, loot use
+and continued ordinary play. They do not establish animation frame timing,
+projectile combat, combat merging, physical-controller behavior or listening.
+The cloud run still uses Dummy audio.
+
+The travel source was rechecked against the locked TravelRecipe and GameDirector:
+copy travelers before consumption, checkpoint the source, cyclic destination,
+independent traveler positions, and fade/pause boundaries. Focused Godot checks
+passed 35 travel assertions, 80 source-data global-checkpoint assertions and
+175 synthetic global-checkpoint assertions. Combat timeline/order/death-wait
+checks passed 59, 45 and 44 assertions respectively. These tests create their
+fixtures explicitly and are not evidence of natural progression to Island.
+An additional licensed-catalog regression passed 45 assertions across acolyte
+loot, the altar ritual, Demon Lord loot, portal crafting with three transformed
+Villagers, timed travel, JSON restore and return. Its prerequisites are spawned
+fixtures and its enemies use direct death calls: this establishes model chain
+connectivity, not natural progression or combat victory.
+The natural Grand Portal route requires 5 Stone, 5 Brick, an Abyssal Core and
+3 Villagers; the Core is Demon Lord loot. That late-game route remains open.
