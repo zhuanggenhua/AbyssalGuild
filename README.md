@@ -37,3 +37,5 @@ godot --path .
 运行时和视觉验收进度见 [`docs/migration-progress.md`](docs/migration-progress.md)，已确认的剩余差异见 [`docs/remaining-parity.md`](docs/remaining-parity.md)。公开仓库的 GitHub Actions 仅验证不含授权素材的代码与合成测试。
 
 完整私有资源可用时，运行 `bash tools/test_imported.sh`。它复制到临时工程重新导入，在隔离用户目录验证真实 PNG/WAV/FBX 和界面绑定；任何必需分支跳过都会失败，不替代画面、鼠标或听感验收。详见 [私有资源验证](docs/private-validation.md)。
+
+Linux 私有导出使用 [隔离导出流程](docs/linux-export.md)：验证官方 4.6.3 模板，在临时副本重新导入，审计导出 PCK 并检查独立程序启动。导出包包含授权素材，不上传公开仓库；桌面操作、正常退出和听感仍需另行验收。

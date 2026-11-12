@@ -329,3 +329,47 @@ admission using production shutdown, verifies voice/cache cleanup, and honors
 production's monotonic drain deadline before freeing its board. The strict
 leak watchdog and production audio behavior are unchanged. Ten focused runs
 and the final complete regressions passed; normal native Quit logs were clean.
+
+
+## Controlled projectile and overlap-merge acceptance
+
+A separate native Linux 4.6.3 run on the unchanged `51277c7` gameplay code
+used two private, paused prerequisite fixtures. Production card factories,
+equipment APIs and normal saves created their starting positions. No combat
+was prestarted, no character stats were changed, and no quest completion or
+natural campaign advancement was fabricated. The four preserved natural saves,
+including Day 8, remained byte-identical.
+
+Ordinary pointer drags started a Bow/Chainmail Ranger versus a Cow and a
+Staff/Chainmail Mage versus another Cow. At Normal/1x, rapid original-window
+captures show the source Arrow and Magic sprites moving from their actors to
+the targets, followed by damage popups, hurt flash/punch and health reduction.
+Repeated attack/return cycles also ran. Normal Save preserved both tasks,
+all eight card/equipment identities and the resulting health. This is a
+controlled rendered ranged-combat check, not natural equipment acquisition,
+full ranged-battle balance, listening acceptance or Unity pixel equivalence.
+
+In the second fixture, pointer drags started two adjacent independent fights
+while paused. Dragging a third Chainmail-equipped Villager into the left fight
+expanded its rectangle into the right one. The visible result was one rectangle
+with three players and two Cows. Actual before/after saves verified that tasks
+1 and 2 were replaced by task 3, with player order `[1, 9, 5]`, opponent order
+`[13, 15]`, unchanged health/equipment and no duplicated participant. Normal
+combat then defeated both Cows. The rectangle disappeared, three equipped
+Villagers returned as ordinary stacks at 14/13/12 health, and two Raw Meat loot
+cards remained. No direct damage or death calls drove that resolution.
+
+A read-only audit passed 107 state/preservation checks, and all five evidence
+saves passed the native campaign validator. Both native sessions used ordinary
+Save & Title and confirmed Quit; complete logs contained only the known VSync
+warning, without script/resource-leak diagnostics. The run used llvmpipe and
+Dummy audio. Fixtures, screenshots, raw saves, logs and imported media remain
+private. Physics ordering, exact source animation/noise, other platforms and
+natural endgame progression are not established by these controlled scenarios.
+
+## Standalone Linux release acceptance
+
+The [private export workflow](linux-export.md) separately builds an official
+4.6.3 Linux x86_64 release executable plus PCK. Its native acceptance results
+are recorded there. It does not publish a game package or replace the licensed
+source recovery requirement for developers.

@@ -300,3 +300,21 @@ Island board, with native-window and contrast/input regression checks. See
 [Island UI acceptance](gui-smoke.md#island-travel-and-status-legibility-follow-up).
 The ordinary campaign reached Day 8 independently. The controlled portal setup
 is explicitly not natural late-game progression or Demon Lord combat victory.
+
+
+## Controlled combat and Linux export follow-up
+
+Native pointer-driven controlled fixtures now verify both Arrow/Magic flight
+and impacts, two independent combat rectangles merging through reinforcement,
+and normal merged-combat resolution with equipment/survivors/loot preserved.
+The natural Day 8 save was not modified. See the
+[controlled combat acceptance](gui-smoke.md#controlled-projectile-and-overlap-merge-acceptance)
+for exact scope and save-audit results.
+
+A reproducible private Linux x86_64 release export now exists, including a
+runtime-only PCK audit and an editor-hosted exported-resource/game-flow probe.
+See [Linux export](linux-export.md) for the separate actual-release native
+results. This narrows Linux export acceptance only: natural endgame progression,
+Windows, physical controller/touch, listening, original fonts and exact
+cross-engine output remain unverified. Public redistribution of licensed
+content is still not authorized by the available provenance.
