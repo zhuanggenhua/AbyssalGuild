@@ -311,9 +311,9 @@ not a claim of original source styling. The layout regression checks at least
 click and wheel pass-through.
 
 These are controlled late-game UI observations, not natural portal crafting or
-Demon Lord victory. The separate natural campaign remains at Day 8. Native
-audio-device listening, projectile/merge acceptance, Windows, controller and
-export/install acceptance remain open. Licensed inputs, fixture builder, raw
+Demon Lord victory. At this checkpoint the separate natural campaign was at
+Day 8; subsequent acceptance is recorded below. Native audio-device listening,
+Windows and controller acceptance remain open. Licensed inputs, fixture builder, raw
 screenshots, saves and logs stay private.
 
 The combined correction passed 104 Python tests, 67 clean source-free Godot
@@ -373,3 +373,54 @@ The [private export workflow](linux-export.md) separately builds an official
 4.6.3 Linux x86_64 release executable plus PCK. Its native acceptance results
 are recorded there. It does not publish a game package or replace the licensed
 source recovery requirement for developers.
+
+## Natural food, production and Blacksmith continuation
+
+On unchanged `8dd6e43637f1b91138c4e04db2f9a97ab368c540` gameplay code, the
+ordinary Day 8 save was copied byte-for-byte to isolated user data and continued
+through native pointer/keyboard play at Normal/1x. The original remains
+unchanged. No cards, quest completions, damage, time or random outcomes were
+injected, edited or preselected.
+
+- **Day 8 food recovery:** plant the last Berry, harvest naturally purchased
+  resource cards, construct a Logging Camp and refine a Plank. Selling the idle
+  House, Plank and surplus Wood funded Farmstead. Its actual Berry, Chicken,
+  Grass and Tree draws, together with two harvested Berry Bushes, supported
+  normal feeding. All four adults survived and the injured Villager healed.
+- **Day 9 production:** renew three Soil plantings, re-equip the existing Club,
+  craft Timber and a Yard, hold ten Wood, harvest Clay and build a second
+  Logging Camp after its quest became active. The 22nd completed quest unlocked
+  Hearty Meals. The day-end save contained exactly eight nutrition; feeding,
+  excess-card sales and the Day 10 checkpoint completed normally.
+- **Day 10 cooking:** the first Hearty Meals pack actually yielded Potato,
+  Fruit Salad recipe and Raw Meat, with no immediately edible food. Continued
+  planting/harvesting supported the village. Ordinary Rock mining provided
+  Flint; Wood became Timber, then Wooden Stick, then Bonfire. Two Eggs became
+  an Omelette. A bounded two Revelations packs supplied another Rock, and its
+  mined Stone enabled a Stone Quarry. These raised completed quests to 25.
+  Feeding consumed eight of 19 nutrition and retained the partially eaten
+  Omelette as the same card with one nutrition. Normal sales cleared the limit.
+- **Day 11 milestone:** cook the retained Raw Meat into Steak, reaching 26
+  completed quests and visibly unlocking Blacksmith. The final paused save has
+  31 Coins, 18 nutrition for eight required, the original four adults at full
+  health, their original Club, and three active Berry plantings. Normal Save &
+  Title, confirmed Quit, cold launch and Continue restored that campaign.
+
+Nine ordinary checkpoints passed the native campaign validator and lossless
+in-memory capture. A separate read-only audit passed 63 checks, including the
+original save hash, adult/equipment identities, feeding nutrition, quest
+milestones and cold restoration. Gameplay card fields and elapsed time were
+unchanged by cold restore; settling position differences were below one
+millionth of a world unit. The documented [post-process load reset](world-post-process.md)
+intentionally restores color even when the native checkpoint retains pause.
+Its 22 model and 23 board checks also passed; no runtime correction was needed.
+
+This is natural progress through Blacksmith unlock, **not natural endgame
+completion**. No Acolyte/Chalice acquisition, Altar, Demon Lord victory, Grand
+Portal construction or natural Island arrival occurred. The probabilistic
+Acolyte draw and further iron/brick/plank construction and combat preparation
+remain. The separate controlled Island tests above do not close that gap.
+Both native processes exited normally; logs contained only the known VSync
+warning. This Linux llvmpipe/Dummy-audio run does not establish listening or
+other-platform acceptance. Raw screenshots, saves, audits and licensed media
+remain private.

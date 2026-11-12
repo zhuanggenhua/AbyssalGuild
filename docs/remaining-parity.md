@@ -288,8 +288,9 @@ Slime encounter, loot payment, full Berry growth and the Day 5 Villager encounte
 It also restored an active fight, exercised reinforcement/flee/rejoin, and grew
 a Baby into a third adult in Day 7, unlocking Farmstead.
 See [native GUI continuation](gui-smoke.md#natural-combat-and-growth-continuation).
-This narrows the basic combat acceptance gap; projectile/merge behavior, natural
-late-game travel, audio listening and platform/export acceptance remain open.
+This narrows the basic combat acceptance gap. Later projectile/merge and Linux
+export results are recorded below; natural late-game travel, audio listening
+and other-platform acceptance remain open.
 
 
 A separate controlled native UI run now covers five actual portal trips between
@@ -318,3 +319,21 @@ results. This narrows Linux export acceptance only: natural endgame progression,
 Windows, physical controller/touch, listening, original fonts and exact
 cross-engine output remain unverified. Public redistribution of licensed
 content is still not authorized by the available provenance.
+
+## Natural production through Blacksmith
+
+The preserved Day 8 campaign has now been continued normally through Day 11,
+with all four adults at full health and 18 nutrition for eight required.
+Ordinary food recovery, three Soil plantings, Timber/Plank production, Yard,
+Logging Camp, Bonfire, Omelette, Stone Quarry and Steak raised completed quests
+from 18 to 26 and unlocked Blacksmith. Three successive day-end feedings,
+surplus-card sales, partial-food retention and a cold save restore were observed.
+Nine checkpoints passed native restore/capture validation and 63 independent
+read-only state checks passed. See the
+[natural production acceptance](gui-smoke.md#natural-food-production-and-blacksmith-continuation).
+
+No cards or prerequisites were injected into this campaign, and its original
+Day 8 file remains unchanged. This reduces the natural economy/progression gap,
+but does not establish Acolyte acquisition, the Altar/Demon Lord/Core chain,
+natural portal construction or natural Island arrival. Controlled travel and
+combat fixtures remain explicitly separate from natural campaign completion.
