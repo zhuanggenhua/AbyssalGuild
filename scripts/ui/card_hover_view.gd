@@ -33,6 +33,22 @@ func _init() -> void:
 	resized.connect(_layout_content)
 	set_descriptor({})
 
+func configure_source_text_color(record: Dictionary) -> bool:
+	# Both native text nodes represent the one source InfoPanel.infoText TMP.
+	# Apply its vertex color, not container modulation (which would tint the
+	# independent panel background/action). Missing records restore native theme.
+	header.remove_theme_color_override("font_color")
+	body.remove_theme_color_override("default_color")
+	var value = record.get("m_fontColor")
+	if not value is Dictionary: return false
+	for channel in ["r", "g", "b", "a"]:
+		if not value.get(channel) is int and not value.get(channel) is float: return false
+		if not is_finite(float(value[channel])): return false
+	var color := Color(float(value.r), float(value.g), float(value.b), float(value.a))
+	header.add_theme_color_override("font_color", color)
+	body.add_theme_color_override("default_color", color)
+	return true
+
 func set_descriptor(value: Dictionary) -> void:
 	if descriptor == value and not value.is_empty(): return # Preserve scroll on unchanged frames.
 	descriptor = value.duplicate(true)
