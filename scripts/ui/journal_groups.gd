@@ -1,6 +1,6 @@
 extends RefCounted
 ## Pure source-shaped journal descriptors. Expansion is presentation-only.
-static func describe(catalog, session, tab: String, expansion: Dictionary, quest_order: Array = []) -> Array:
+static func describe(catalog, session, tab: String, expansion: Dictionary, quest_order: Array = [], quest_captions: Dictionary = {}) -> Array:
 	var groups: Array = []
 	if tab == "recipes":
 		var recipes: Array = catalog.data.get("recipes", []).duplicate()
@@ -46,12 +46,13 @@ static func describe(catalog, session, tab: String, expansion: Dictionary, quest
 				var instance: Dictionary = instances[id]
 				if not members.has(id): continue
 				var fields: Dictionary = tracker.definitions.get(id, {})
-				var complete: bool = tracker.completed_ids.has(id)
+				# Without a live view, describe the initial PopulateView snapshot.
+				# The Board supplies captions latched at creation/completion events.
+				var complete: bool = quest_complete(fields, instance)
 				var title := "• " + str(fields.get("title", id))
 				title += " √" if complete else ""
-				var body := str(fields.get("description", ""))
-				if not complete: body += "\n\nProgress: %d / %d" % [int(instance.current_amount), int(fields.get("targetAmount", 1))]
-				rows.append(_row(session, id, title, {"header": str(fields.get("title", id)), "body": body}))
+				title = str(quest_captions.get(id, title))
+				rows.append(_row(session, id, title, quest_info(fields, instance)))
 			if not rows.is_empty():
 				groups.append({"key": "quests:%s:%d" % [session.scene_name, index], "title": str(group.get("GroupName", "Quests")), "rows": rows})
 	var result: Array = []
@@ -61,6 +62,15 @@ static func describe(catalog, session, tab: String, expansion: Dictionary, quest
 		if expanded: result.append_array(group.rows)
 	if result.is_empty(): result.append({"id": "", "group": "", "text": "Discover recipes by combining cards or opening packs." if tab == "recipes" else "No quests yet.", "unread": false})
 	return result
+
+static func quest_complete(fields: Dictionary, instance: Dictionary) -> bool:
+	return int(instance.get("current_amount", 0)) >= int(fields.get("targetAmount", 1))
+
+static func quest_info(fields: Dictionary, instance: Dictionary) -> Dictionary:
+	var body: String = str(fields.get("description", ""))
+	if not quest_complete(fields, instance):
+		body += "\n\nProgress: %d / %d" % [int(instance.get("current_amount", 0)), int(fields.get("targetAmount", 1))]
+	return {"header":str(fields.get("title", instance.get("id", ""))), "body":body}
 
 static func _row(session, id: String, text: String, info: Dictionary = {}) -> Dictionary:
 	return {"id": id, "group": "", "text": text, "unread": session.collection.is_unread(id), "info": info}

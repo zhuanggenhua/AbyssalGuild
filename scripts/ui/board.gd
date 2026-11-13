@@ -89,6 +89,7 @@ var ledger_visible_groups: Dictionary = {}
 var ledger_session_id: int = 0
 var ledger_scene_name: String = ""
 var ledger_quest_order: Array = []
+var quest_journal = preload("res://scripts/ui/quest_journal_state.gd").new()
 var collection_refresh_pending: bool = false
 var active_slot: int = 0
 var selected_slot: int = 0
@@ -708,6 +709,7 @@ func _enter_game() -> void:
 	trade_zones.clear()
 	trade_activated.clear()
 	ledger_key = ""
+	ledger_session_id = 0 # Entering a source scene creates a fresh QuestsView.
 	if not session.collection.changed.is_connected(_collection_changed):
 		session.collection.changed.connect(_collection_changed)
 	slots.configure(session.campaign, slot_root)
@@ -1395,6 +1397,8 @@ func _refresh() -> void:
 	_sync_source_info()
 
 func _refresh_ledger() -> void:
+	if not quest_journal.changed.is_connected(_on_quest_journal_changed):
+		quest_journal.changed.connect(_on_quest_journal_changed)
 	if not ledger.meta_clicked.is_connected(_on_ledger_group_clicked):
 		ledger.meta_clicked.connect(_on_ledger_group_clicked)
 	if ledger_session_id != session.get_instance_id() or ledger_scene_name != session.scene_name:
@@ -1403,15 +1407,25 @@ func _refresh_ledger() -> void:
 		ledger_expansion.clear()
 		ledger_quest_order.clear()
 		ledger_key = ""
-	ledger_quest_order = preload("res://scripts/ui/journal_groups.gd").reconcile_quest_order(session.quest_tracker, ledger_quest_order)
-	var rows: Array = preload("res://scripts/ui/journal_groups.gd").describe(catalog, session, active_tab, ledger_expansion, ledger_quest_order)
-	var signature: String = active_tab + str(rows)
+		quest_journal.bind(session.quest_tracker)
+		info_requests.submit("journal", 0, {})
+	ledger_quest_order = preload("res://scripts/ui/journal_groups.gd").reconcile_quest_order(session.quest_tracker, quest_journal.order)
+	var rows: Array = preload("res://scripts/ui/journal_groups.gd").describe(catalog, session, active_tab, ledger_expansion, ledger_quest_order, quest_journal.captions())
+	# Changing progress must not recreate a source button or renew a hover request.
+	# Keep compatibility descriptors current, but exclude them from display identity.
+	ledger_info.clear()
+	var display_rows: Array = []
+	for row in rows:
+		if not row.id.is_empty(): ledger_info[row.id] = row.get("info", {})
+		var display: Dictionary = row.duplicate()
+		if active_tab == "quests": display.erase("info")
+		display_rows.append(display)
+	var signature: String = active_tab + str(display_rows)
 	if signature == ledger_key: return
 	ledger_key = signature
 	var scroll: float = ledger.get_v_scroll_bar().value
 	ledger.clear()
 	ledger_visible_ids.clear()
-	ledger_info.clear()
 	ledger_visible_groups.clear()
 	for row in rows:
 		if not row.group.is_empty():
@@ -1435,6 +1449,11 @@ func _refresh_ledger() -> void:
 		if not row.id.is_empty() or not row.group.is_empty(): ledger.pop()
 	ledger.get_v_scroll_bar().value = scroll
 
+func _on_quest_journal_changed() -> void:
+	# Source activation/completion updates its buttons synchronously. This path
+	# only updates journal presentation, never geometry, transactions, or saves.
+	if running: _refresh_ledger()
+
 func _on_ledger_group_clicked(meta: Variant) -> void:
 	if not meta is Dictionary or meta.size() != 1 or not meta.get("journal_group") is String: return
 	if not ledger.is_visible_in_tree() or not ledger_visible_groups.has(meta.journal_group) or _ui_pause_active() or _navigation_modal_active(): return
@@ -1445,7 +1464,9 @@ func _on_ledger_group_clicked(meta: Variant) -> void:
 
 func _on_ledger_hover(meta: Variant) -> void:
 	if not meta is String or not ledger.is_visible_in_tree() or not ledger_visible_ids.has(meta): return
-	info_requests.submit("journal", 0, ledger_info.get(meta, {}))
+	# MenuView queries GetItemInfo at pointer entry, not at the previous refresh.
+	var info: Dictionary = quest_journal.info(meta) if active_tab == "quests" else ledger_info.get(meta, {})
+	info_requests.submit("journal", 0, info)
 	session.collection.mark_seen(meta)
 
 func _collection_changed() -> void:
@@ -1679,6 +1700,9 @@ func _confirm_game_over_return() -> void:
 
 func _show_title() -> void:
 	if running: options_panel.reset_source_lifecycle()
+	quest_journal.clear()
+	ledger_session_id = 0
+	info_requests.submit("journal", 0, {})
 	world_post_process.cancel()
 	journal_slide.reset(false)
 	_clear_card_feedback()
@@ -2634,6 +2658,7 @@ func _commit_travel(owner, candidate) -> void:
 	_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	quest_journal.clear()
 	world_post_process.cancel()
 	scene_transition.cancel()
 	session.travel_pending = false

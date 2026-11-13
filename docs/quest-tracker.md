@@ -1,6 +1,6 @@
 # Quest tracker domain port
 
-Scope: independent GDScript implementation of Quest, QuestInstance and QuestManager behavior. This is a tested domain component integrated with the existing session core, not a claim that the whole game migration is finished. No Unity launch, original code publication, commit or push was performed by this component's author.
+Scope: independent GDScript implementation of Quest, QuestInstance and QuestManager behavior. This is a tested domain component integrated with the existing session core, not a claim that the whole game migration is finished. Original Unity source and assets are not distributed here.
 
 ## Source parity
 
@@ -27,9 +27,9 @@ There are **no explicit card, currency, XP or item rewards** in these source que
 
 ## Session integration (implemented for current core)
 
-GameSession.configure installs a Main-scene tracker and connects event_occurred once to its event handler, before UI listeners. start_new_game resets cards, discovery, time, payments and tracker, activates the 63 Main definitions according to source roots, then creates the starter pack. completed_quests is now a getter derived from quest_tracker.completed_count(); there is no incrementable gameplay counter. Do not replay historical Obtain/Buy/Craft actions. A future full scene-save loader must call tracker.restore_state after restoring cards/discovered recipes, not also start_new_game.
+GameSession.configure installs the selected scene's tracker (Main by default) and connects event_occurred once to its event handler, before UI listeners. start_new_game resets cards, discovery, time, payments and tracker, activates the 63 Main definitions according to source roots, then creates the starter pack. completed_quests is a getter derived from quest_tracker.completed_count(); there is no incrementable gameplay counter. Do not replay historical Obtain/Buy/Craft actions. The implemented SaveCodec restores cards and discovered recipes before calling tracker.restore_state, without also calling start_new_game.
 
-The existing session core now emits all applicable events below. Equip/exploration actions do not yet exist in this core: the tracker supports their events, but no fake successes or completion buttons were added. Required payloads:
+The session and its existing equipment/recipe adapters emit the applicable events below. No fake successes or completion buttons are added by the tracker. Required payloads:
 
 | Event | Payload | Source-equivalent emission point |
 |---|---|---|
@@ -66,6 +66,74 @@ These are synchronous domain notifications; original Unity animations/coroutine 
 
 save_state returns CompletedQuests (stable ID array), ActiveQuests (QuestId / CurrentAmount), QuestProgress percentage. restore_state reconstructs completed instances at targetAmount; preserves unknown completed IDs in the completion count (source compatibility), skips unknown active definitions, emits activation for restored active quests, and performs no completion/replay or root activation. Valid source saves have unique active IDs.
 
+### Restored Active quests and journal presentation
+
+The source `QuestInstance.IsComplete()` compares `CurrentAmount >= TargetAmount`;
+it does not test `Status` or membership in the manager's completed-ID set.
+`QuestsView.CreateQuestButton` uses that predicate for its completion suffix, and
+`GetItemInfo` uses it to omit the progress line. `QuestManager.RestoreQuests`
+explicitly restores an active record as Active with its saved amount and sends
+the activation notification, without checking completion or unlocking successors.
+Thus a valid restored Active record at or above its target already displays the
+suffix and no progress line, while the manager still counts it as active.
+
+`journal_groups.gd` now maps that numeric display predicate. It previously used
+`completed_ids`, which incorrectly showed these restored rows as incomplete.
+This is a presentation correction only: it does not change tracker status,
+completion counts, vendor gates, save contents, successor activation, event
+emission, or seen/unseen state. It does not manufacture a completion
+event during loading or refreshing.
+
+The focused journal test covers below/equal/above-target amounts, an already
+completed record, repeat refresh, unchanged save state and event counts, no
+successor unlock, and a real-catalog full-session SaveCodec restore into the
+native ledger. Running the initial restored-state fixtures against the preceding UI predicate fails
+six assertions: two synthetic suffix/progress pairs and the native pair.
+
+### Button lifetime and hover timing
+
+The numeric predicate alone is insufficient. Unity evaluates the initial title
+suffix when creating a button, later only appends a suffix on the completion
+event, and queries details on hover entry. A restored Active Food/Have quest can
+subsequently fall below its target: its already-created button retains its suffix,
+but a new hover request includes the current progress. The existing hover request
+is a snapshot, not a live progress binding.
+
+`quest_journal_state.gd` maps that presentation lifetime independently of the
+tracker. It captures each instance's title at creation, subscribes to activation
+and completion, and updates only an existing matching instance on completion.
+Same-instance repeated activation and repeated completion cannot duplicate a row
+or suffix. Initial population follows `AllQuests`; subsequent activations insert
+in event order. Rebinding a new view reevaluates current numeric state and
+disconnects the old tracker; title/scene teardown also disconnects it. No journal
+presentation state is serialized into a game save.
+
+Board activation/completion notifications update journal text synchronously,
+without reentering geometry or gameplay transactions. Ordinary refresh uses the
+stored captions and excludes live detail text from its display identity, so a
+progress change does not recreate the displayed text. Tab hiding/showing retains
+the quest view, matching `MenuView.ToggleView` changing CanvasGroup visibility
+rather than destroying the GameObject. A real scene/view reconstruction resets it.
+
+On hover entry, Board asks for current quest information, even if no ledger
+refresh occurred since the last progress change. `InfoRequestQueue` retains the
+request's copied descriptor until exit or another explicit request. Refreshing or
+completing a quest does not renew the request or silently alter its priority.
+
+New checks cover real tracker Food/Have decreases, creation versus completion,
+identity isolation, repeated events, event insertion order, old-tracker cleanup,
+rebuild, and native ledger/hover signal integration. The pure lifecycle test has
+58 checks; the real-catalog journal test has 66. Replacing the final Board and
+descriptor adapter with the first, numeric-only checkpoint fails five native
+assertions covering retained captions, progress-only refresh, fresh hover reads,
+tab lifetime, and immediate completion text.
+
+These are deterministic domain and injected native-signal tests, not a claim that
+Unity and Godot dispatch physical-pointer events at identical renderer-frame
+boundaries. Physical hit testing, hover events caused by live text relayout, and
+rendered timing remain unverified without a working graphical session. No Unity
+editor launch or screenshot-derived visual adjustment is used for this change.
+
 ## Validation
 
 Run from repository root:
@@ -83,4 +151,7 @@ Core: 76/76 assertions. Only the pre-existing vendor-isolation fixture changed: 
 
 Integration: 70/70 assertions. The separate actual-data gameplay test starts a new Main game, opens all four Starter slots, stacks Villager on Berry Bush to discover/harvest berries, mines Rock for Stone, sells the harvested Stone/Berry and starter Wood to earn the actual three-coin price, and buys Beginning. The five original introduction quests complete through session actions, without injected coins or fabricated completions. It also checks gating, event order, no duplicate sale/Buy/Obtain, snapshot restoration, new-game reset, partial vendor payment, food Kill, day and time controls, and recipe-card discovery. Focused synthetic fixtures are explicitly marked, including a zero-gate vendor transaction fixture.
 
-Remaining validation: full session persistence is not implemented here (only tracker save/restore); actual equip/exploration/combat systems and UI rendering remain separate migration work. This test result is not completion of the entire original game.
+Full-session persistence is implemented separately by [SaveCodec](save-format.md),
+including the restored-Active journal case above. The domain and headless native
+UI checks are not rendered/manual UI acceptance or proof of complete Unity/Godot
+equivalence. This test result is not completion of the entire original game.

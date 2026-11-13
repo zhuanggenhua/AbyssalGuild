@@ -3,6 +3,7 @@ const Groups = preload("res://scripts/ui/journal_groups.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const Board = preload("res://scripts/ui/board.gd")
+const Codec = preload("res://scripts/model/save_codec.gd")
 var checks := 0
 var failures := 0
 func check(ok: bool, label: String) -> void:
@@ -13,7 +14,46 @@ func check(ok: bool, label: String) -> void:
 func _init() -> void: call_deferred("run")
 func ids(rows: Array) -> Array:
 	return rows.filter(func(row): return not row.id.is_empty()).map(func(row): return row.id)
+func restored_progress_rows() -> void:
+	# Source RestoreQuests retains Active status at/above target without replay.
+	# QuestsView still uses the numeric QuestInstance.IsComplete predicate.
+	var catalog = Catalog.new()
+	var quests: Array = []
+	var references: Array = []
+	for id in ["below", "at", "above", "done", "child"]:
+		var fields := {"id":id, "title":id, "description":"Description " + id, "targetAmount":2, "type":3}
+		if id == "at": fields["questsToUnlock"] = [{"guid":"child"}]
+		if id == "child": fields["prerequisiteQuests"] = [{"guid":"at"}]
+		quests.append({"guid":id, "fields":fields})
+		references.append({"guid":id})
+	catalog.configure({"quests":quests})
+	var session = Session.new()
+	var tracker = session.quest_tracker
+	check(tracker.configure(catalog, "Main", [{"GroupName":"Fixture", "Quests":references}]), "Synthetic restore definitions valid")
+	var signals := {"activated":0, "completed":0}
+	tracker.quest_activated.connect(func(_quest): signals.activated += 1)
+	tracker.quest_completed.connect(func(_quest): signals.completed += 1)
+	tracker.restore_state({"CompletedQuests":["done"], "ActiveQuests":[{"QuestId":"below","CurrentAmount":1},{"QuestId":"at","CurrentAmount":2},{"QuestId":"above","CurrentAmount":5}]})
+	check(signals.activated == 3 and signals.completed == 0, "Restore activates rows without replaying completion")
+	var before: Dictionary = tracker.save_state().duplicate(true)
+	var rows := Groups.describe(catalog, session, "quests", {})
+	var mapped := {}
+	for row in rows:
+		if not row.id.is_empty(): mapped[row.id] = row
+	check(ids(rows) == ["above", "at", "below", "done"], "Numeric completion does not reorder restored rows")
+	for id in ["at", "above", "done"]:
+		check(mapped[id].text.ends_with(" √"), "Numeric completion suffix for " + id)
+		check(mapped[id].info.body == "Description " + id, "Numeric completion hides progress for " + id)
+	check(not mapped.below.text.ends_with(" √"), "Below-target Active row has no suffix")
+	check(mapped.below.info.body == "Description below\n\nProgress: 1 / 2", "Below-target progress remains visible")
+	check(Groups.describe(catalog, session, "quests", {}) == rows, "Repeated view refresh is stable")
+	check(tracker.save_state() == before, "Rendering does not mutate saved quest progress/status")
+	check(tracker.completed_count() == 1 and not tracker.completed_ids.has("at") and not tracker.completed_ids.has("above"), "Numeric UI completion does not alter completion count or vendor gates")
+	check(tracker.active_quests.all(func(q): return q.status == tracker.QuestStatus.ACTIVE), "Restored active instances remain Active")
+	check(not mapped.has("child") and signals.activated == 3 and signals.completed == 0, "View does not unlock successors or emit progression events")
+	check(session.collection.seen_items.is_empty(), "Displaying restored rows does not mark them seen")
 func run() -> void:
+	restored_progress_rows()
 	var catalog = Catalog.new()
 	catalog.configure({"cards": [{"guid": "output", "fields": {"displayName": "Output"}}], "enums": {"RecipeCategory": {"Early": 0, "Later": 1}}, "recipes": [
 		{"guid": "z", "fields": {"id": "z", "displayName": "Zulu", "category": 0, "resultingCard": {"guid": "output"}}},
@@ -67,7 +107,82 @@ func run() -> void:
 	if board.data_error != OK: board.queue_free(); quit(1); return
 	board.start_new()
 	board.set_process(false)
+	# A valid full-session save may contain an Active quest at its target.
+	# Restore must preserve that state while the native ledger uses IsComplete.
+	var snapshot := Codec.capture(board.session)
+	var restored_id: String = board.session.quest_tracker.active_quests[0].id
+	var target: int = int(board.session.quest_tracker.definitions[restored_id].targetAmount)
+	for saved in snapshot.session.quests.ActiveQuests:
+		if saved.QuestId == restored_id: saved.CurrentAmount = target
+	# A synthetic saved Food record using an actual source definition lets the
+	# ordinary stats handler demonstrate a genuine progress decrease after load.
+	var food_id := ""
+	for id in board.session.quest_tracker.definitions:
+		if int(board.session.quest_tracker.definitions[id].type) == board.session.quest_tracker.QuestType.FOOD:
+			food_id = id
+			break
+	check(not food_id.is_empty(), "Actual source Food quest exists for decrease fixture")
+	var food_target: int = int(board.session.quest_tracker.definitions[food_id].targetAmount)
+	var food_saved := false
+	for saved in snapshot.session.quests.ActiveQuests:
+		if saved.QuestId == food_id:
+			saved.CurrentAmount = food_target
+			food_saved = true
+	if not food_saved: snapshot.session.quests.ActiveQuests.append({"QuestId":food_id,"CurrentAmount":food_target})
+	var completed_before: int = board.session.quest_tracker.completed_count()
+	check(Codec.restore(board.session, snapshot).ok, "Actual catalog accepts Active-at-target save")
+	board.active_tab = "quests"
+	board._refresh_ledger()
+	var restored_title: String = board.session.quest_tracker.definitions[restored_id].title
+	check(board.ledger.get_parsed_text().contains(restored_title + " √"), "Native restored row shows numeric completion")
+	check(not board.ledger_info[restored_id].body.contains("Progress:"), "Native restored info hides completed progress")
+	check(board.session.quest_tracker.completed_count() == completed_before and not board.session.quest_tracker.completed_ids.has(restored_id), "Native refresh leaves completed membership unchanged")
+	var active_saved: Array = board.session.quest_tracker.save_state().ActiveQuests
+	check(active_saved.any(func(q): return q.QuestId == restored_id and q.CurrentAmount == target), "Native save round trip retains Active-at-target")
 	board.detail_panel.show()
+	var food_instance: Dictionary = {}
+	for item in board.session.quest_tracker.active_quests:
+		if item.id == food_id: food_instance = item
+	var food_title: String = board.session.quest_tracker.definitions[food_id].title
+	board.ledger.meta_hover_started.emit(food_id)
+	check(not board.info_requests.requests.journal.info.body.contains("Progress:"), "Hover samples restored numeric completion")
+	board._refresh_ledger() # Settle removal of the unread dot, as in TextButton.
+	var display_key: String = board.ledger_key
+	var request_serial: int = board.info_requests.serial
+	board.session.quest_tracker.sync_stats(board.session)
+	check(int(food_instance.current_amount) < food_target, "Real stats handler lowers restored Food amount")
+	var after_stats: Dictionary = board.session.quest_tracker.save_state().duplicate(true)
+	board._refresh_ledger()
+	check(board.ledger.get_parsed_text().contains(food_title + " √"), "Progress decrease retains existing native title suffix")
+	check(board.ledger_key == display_key, "Progress-only refresh does not recreate native row text")
+	check(board.info_requests.serial == request_serial and not board.info_requests.requests.journal.info.body.contains("Progress:"), "Refresh does not renew or mutate an already submitted hover snapshot")
+	check(board.session.quest_tracker.save_state() == after_stats, "Native presentation preserves post-stats quest/save state")
+	board.ledger.meta_hover_ended.emit(food_id)
+	check(not board.info_requests.requests.has("journal"), "Hover exit clears only its requester")
+	board.ledger.meta_hover_started.emit(food_id)
+	check(board.info_requests.requests.journal.info.body.contains("Progress:"), "Reentry queries current decreased progress")
+	# Deliberate numerical mutation without a refresh isolates hover query timing.
+	food_instance.current_amount = food_target
+	board.ledger.meta_hover_ended.emit(food_id)
+	board.ledger.meta_hover_started.emit(food_id)
+	check(not board.info_requests.requests.journal.info.body.contains("Progress:"), "Hover reads current progress without waiting for ledger refresh")
+	board.session.quest_tracker.sync_stats(board.session)
+	board.ledger.meta_hover_ended.emit(food_id)
+	board.active_tab = "recipes"
+	board._refresh_ledger()
+	board.active_tab = "quests"
+	board._refresh_ledger()
+	check(board.ledger.get_parsed_text().contains(food_title + " √"), "Tab hiding/showing is not a QuestsView rebuild")
+	# Recreate only the source presentation lifetime, not the game/session state.
+	var before_rebuild: Dictionary = board.session.quest_tracker.save_state().duplicate(true)
+	board.ledger_session_id = 0
+	board._refresh_ledger()
+	check(not board.ledger.get_parsed_text().contains(food_title + " √"), "Fresh view reevaluates current below-target amount")
+	check(board.session.quest_tracker.save_state() == before_rebuild, "View reconstruction does not complete or replay quests")
+	food_instance.current_amount = food_target
+	board.session.quest_tracker._check(food_instance, board.session)
+	check(board.ledger.get_parsed_text().contains(food_title + " √"), "Completion event updates native text immediately without a frame refresh")
+	check(board.session.quest_tracker.completed_ids.has(food_id), "Actual tracker completion still owns completed membership")
 	board.active_tab = "quests"
 	board._refresh_ledger()
 	var first: Dictionary = board.session.quest_tracker.active_quests[0]
