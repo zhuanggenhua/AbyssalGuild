@@ -36,6 +36,15 @@ screenshot uses the same Unity repository. The exact text/font configuration
 that produced it still needs tracing; language alone is not evidence of a
 different source version, and no invented localization is supplied.
 
+The subsequent same-repository entry-point trace found exact Chinese strings and
+an empty character equipment panel not hidden by equipment count in the Gameplay view
+chain outside the extracted template subtree. Its default HUD setup does not
+fully match the supplied image; vendor creation requires an explicit helper
+call. The screenshot's active scene and subsequent operations remain unverified.
+See [entry-point evidence](source-screenshot-state-audit.md).
+Do not treat the template's source lock or method inventory as coverage of every
+runtime chain in the Unity repository, or silently change the migration target.
+
 See [method audit status](source-method-audit-status.md) for the 824-member
 inventory's evidence limits and still-open branches. Source method names or passing
 related tests are not exhaustive method equivalence.

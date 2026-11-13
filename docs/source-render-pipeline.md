@@ -31,9 +31,8 @@ separately resolves screen-pass admission:
 - Recognized URP renderer-list schema: resolve the camera renderer override, or
   the pipeline's default renderer; locate an active custom feature whose exact
   material GUID **and subasset file ID** match the writer. A match establishes
-  routing only and is currently **unknown**, not enabled: the locked custom pass
-  overrides `RecordRenderGraph` but not compatibility-mode `Execute`. The profile
-  does not resolve the active URP global RenderGraph/Compatibility setting.
+  routing only and is **unknown** without the version-bounded execution rule below: the locked custom pass
+  overrides `RecordRenderGraph` but not compatibility-mode `Execute`. Older profiles do not resolve the active URP global execution mode.
 - The locked host PC/Standalone profile: no such feature, so the material still
   updates but no grayscale/vignette rectangle is displayed.
 - The template URP feature queues its pass regardless of the camera's standard
@@ -151,7 +150,7 @@ yet been built. A later pack-only check of the published renderer batch now
 verifies packaged execution; see the follow-up below. It is not a new standalone
 release executable validation.
 
-### RenderGraph admission correction
+### Initial RenderGraph admission correction (superseded for the proven version below)
 
 Static inspection of the locked `CustomPostProcessFeature.CustomPass` confirms
 that it implements `RecordRenderGraph` only, with no `Execute` override. Enqueueing
@@ -212,3 +211,51 @@ New/Save/Continue/production Quit and the rendering graph's hash/no-PC-pass chec
 All captured owned inputs matched that commit. The package and original media
 remain private. This proves that renderer batch's packaged resource route, not
 later audio changes, standalone release execution, GPU parity or listening.
+
+## Version-bounded RenderGraph execution follow-up
+
+The active global-settings reference is now resolved from GraphicsSettings by
+pipeline type, GUID and file ID. Only registered managed-reference entries in
+that asset's settings list are eligible. Global schema 10, references version 2,
+and exactly one RenderGraphSettings version 0 are required; other schemas remain
+unknown instead of running guessed editor migrations.
+
+Project inputs remain locked to the project's own source commit. Additional
+private inputs are ProjectVersion.txt and the active global-settings asset/meta.
+They establish Unity 6000.5.4f1, built-in URP/Core 17.5.0, and the selected settings.
+Separate implementation evidence is Unity-Technologies/Graphics commit
+`c930feab9f105738328d183bb3c32758d8da0ac3`, whose URP and Core package.json versions
+are 17.5.0. This is external engine implementation evidence, not a file from the
+project's commit and not a byte-for-byte assertion about the installed editor.
+
+At that engine revision RenderGraphSettings is obsolete since 6000.4; its
+compatibility accessor always returns false. RenderSingleCamera calls
+RecordAndExecuteRenderGraph directly, and the custom pass queue invokes each
+eligible pass's RecordRenderGraph. Thus an absent compatibility field here is
+not treated as a guessed boolean default. Even a stale serialized compatibility
+field cannot restore an engine execution path removed in this version.
+
+The new admission rule is limited to release Unity 6000.5.x plus built-in
+URP/Core 17.5.0 and the validated active settings chain. A single matching custom
+feature can now be admitted under this rule. The selected PC renderer still has
+no such feature, so its visible behavior remains unchanged. Older profiles or
+older/embedded/unknown packages remain unknown, including alleged compatibility
+mode: this change does not pretend to implement older pipeline versions. The
+Built-in branch is unchanged. Shader identity, GPU output and arbitrary feature
+ordering limitations above still apply. No engine source files are redistributed.
+
+Targeted coverage includes registered-vs-unregistered managed references, absent
+or mismatched version evidence, obsolete mode fields, old schemas, unknown
+compatibility inputs, a proven graph rule and the unchanged PC no-feature branch.
+
+The integrated frozen candidate passed 164 Python tests, 147 full-data Godot
+groups, 95 clean public groups and 78 strict private-import suites. Its 423 owned
+and 182 private runtime inputs matched before and after isolated verification.
+A subsequent normal pack-only export passed the unchanged strict probe with
+778 checks and a 557-file runtime allowlist after the temporary project was
+removed. An additional external probe loaded the new execution rule and audio
+methods directly from that PCK, checked frame-stable admission/loop construction,
+and confirmed Main/Island PC custom passes remain disabled. This package covers
+the combined audio plus execution-rule candidate, unlike the preceding
+`a77407f` package. It remains private and editor-hosted only, not a standalone
+release binary, GPU-equivalence or listening result.

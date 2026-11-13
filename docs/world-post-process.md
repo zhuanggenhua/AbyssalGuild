@@ -27,9 +27,10 @@ rendered. See [source renderer-pass admission](source-render-pipeline.md). The
 locked CardLoop host's default Standalone PC renderer has no template custom pass;
 its writer still receives events but its native screen rectangle now stays hidden.
 Built-in retains its supported admission branch. A matching template URP feature
-is now explicitly unknown: its source pass only overrides `RecordRenderGraph`,
-and the imported profile does not establish the active global RenderGraph versus
-Compatibility execution mode. Matching material references alone do not enable
+is explicitly unknown unless the version-bounded rule in the linked admission
+document establishes URP 17.5 RenderGraph-only execution: its source pass only
+overrides `RecordRenderGraph`. Old or unsupported profiles do not establish the
+required execution mode. Matching material references alone do not enable
 the native screen rectangle. This host-profile fact is not a claim about the user's
 reference screenshot or a reason to remove the template's documented effects.
 Missing profiles are explicitly unknown, not assumed Built-in rendering.

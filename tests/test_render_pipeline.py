@@ -62,3 +62,55 @@ class RenderPipelineTests(unittest.TestCase):
     def test_script_identity_and_guid_must_match_catalog(self):
         self.catalog['guid_index']={}
         with self.assertRaises(ValueError):build(self.root,self.lock,self.catalog)
+    def execution_fixture(self, editor='6000.5.4f1', mode=None):
+        self.put('ProjectSettings/ProjectVersion.txt', 'm_EditorVersion: '+editor+'\n')
+        self.put('Packages/packages-lock.json', json.dumps({'dependencies': {
+            'com.unity.render-pipelines.'+p: {'version':'17.5.0','source':'builtin'} for p in ['universal','core']}}))
+        self.doc('ProjectSettings/GraphicsSettings.asset','GraphicsSettings',30,{
+            'm_CustomRenderPipeline':{'fileID':11400000,'guid':'1'*32},
+            'm_RenderPipelineGlobalSettingsMap':{'UnityEngine.Rendering.Universal.UniversalRenderPipeline':{'fileID':11400000,'guid':'5'*32}}})
+        data={'m_Version':0}
+        if mode is not None:data['m_EnableRenderCompatibilityMode']=mode
+        self.global_fields={'m_AssetVersion':10,'m_Settings':{'m_SettingsList':{'m_List':[{'rid':123}]}},'references':{'version':2,'RefIds':[{'rid':123,'type':{'class':'RenderGraphSettings','ns':'UnityEngine.Rendering.Universal','asm':'Unity.RenderPipelines.Universal.Runtime'},'data':data}]}}
+        self.asset('5'*32,self.global_fields)
+    def test_current_graph_only_mode_and_active_reference(self):
+        self.execution_fixture();self.asset('6'*32,{'references':{}})
+        result=build(self.root,self.lock,self.catalog)['execution']
+        self.assertEqual(result['mode'],'render_graph');self.assertEqual(result['global_settings_guid'],'5'*32)
+    def test_obsolete_serialized_compatibility_does_not_override_removed_engine_mode(self):
+        self.execution_fixture(mode=1)
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'render_graph')
+    def test_older_editor_mode_is_not_inferred(self):
+        self.execution_fixture(editor='6000.3.0f1',mode=1)
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'unknown')
+    def test_unknown_global_setting_reference(self):
+        self.execution_fixture();del self.lock['files']['Assets/Arbitrary/'+'5'*32+'.asset']
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'unknown')
+    def test_unregistered_managed_reference_cannot_select_settings(self):
+        self.execution_fixture();self.global_fields['m_Settings']['m_SettingsList']['m_List']=[];self.asset('5'*32,self.global_fields)
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'unknown')
+    def test_embedded_package_and_missing_package_evidence_are_unknown(self):
+        self.execution_fixture();self.put('Packages/packages-lock.json',json.dumps({'dependencies':{'com.unity.render-pipelines.universal':{'version':'17.5.0','source':'embedded'}}}))
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'unknown')
+        del self.lock['files']['Packages/packages-lock.json']
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'unknown')
+
+    def test_old_global_schema_needs_unimplemented_migration(self):
+        self.execution_fixture();self.global_fields['m_AssetVersion']=9;self.asset('5'*32,self.global_fields)
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'unknown')
+
+    def test_active_global_guid_and_file_id_must_both_resolve(self):
+        self.execution_fixture()
+        for guid, file_id in [('7'*32,11400000),('5'*32,999),('5'*32,0)]:
+            with self.subTest(guid=guid,file_id=file_id):
+                self.doc('ProjectSettings/GraphicsSettings.asset','GraphicsSettings',30,{
+                    'm_CustomRenderPipeline':{'fileID':11400000,'guid':'1'*32},
+                    'm_RenderPipelineGlobalSettingsMap':{'UnityEngine.Rendering.Universal.UniversalRenderPipeline':{'fileID':file_id,'guid':guid}}})
+                self.assertEqual(build(self.root,self.lock,self.catalog)['execution']['mode'],'unknown')
+    def test_additional_unselected_global_cannot_change_execution(self):
+        self.execution_fixture()
+        before=build(self.root,self.lock,self.catalog)['execution']
+        other=copy.deepcopy(self.global_fields)
+        other['references']['RefIds'][0]['data']['m_EnableRenderCompatibilityMode']=1
+        self.asset('6'*32,other)
+        self.assertEqual(build(self.root,self.lock,self.catalog)['execution'],before)

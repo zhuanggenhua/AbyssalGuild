@@ -166,7 +166,11 @@ static func resolve_pass(pipeline: Dictionary, component: Dictionary) -> Diction
 		count += 1
 	if count > 1: return {"status": "unknown", "reason": "Multiple custom passes require ordered rendering, not one substituted pass."}
 	# The locked custom pass overrides RecordRenderGraph only, not Execute.
-	# This profile does not resolve URP global RenderGraph/Compatibility mode.
+	# Only the imported, version-bounded execution rule can admit this pass.
 	# Material routing alone cannot admit a visible pass.
-	if count == 1: return {"status": "unknown", "reason": "Matching URP custom feature is RenderGraph-only; global execution mode is not mapped."}
+	if count == 1:
+		var execution: Dictionary = pipeline.get("execution", {})
+		if execution.get("mode", "unknown") == "render_graph" and execution.get("rule", "") == "unity_6000_5_builtin_urp_17_5":
+			return {"status": "enabled", "reason": "Matching custom feature on verified URP 17.5 RenderGraph-only execution."}
+		return {"status": "unknown", "reason": "Matching URP custom feature is RenderGraph-only; execution mode/version is not supported."}
 	return {"status": "disabled", "reason": "Selected URP renderer has no active matching custom pass."}

@@ -20,6 +20,13 @@ func _init() -> void:
 	check(Effect.resolve_pass(profile,component).status == "unknown")
 	profile["render_graph_enabled"] = false
 	check(Effect.resolve_pass(profile,component).status == "unknown")
+	profile["execution"] = {"mode":"render_graph","rule":"unity_6000_5_builtin_urp_17_5"}
+	check(Effect.resolve_pass(profile,component).status == "enabled")
+	profile.execution.rule = "unverified"
+	check(Effect.resolve_pass(profile,component).status == "unknown")
+	profile.execution = {"mode":"compatibility"}
+	check(Effect.resolve_pass(profile,component).status == "unknown") # Older packages are not imported by this bounded rule.
+	profile.erase("execution")
 	profile.renderers.custom.features[0].active = false
 	check(Effect.resolve_pass(profile,component).status == "disabled")
 	profile.renderers.custom.features[0].active = true

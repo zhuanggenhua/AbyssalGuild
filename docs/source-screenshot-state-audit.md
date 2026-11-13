@@ -23,6 +23,43 @@ camera transform and equipment state still need direct comparison. Unknown
 settings are not evidence that they differ. Do not switch the migration baseline
 or explain the screenshot discrepancy by assuming another source version.
 
+## Same-repository entry-point evidence (2026-11-13)
+
+A bounded read-only trace of the same repository found an additional Gameplay
+runtime chain outside `Assets/StackCraft`. At
+`62b5cfb7ed48e499ac224f5e3e953c0ec1512d18`, the chain is
+`FoundationStackCraftParityTest.unity` → `FoundationTestSceneHarness` /
+`TabletopView` → `牌桌测试视图设置.asset` → `卡牌视图.prefab`.
+Scene/settings/prefab GUID references were checked against their metadata.
+The private evidence contains 27 actually retrieved files with verified Git blob
+hashes, not an assumption based on matching names.
+
+This Gameplay chain contains the exact Chinese quest/group/pack/character strings
+seen in the supplied image. Its character-status subtree also contains an enabled
+equipment-panel renderer without the original `EquipmentPanel` component.
+`TabletopCardView` enables that subtree for characters; `TabletopView` gates it by
+stack-top/combat pose, not equipment count. An unequipped character can therefore
+show an empty panel in this chain. The original-template hide rule below is not
+a repository-wide rule and cannot identify the screenshot's active scene.
+
+There is a concrete countercheck against declaring the screenshot identified:
+the parity test's default layout creates only Starter, explicitly omits automatic
+quest/turn HUD opening, and does not call its explicit vendor-creation helper.
+The ordinary foundation test opens the HUD but starts with a different card
+layout. The image's actual scene and subsequent operations remain unverified.
+
+The Gameplay board/header material colors match the selected template values,
+and its board ShaderGraph text is identical. This is not evidence for different
+color constants. The grass texture points to an Art copy in the same repository;
+its texture bytes were not compared. No renderer or camera parity follows merely
+from these matching inputs.
+
+These findings demonstrate that the extracted template subtree is not the full
+repository's runtime surface. They do not authorize replacing the basic-template
+target with the Gameplay project, changing the selected source snapshot, or
+mixing the two entry points' behavior. The following geometry/lifecycle analysis
+is explicitly scoped to the selected template's Main scene.
+
 ## Grass: present, but outside the initial view
 
 The actual native source-background node has one textured built-in plane:
@@ -67,8 +104,9 @@ Do not resize card meshes before matching the camera and world positions.
 `EquipmentPanel.Awake` initializes its slots and calls `UpdatePanelVisibility`.
 The latter enables its renderer/collider only when the animated equipment list
 is nonempty. Starter's Villager has no initial equipment. The native empty-panel
-hide follows this source condition. A visible panel in another screenshot is
-not evidence to invent always-visible empty slots.
+hide follows this source condition. The same-repository Gameplay path described
+above has a different, now-traced visibility rule. Neither rule should be applied
+to the supplied screenshot until its active entry point is verified.
 
 ## Color remains a separate audit
 

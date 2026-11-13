@@ -10,6 +10,9 @@ func run() -> void:
 	assert(assets.load_render_pipeline(source.provenance.source_commit) == OK)
 	var profile: Dictionary = assets.render_pipeline
 	assert(profile.target_platform == "Standalone")
+	assert(profile.execution.mode == "render_graph")
+	assert(profile.execution.rule == "unity_6000_5_builtin_urp_17_5")
+	assert(profile.execution.editor_version == "6000.5.4f1")
 	assert(int(profile.selected_quality) == int(profile.platform_defaults.Standalone))
 	var selected: String = str(profile.qualities[int(profile.selected_quality)].pipeline_guid)
 	assert(not selected.is_empty() and profile.pipelines.has(selected))

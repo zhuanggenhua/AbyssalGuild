@@ -14,6 +14,57 @@ from import_stackcraft import parse_unity, json_bytes
 from import_source_fonts import inside, blob_sha, meta_guid
 
 
+def execution_mode(source, inputs, graphics, by_guid):
+    """Narrow URP 17.5 rule: compatibility was removed, not defaulted off.
+
+    Missing settings/version evidence remains unknown. No old serialized bool
+    overrides the 17.5 engine execution rule. This does not admit other versions.
+    """
+    result = {'mode': 'unknown', 'reason': 'Active global settings/version evidence unavailable.'}
+    ref = graphics.get('m_RenderPipelineGlobalSettingsMap', {}).get(
+        'UnityEngine.Rendering.Universal.UniversalRenderPipeline', {})
+    guid = str(ref.get('guid', ''))
+    result['global_settings_guid'] = guid
+    docs = [d for d in by_guid.get(guid, []) if str(d['file_id']) == str(ref.get('fileID', '0'))]
+    if len(docs) != 1:
+        return result
+    f = docs[0]['fields']
+    if f.get('m_AssetVersion') != 10 or f.get('references', {}).get('version') != 2:
+        return result
+    refs = f.get('references', {}).get('RefIds', [])
+    active = f.get('m_Settings', {}).get('m_SettingsList', {}).get('m_List', [])
+    active_ids = {str(r.get('rid')) for r in active}
+    settings = [r for r in refs if str(r.get('rid')) in active_ids and r.get('type', {}) == {
+        'class': 'RenderGraphSettings', 'ns': 'UnityEngine.Rendering.Universal',
+        'asm': 'Unity.RenderPipelines.Universal.Runtime'}]
+    if len(settings) != 1:
+        return result
+    result['render_graph_settings_id'] = str(settings[0]['rid'])
+    result['serialized_settings'] = settings[0].get('data', {})
+    version_path = 'ProjectSettings/ProjectVersion.txt'
+    packages_path = 'Packages/packages-lock.json'
+    if version_path not in inputs or packages_path not in inputs:
+        return result
+    match = re.search(r'^m_EditorVersion: (\S+)$', (source/version_path).read_text(), re.M)
+    version = match.group(1) if match else ''
+    packages = json.loads((source/packages_path).read_text()).get('dependencies', {})
+    result['editor_version'] = version
+    result['urp_version'] = packages.get('com.unity.render-pipelines.universal', {}).get('version', '')
+    if not re.fullmatch(r'6000\.5\.\d+f\d+', version):
+        return result
+    for package in ('universal', 'core'):
+        dep = packages.get('com.unity.render-pipelines.' + package, {})
+        if dep.get('version') != '17.5.0' or dep.get('source') != 'builtin':
+            return result
+    if result['serialized_settings'].get('m_Version') != 0:
+        return result
+    result.update(mode='render_graph', rule='unity_6000_5_builtin_urp_17_5',
+                  engine_repository='Unity-Technologies/Graphics',
+                  engine_commit='c930feab9f105738328d183bb3c32758d8da0ac3',
+                  reason='URP 17.5 executes RenderGraph; compatibility settings are obsolete since 6000.4.')
+    return result
+
+
 def build(source, lock, catalog, target_platform="Standalone"):
     source = Path(source).resolve()
     commit = lock.get('source_commit', '')
@@ -92,6 +143,7 @@ def build(source, lock, catalog, target_platform="Standalone"):
             'inputs': inputs, 'graphics_pipeline_guid': root_guid, 'selected_quality': current, 'qualities': qualities,
             'target_platform': target_platform, 'platform_defaults': platform_defaults, 'editor_quality': quality.get('m_CurrentQuality'),
             'pipelines': pipelines, 'renderers': renderers, 'custom_feature_script_guid': custom_guid,
+            'execution': execution_mode(source, inputs, graphics, by_guid),
             'scope': 'Renderer-list/pass admission only; not URP lighting, SSAO or complete shader equivalence.'}
 
 if __name__ == '__main__':
