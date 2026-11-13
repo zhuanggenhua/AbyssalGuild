@@ -59,6 +59,12 @@ func _init() -> void:
 	var original: String = bytes(store.slot_path(1))
 	session.day = 5
 	check(store.save_slot(1).ok and store.create_slot().slot == 2, "test slots and backup created")
+	# Archived evidence may be much older than its restored copy. A new staged
+	# save deliberately refreshes last_saved, even when it reuses the same slot.
+	# Make that difference deterministic rather than relying on a clock-second race.
+	var aged_primary: Dictionary = JSON.parse_string(bytes(store.slot_path(1)))
+	aged_primary.last_saved = {"local": "2001-02-03T04:05:06", "utc_offset_minutes": 0}
+	write(store.slot_path(1), JSON.stringify(aged_primary, "", true, true))
 	write(store.slot_path(1) + ".tmp", "interrupted primary")
 	write(store.slot_path(1) + ".bak.tmp", "interrupted backup")
 	write(store.slot_path(3), "corrupt-only evidence")
@@ -102,7 +108,12 @@ func _init() -> void:
 	for invalid in ["../" + archive_id, "/" + archive_id, "slots-1-2/../" + archive_id, "slots-1-2\\outside", "slots-+1-2", "slot-1-2", "slots-1-2-3", "slots-1.2-3"]:
 		check(not store.restore_archive(invalid, 1).ok, "archive ID cannot escape or invent format: " + invalid)
 	var copy: Dictionary = store.restore_archive(archive_id, 1)
-	check(copy.ok and copy.slot == 1 and not copy.recovered and bytes(copy.path) == previous, "validated restore copies primary into first free slot")
+	var copied_snapshot: Dictionary = JSON.parse_string(bytes(copy.path))
+	var previous_snapshot: Dictionary = JSON.parse_string(previous)
+	check(copy.ok and copy.slot == 1 and not copy.recovered and Session.Campaign.SavedTime.valid(copied_snapshot.last_saved) and copied_snapshot.last_saved != previous_snapshot.last_saved, "validated restore creates first free slot with its own save timestamp")
+	copied_snapshot.erase("last_saved")
+	previous_snapshot.erase("last_saved")
+	check(copied_snapshot == previous_snapshot, "restore preserves every archived campaign field except new-save timestamp")
 	var restored_bytes: String = bytes(copy.path)
 	copy = store.restore_archive(archive_id, 1)
 	check(copy.ok and copy.slot == 2 and bytes(store.slot_path(1)) == restored_bytes, "repeated restore creates a separate copy without overwriting first")

@@ -2,6 +2,7 @@ extends RefCounted
 ## Optional private media bindings with generated-geometry fallback.
 var manifest: Dictionary = {}
 var root_path: String = "res://assets/imported/"
+var render_pipeline: Dictionary = {}
 var texture_cache: Dictionary = {}
 var model_cache: Dictionary = {}
 
@@ -24,6 +25,20 @@ func load_manifest(path: String = "res://assets/imported/manifest.json") -> Erro
 	root_path = path.get_base_dir() + "/"
 	texture_cache.clear()
 	model_cache.clear()
+	return OK
+
+func load_render_pipeline(expected_commit: String, path: String = "res://assets/imported/render_pipeline.json") -> Error:
+	render_pipeline = {}
+	if not FileAccess.file_exists(path) or not FileAccess.file_exists(path + ".sha256"): return ERR_FILE_NOT_FOUND
+	if FileAccess.get_sha256(path) != FileAccess.get_file_as_string(path + ".sha256").strip_edges(): return ERR_INVALID_DATA
+	var parsed = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not parsed is Dictionary or int(parsed.get("schema_version", 0)) != 1 or expected_commit.is_empty() or parsed.get("source_commit", "") != expected_commit:
+		return ERR_INVALID_DATA
+	for key in ["pipelines", "renderers", "inputs"]:
+		if not parsed.get(key) is Dictionary: return ERR_INVALID_DATA
+	if not parsed.get("qualities") is Array: return ERR_INVALID_DATA
+	if parsed.get("target_platform", "") != "Standalone" or OS.get_name() not in ["Linux", "Windows", "macOS"]: return ERR_UNAVAILABLE
+	render_pipeline = parsed
 	return OK
 
 func texture(guid: String) -> Texture2D:

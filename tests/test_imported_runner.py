@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_render_pipeline_imported": "Private source render pipeline: PASS",
     "test_pause_ending_actions": "Pause ending actions: 27/27 passed",
     "test_day_clock_boundary": "Day clock boundary: 44/44 passed",
     "test_day_clock_boundary_board": "Day clock boundary board: 34/34 passed",
@@ -173,6 +174,10 @@ class ImportedRunnerTests(unittest.TestCase):
                          "fonts": {"synthetic-font": {"ttf_guid": "synthetic-ttf", "font_path": "source.ttf", "metrics_path": "metrics.json", "license_path": "LICENSE.txt",
                                    "ttf_sha256": hashlib.sha256(blobs["source.ttf"]).hexdigest(), "metrics_sha256": hashlib.sha256(metrics).hexdigest(), "license_sha256": hashlib.sha256(blobs["LICENSE.txt"]).hexdigest()}}}
         (font_root / "manifest.json").write_bytes(canonical(font_manifest))
+        pipeline = {"schema_version": 1, "source_commit": "synthetic", "target_platform": "Standalone", "inputs": font_manifest["inputs"]}
+        pipeline_bytes = canonical(pipeline)
+        (self.root / "assets/imported/render_pipeline.json").write_bytes(pipeline_bytes)
+        (self.root / "assets/imported/render_pipeline.json.sha256").write_text(hashlib.sha256(pipeline_bytes).hexdigest() + "\n")
         self.save_manifest()
         groups = ("cards", "packs", "recipes", "quests", "encounters", "settings", "scenes", "referenced_prefabs")
         catalog = {"schema_version": 1, "provenance": {"source_commit": "synthetic"}, "counts": {}, "guid_index": {}}
@@ -365,6 +370,28 @@ class ImportedRunnerTests(unittest.TestCase):
         path.write_bytes(canonical(manifest))
         with self.assertRaisesRegex(runner.ValidationError, "source commit differs"):
             runner.private_inputs(self.root)
+
+
+    def test_pipeline_supplement_copied_and_hashed(self):
+        paths = runner.private_inputs(self.root)
+        self.assertIn("render_pipeline.json", paths)
+        self.assertIn("render_pipeline.json.sha256", paths)
+        destination = self.base / "pipeline-copy"
+        runner.copy_project(self.root, destination, paths)
+        self.assertEqual((self.root / "assets/imported/render_pipeline.json").read_bytes(),
+                         (destination / "assets/imported/render_pipeline.json").read_bytes())
+
+    def test_pipeline_tampering_and_wrong_revision_rejected(self):
+        path = self.root / "assets/imported/render_pipeline.json"
+        path.write_bytes(path.read_bytes() + b" ")
+        with self.assertRaisesRegex(runner.ValidationError, "Pipeline profile content"):
+            runner.private_inputs(self.root)
+        profile = json.loads(path.read_text()); profile["source_commit"] = "different"
+        path.write_bytes(canonical(profile))
+        path.with_suffix(".json.sha256").write_text(hashlib.sha256(path.read_bytes()).hexdigest())
+        with self.assertRaisesRegex(runner.ValidationError, "Pipeline supplement source commit"):
+            runner.private_inputs(self.root)
+
 
 
 if __name__ == "__main__":

@@ -61,7 +61,12 @@ At viewport sizes 1440x900 and 1233x771 it checks:
   after resetting the camera. Both recovery paths retain physics picking.
 - Neither recovery changes the synthetic card's model or view position.
 
-The focused suite passed **28/28** on Godot 4.6.3 headless. HUD controls are hidden
+The focused suite now includes four-corner board-plane intersections and
+initial/zoomed background exposure checks at both viewport sizes, plus buyer
+collider-edge and Sell-label projection before/after one wheel step. These checks
+prevent treating an out-of-view grass margin as a missing board texture or a
+newly visible trade header as a missing visibility condition. See the
+[screenshot state audit](source-screenshot-state-audit.md). HUD controls are hidden
 to isolate camera routing. Camera smoothing is advanced deterministically, and
 picking is checked with the production ray query after physics synchronization.
 This is not physical mouse, rendered/native-window, private imported Starter,

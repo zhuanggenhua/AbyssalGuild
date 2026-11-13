@@ -483,9 +483,13 @@ Observed through real pointer/keyboard input:
 
 The native desktop reported unsupported VSync switching and audio-driver failure
 with dummy-audio fallback; no listening acceptance is claimed. Engine warnings
-about names shadowing built-ins remain. Missing TMP glyph metrics, the separate
-Chinese variant, source control/slot templates, exact tween/noise math and
+about names shadowing built-ins remain. Missing TMP glyph metrics, the reference
+image's untraced text/font configuration, source control/slot templates, exact tween/noise math and
 Unity/Godot lighting/color-space equivalence remain separate open work.
+
+Correction: the user confirms both use the same Unity repository. Earlier
+wording calling the Chinese image a separate variant was unsupported and is
+withdrawn; language differences alone do not establish different source code.
 
 
 ## Source controls / Options / Pause follow-up (2026-11-12)
@@ -586,3 +590,26 @@ This does not visually resolve a one-frame threshold boundary. That branch and
 Continue during feeding/overlapping vendor pause are covered by real Board button
 callbacks in the automated suite. Native baseline visibility is not original TMP
 SDF pixel equivalence. No Unity execution, touch hardware or listening occurred.
+
+## Fresh screenshot follow-up (2026-11-13 UTC)
+
+A fresh cloud-native Godot 4.6.3 run captured the implementation tree
+`bb8fb509408074bec8bdb8ef89aa24d68579aa55` (public `78ff9db`, local `e14cd49`).
+The embedded game viewport was 1233×771. New Game retained 120/OFF preferences;
+three actual Starter clicks produced Villager, Berry Bush and Rock. Real wheel
+input and pointer dragging placed those cards and the remaining pack in view.
+Space paused during placement, then resumed before the final Day 1 / 3/24 image.
+The Villager information panel was visible. No model injection or edited image
+substituted for gameplay. F8 stopped the run without archiving existing saves.
+
+The editor serialized project metadata on opening: comments/formatting, its 4.6
+feature marker, and omission of the explicit default nearest-mipmap flag. The
+tracked project file was restored afterward; no game logic, window dimensions
+or renderer choice was changed for the capture.
+
+The first paused capture still cropped Berry Bush on the left; it is not the
+final staged capture. The final image is not same-camera/renderer/locale evidence
+against the supplied Unity image. Separate source checks explain several visible
+differences without changing production behavior; see the
+[state audit](source-screenshot-state-audit.md). Lighting/BRDF and TMP raster
+equivalence remain open. No Unity execution, hardware touch or listening occurred.

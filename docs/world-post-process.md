@@ -19,3 +19,17 @@ A screen-reading native CanvasItem shader is on CanvasLayer 0, after the 3D worl
 `test_world_post_process_board.gd`: actual imported Main/Island references, Title exclusion, layer/input/shader/uniform binding, real paused clock, silent day-end ordering, day-start reversal, entry/load/travel/title/teardown cancellation and missing scene fallback.
 
 Headless checks establish logic and resource binding only. They do not establish GPU shader output, visible frame composition, physical input, or Windows acceptance. No Unity editor/display was launched.
+
+## Rendering-path correction (2026-11-13)
+
+Component presence proves material-state/event behavior, not that its pixels are
+rendered. See [source renderer-pass admission](source-render-pipeline.md). The
+locked CardLoop host's default Standalone PC renderer has no template custom pass;
+its writer still receives events but its native screen rectangle now stays hidden.
+Built-in retains its supported admission branch. A matching template URP feature
+is now explicitly unknown: its source pass only overrides `RecordRenderGraph`,
+and the imported profile does not establish the active global RenderGraph versus
+Compatibility execution mode. Matching material references alone do not enable
+the native screen rectangle. This host-profile fact is not a claim about the user's
+reference screenshot or a reason to remove the template's documented effects.
+Missing profiles are explicitly unknown, not assumed Built-in rendering.

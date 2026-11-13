@@ -54,6 +54,10 @@ class LinuxExportTests(unittest.TestCase):
                          "fonts": {"synthetic-font": {"ttf_guid": "synthetic-ttf", "font_path": "source.ttf", "metrics_path": "metrics.json", "license_path": "LICENSE.txt",
                                    "ttf_sha256": hashlib.sha256(blobs["source.ttf"]).hexdigest(), "metrics_sha256": hashlib.sha256(metrics).hexdigest(), "license_sha256": hashlib.sha256(blobs["LICENSE.txt"]).hexdigest()}}}
         (font_root / "manifest.json").write_bytes(encoded(font_manifest))
+        pipeline = {"schema_version": 1, "source_commit": "synthetic", "target_platform": "Standalone", "inputs": font_manifest["inputs"]}
+        pipeline_bytes = encoded(pipeline)
+        (self.root / "assets/imported/render_pipeline.json").write_bytes(pipeline_bytes)
+        (self.root / "assets/imported/render_pipeline.json.sha256").write_text(hashlib.sha256(pipeline_bytes).hexdigest() + "\n")
         catalog = {"schema_version": 1, "provenance": {"source_commit": "synthetic"}, "counts": {}, "guid_index": {}}
         for group in ("cards", "packs", "recipes", "quests", "encounters", "settings", "scenes", "referenced_prefabs"):
             catalog[group] = []
@@ -103,6 +107,8 @@ class LinuxExportTests(unittest.TestCase):
         self.assertTrue((project / "scripts/main.gd").is_file())
         self.assertTrue((project / "assets/imported/fonts/source.ttf").is_file())
         self.assertTrue((project / "assets/imported/fonts/LICENSE.txt").is_file())
+        self.assertTrue((project / "assets/imported/render_pipeline.json").is_file())
+        self.assertTrue((project / "assets/imported/render_pipeline.json.sha256").is_file())
         for path in ("source", "tests", "tools", ".godot", ".env", "scripts/main.gd.uid", "scripts/private.txt", "assets/imported/unlisted.png"):
             self.assertFalse((project / path).exists(), path)
 
@@ -218,7 +224,7 @@ class LinuxExportTests(unittest.TestCase):
 
     def test_preset_explicitly_includes_json_and_excludes_provenance(self):
         preset = (ROOT / "export_presets.cfg").read_text()
-        self.assertIn('include_filter="data/stackcraft.json,assets/imported/manifest.json,assets/imported/fonts/*"', preset)
+        self.assertIn('include_filter="data/stackcraft.json,assets/imported/manifest.json,assets/imported/render_pipeline.json,assets/imported/render_pipeline.json.sha256,assets/imported/fonts/*"', preset)
         self.assertIn('data/manifest.json"', preset)
         self.assertIn('binary_format/embed_pck=false', preset)
 

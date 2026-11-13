@@ -208,6 +208,7 @@ func _ready() -> void:
 	friendly_choice.button_pressed = gameplay_prefs.friendly
 	friendly_choice.text = TitleGameplayPrefs.friendly_text(friendly_choice.button_pressed)
 	visual_assets.load_manifest()
+	visual_assets.load_render_pipeline(str(catalog.data.get("provenance", {}).get("source_commit", "")))
 	_configure_source_title()
 	options_panel.configure_source(catalog.data, visual_assets)
 	_configure_source_pause()
@@ -679,7 +680,7 @@ func start_new() -> void:
 
 func _enter_game() -> void:
 	options_panel.reset_source_lifecycle()
-	world_post_process.configure(catalog.data, session.scene_name)
+	world_post_process.configure(catalog.data, session.scene_name, visual_assets.render_pipeline)
 	journal_slide.reset(MenuSlide.initial_state(catalog.data).open)
 	title_navigation.open(TitleNavigation.HOME)
 	_sync_title_destination()

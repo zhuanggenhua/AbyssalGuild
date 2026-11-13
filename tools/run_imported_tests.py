@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_render_pipeline_imported", r"Private source render pipeline: PASS"),
     ("test_pause_ending_actions", r"Pause ending actions: 27/27 passed"),
     ("test_day_clock_boundary", r"Day clock boundary: 44/44 passed"),
     ("test_day_clock_boundary_board", r"Day clock boundary board: 34/34 passed"),
@@ -166,7 +167,26 @@ def private_inputs(root):
     if kinds != {"png", "wav", "fbx"}:
         raise ValidationError("Private validation requires PNG, WAV and FBX assets")
     paths.update(font_inputs(root, catalog))
+    paths.update(pipeline_inputs(root, catalog))
     return sorted(paths)
+
+
+
+def pipeline_inputs(root, catalog):
+    path = root / "assets/imported/render_pipeline.json"
+    profile = read_json(path, root)
+    digest_path = path.with_suffix(".json.sha256")
+    require_regular(digest_path, root)
+    if hashlib.sha256(path.read_bytes()).hexdigest() != digest_path.read_text().strip():
+        raise ValidationError("Pipeline profile content SHA-256 mismatch")
+    if profile.get("source_commit") != catalog.get("provenance", {}).get("source_commit"):
+        raise ValidationError("Pipeline supplement source commit differs from catalog")
+    if profile.get("target_platform") != "Standalone" or not profile.get("inputs"):
+        raise ValidationError("Pipeline profile requires locked Standalone input provenance")
+    for source in profile["inputs"].values():
+        if not isinstance(source, dict) or not re.fullmatch(r"[0-9a-f]{64}", str(source.get("sha256", ""))) or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_blob_sha1", ""))) or not source.get("repository_path"):
+            raise ValidationError("Invalid private pipeline input provenance")
+    return {"render_pipeline.json", "render_pipeline.json.sha256"}
 
 
 def font_inputs(root, catalog):

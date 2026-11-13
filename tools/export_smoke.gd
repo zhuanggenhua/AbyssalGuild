@@ -25,7 +25,7 @@ func audit_directory(path: String, assets) -> void:
 			audit_directory(full, assets)
 		else:
 			packed_files += 1
-			var allowed: bool = full in ["res://project.binary", "res://data/stackcraft.json", "res://assets/imported/manifest.json", "res://.godot/global_script_class_cache.cfg", "res://.godot/uid_cache.bin"]
+			var allowed: bool = full in ["res://project.binary", "res://data/stackcraft.json", "res://assets/imported/manifest.json", "res://assets/imported/render_pipeline.json", "res://assets/imported/render_pipeline.json.sha256", "res://.godot/global_script_class_cache.cfg", "res://.godot/uid_cache.bin"]
 			if full.begins_with("res://.godot/imported/"):
 				allowed = full.get_extension() in ["ctex", "sample", "scn", "res", "fontdata"]
 			if full.begins_with("res://.godot/exported/"):
@@ -70,6 +70,7 @@ func run() -> void:
 		var binding: Dictionary = fonts.resolve(str(guid))
 		check(binding.font != null and binding.status == "source_font_bound_native_layout", "packed exact source-font bytes and metrics: " + str(guid))
 		check(FileAccess.file_exists(fonts.root_path + str(fonts.manifest.fonts[guid].license_path)), "packed font license notice")
+	check(assets.load_render_pipeline(str(catalog.data.provenance.source_commit)) == OK, "packed source rendering graph and content hash")
 	audit_directory("res://", assets)
 	for entry in assets.manifest.assets.values():
 		var path: String = assets.root_path + str(entry.path)
@@ -101,6 +102,7 @@ func run() -> void:
 		await create_timer(0.5).timeout
 		quit(1)
 		return
+	check(board.world_post_process.config.render_pass.status == "disabled" and not board.world_post_process.rect.visible, "packed Standalone renderer does not invent custom postprocess")
 	check(board.original_board != null, "original packed board mesh is bound")
 	for view in board.views.values():
 		check(view.caption.text.contains("Starter"), "packed starter view bound")

@@ -31,9 +31,10 @@ Correction: the source TMP font is present in the full locked Git tree, outside
 the sparse StackCraft working copy. GUID 8f586378b4e144a9851e7b34d9b748ee resolves to
 LiberationSans SDF; the original TTF, SDF metrics/atlas and OFL license have been
 retrieved and hash-checked privately. Static 2D/3D components now resolve their actual font references through the private registry; the separate dynamic TMP default reference remains unresolved. Its
-250 static characters include no CJK. The supplied Chinese screenshot and locked
-English catalog cannot be treated as the same source variant, and no invented
-localization is supplied.
+250 static characters include no CJK. The user confirms the supplied Chinese
+screenshot uses the same Unity repository. The exact text/font configuration
+that produced it still needs tracing; language alone is not evidence of a
+different source version, and no invented localization is supplied.
 
 See [method audit status](source-method-audit-status.md) for the 824-member
 inventory's evidence limits and still-open branches. Source method names or passing
@@ -426,3 +427,21 @@ now addressed in [Pause ending actions](pause-ending-actions.md). Both use their
 source button callbacks while new-menu/Escape gates remain in force. Actual
 test-owned save/restore/fade, save failure and recoverable game-over archive paths
 are tested separately; no silent widening of deletion or save-failure behavior.
+
+## Source-renderer and reference-state audit
+
+[Renderer-pass admission](source-render-pipeline.md) now follows the locked host's
+platform-default quality, pipeline, camera renderer selection and active feature
+material. Material-event updates alone no longer invent a visible post-process
+pass. The locked host PC path is verified with real private input and a bounded
+native pause check; Built-in and feature-enabled URP alternatives remain synthetic
+routing fixtures. URP lighting/SSAO/BRDF, shader identity and cross-engine pixels
+are not established by this correction.
+
+[Reference-state audit](source-screenshot-state-audit.md) records the user's
+confirmation that both use the same Unity repository, without assuming a
+different version from the displayed language. It traces grass/board framing,
+card mesh dimensions, top-shop projection
+and empty-equipment visibility to source values. No extra zoom, tint, card scale,
+shop hiding or always-visible empty equipment bar was introduced to imitate an
+image whose camera, pipeline and equipment state are unknown.

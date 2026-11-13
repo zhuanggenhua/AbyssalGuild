@@ -48,6 +48,22 @@ func fully_visible(camera: Camera3D, position: Vector2, size: Vector2) -> bool:
 			if not viewport.has_point(camera.unproject_position(Vector3(position.x + x, 0.04, -position.y - z))): return false
 	return viewport.size.is_equal_approx(size)
 
+func board_plane_corners(camera: Camera3D, size: Vector2) -> Array[Vector3]:
+	# Main's authored Board instance is Y=-.05. Grass is a separate plane below it,
+	# not a board texture. A view wholly inside these bounds cannot reveal grass.
+	var result: Array[Vector3] = []
+	var plane := Plane(Vector3.UP, -0.05)
+	for screen in [Vector2.ZERO, Vector2(size.x, 0), size, Vector2(0, size.y)]:
+		var hit: Variant = plane.intersects_ray(camera.project_ray_origin(screen), camera.project_ray_normal(screen))
+		if hit is Vector3: result.append(hit)
+	return result
+
+func outside_board(camera: Camera3D, size: Vector2) -> bool:
+	for point in board_plane_corners(camera, size):
+		# Same symmetric bounds in reflected Godot coordinates.
+		if not Rect2(-6, -4, 12, 8).has_point(Vector2(point.x, point.z)): return true
+	return false
+
 func _init() -> void: call_deferred("run")
 
 func run() -> void:
@@ -94,6 +110,22 @@ func run() -> void:
 		var size := Vector2(dimensions)
 		check(SourceCamera.apply(board.camera, scene_fixture()), "synthetic camera configuration accepted")
 		board.camera_motion.configure(board.camera.position)
+		check(board_plane_corners(board.camera, size).size() == 4, "all corner rays hit the authored board plane")
+		check(not outside_board(board.camera, size), "source initial framing covers board only, not the grass margin")
+		# Source buyer: x=-4.4, zone z=3.25, scale z=1.125. Lower edge
+		# local z=-.5; Sell title Transform z=-.35 (not anchoredPosition.y).
+		var zone_edge := Vector3(-4.4, 0, -2.6875)
+		var sell_center := Vector3(-4.4, 0, -2.85625)
+		var pixel_scale := size.y / 771.0
+		check(absf(board.camera.unproject_position(zone_edge).y / pixel_scale + 6.505) < 0.01, "source buyer starts just above viewport")
+		check(absf(board.camera.unproject_position(sell_center).y / pixel_scale + 29.431) < 0.01, "source Sell title initially outside viewport")
+		button(MOUSE_BUTTON_WHEEL_DOWN, true, size * 0.5)
+		button(MOUSE_BUTTON_WHEEL_DOWN, false, size * 0.5)
+		settle(board)
+		check(absf(board.camera.unproject_position(zone_edge).y / pixel_scale - 28.237) < 0.01, "one source zoom step exposes buyer edge without a visibility change")
+		check(absf(board.camera.unproject_position(sell_center).y / pixel_scale - 7.295) < 0.01, "one source zoom step exposes Sell title")
+		SourceCamera.apply(board.camera, scene_fixture())
+		board.camera_motion.configure(board.camera.position)
 		for point in [Vector2.ZERO, Vector2(-4.5, 0.6), position, Vector2(2, -1)]:
 			var actual: Vector2 = board.camera.unproject_position(Vector3(point.x, 0, -point.y))
 			check(actual.distance_to(expected_projection(point, size)) < 0.01, "independent projection at %s for %s" % [dimensions, point])
@@ -117,6 +149,7 @@ func run() -> void:
 			button(MOUSE_BUTTON_WHEEL_DOWN, false, center)
 		settle(board)
 		check(board.camera.position.y > 15.0, "Viewport wheel zoom increases distance")
+		check(outside_board(board.camera, size), "wheel zoom can expose the separate background without changing board size")
 		check(fully_visible(board.camera, position, size), "zoom recovers whole synthetic card")
 		check(board._pick(board.camera.unproject_position(card.position)) == 2, "zoom-recovered card is physics-pickable")
 		check(card.position == original_pose and states[1].position == position, "camera recovery never changes fixture positions")

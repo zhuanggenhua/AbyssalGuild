@@ -30,7 +30,7 @@ func run() -> void:
 	check(effect.rect.material.shader == Effect.EFFECT_SHADER, "native shader bound")
 	board.start_new()
 	board.set_process(false)
-	check(effect.rect.visible and effect.grayscale == 0 and effect.vignette == 0, "entry uses component initialization")
+	check(not effect.rect.visible and effect.grayscale == 0 and effect.vignette == 0, "entry initializes writer; absent/PC renderer pass stays invisible")
 	board.session.set_paused(true)
 	var elapsed: float = board.session.elapsed
 	board._process(0.15)
@@ -53,7 +53,7 @@ func run() -> void:
 	board._process(9)
 	check(not effect.rect.visible and effect.tracks.is_empty(), "title cancels stale work")
 	board._enter_game()
-	check(effect.rect.visible and effect.grayscale == 0, "load/reentry does not infer saved paused flag")
+	check(not effect.rect.visible and effect.grayscale == 0, "reentry preserves absent/PC pass, does not infer saved paused flag")
 	board._on_session_event("day_ended", {})
 	board.session.scene_name = "Island"
 	board._enter_game()
