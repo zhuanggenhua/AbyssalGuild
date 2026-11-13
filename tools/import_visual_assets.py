@@ -15,6 +15,7 @@ from world_visual_metadata import world_metadata
 from progress_visual_metadata import progress_metadata, world_canvas_chain, board_effective_pose
 from trade_visual_metadata import trade_metadata
 from outline_visual_metadata import outline_metadata
+from source_lit_metadata import source_lit_metadata
 
 SUPPORTED = {'.png', '.wav', '.fbx'}
 
@@ -77,9 +78,19 @@ def build(source, catalog, output):
                 result['materials'][guid] = {'source_path': relative, 'name': fields.get('m_Name'),
                     'shader_source_path': index.get(fields.get('m_Shader', {}).get('guid', ''), {}).get('source_path', ''),
                     'shader_reference': fields.get('m_Shader', {}),
+                    'keywords': list(fields.get('m_ValidKeywords', [])) + list(fields.get('m_InvalidKeywords', [])) + str(fields.get('m_ShaderKeywords', '')).split(),
                     'colors': {k: v for item in saved.get('m_Colors', []) for k, v in item.items()},
                     'textures': {k: v for item in saved.get('m_TexEnvs', []) for k, v in item.items()},
                     'floats': {k: v for item in saved.get('m_Floats', []) for k, v in item.items()}}
+                material = result['materials'][guid]
+                graph_relative = material['shader_source_path']
+                if graph_relative in ('Shaders/Card.shadergraph', 'Shaders/SimpleLit.shadergraph'):
+                    graph_path = inside(source, graph_relative)
+                    if graph_path.is_file():
+                        # Decode without removing BOM: digest must match the input bytes.
+                        graph_text = graph_path.read_bytes().decode('utf-8')
+                        material['source_lit'] = source_lit_metadata(graph_text)
+                        result['inputs'][graph_relative] = sha256(graph_path)
     def prefab(guid):
         if guid in result['prefabs']:
             return guid

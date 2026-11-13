@@ -22,6 +22,15 @@ def encoded(value):
 
 
 class LinuxExportTests(unittest.TestCase):
+    def test_production_light_code_survives_export_allowlist(self):
+        relative = Path("scripts/ui/source_lit_material.gd")
+        (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / relative).write_bytes((ROOT / relative).read_bytes())
+        project = self.base / "lit-export"
+        runner.copy_export_project(self.root, project, runner.private_inputs(self.root))
+        self.assertEqual((ROOT / relative).read_bytes(), (project / relative).read_bytes())
+        self.assertIn(b"1.175494351e-38", (project / relative).read_bytes())
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="abyssal-export-tests-")
         self.addCleanup(self.temporary.cleanup)

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_source_lit_material": "Private source direct lit: PASS (2 materials)",
     "test_render_pipeline_imported": "Private source render pipeline: PASS",
     "test_pause_ending_actions": "Pause ending actions: 27/27 passed",
     "test_day_clock_boundary": "Day clock boundary: 44/44 passed",
@@ -143,6 +144,15 @@ def canonical(value):
 
 
 class ImportedRunnerTests(unittest.TestCase):
+    def test_production_light_code_is_copied_without_include_files(self):
+        relative = Path("scripts/ui/source_lit_material.gd")
+        (self.root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / relative).write_bytes((ROOT / relative).read_bytes())
+        destination = self.base / "direct-light-copy"
+        runner.copy_project(self.root, destination, runner.private_inputs(self.root))
+        self.assertEqual((ROOT / relative).read_bytes(), (destination / relative).read_bytes())
+        self.assertIn(b"1.175494351e-38", (destination / relative).read_bytes())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="abyssal-private-runner-test-")
         self.addCleanup(self.temp.cleanup)

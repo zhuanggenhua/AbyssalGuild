@@ -232,6 +232,10 @@ func _apply_board_materials(node: Node, references: Array) -> void:
 			var source: Dictionary = manifest.get("materials", {}).get(reference.get("guid", ""), {})
 			if source.is_empty():
 				continue
+			var source_lit := preload("res://scripts/ui/source_lit_material.gd").board_material(self, source)
+			if source_lit != null:
+				node.set_surface_override_material(surface, source_lit)
+				continue
 			var material := StandardMaterial3D.new()
 			material.resource_name = str(source.get("name", "SourceMaterial"))
 			material.albedo_color = source_color(source.get("colors", {}).get("_Color", {}))

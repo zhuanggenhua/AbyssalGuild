@@ -106,6 +106,10 @@ func run() -> void:
 	check(board.original_board != null, "original packed board mesh is bound")
 	for view in board.views.values():
 		check(view.caption.text.contains("Starter"), "packed starter view bound")
+		check(view.source_material is ShaderMaterial, "packed starter shader material")
+		if view.source_material is ShaderMaterial:
+			check(view.source_material.shader.code.count("void light()") == 1, "packed starter has one production direct-light function")
+			check(view.source_material.shader.code.contains("1.175494351e-38"), "packed source SafeNormalize constant preserved")
 	board._save_game()
 	check(FileAccess.file_exists(board._active_slot_path()), "isolated checkpoint written")
 	board._return_title()

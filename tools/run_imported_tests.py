@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_source_lit_material", r"Private source direct lit: PASS \([1-9]\d* materials\)"),
     ("test_render_pipeline_imported", r"Private source render pipeline: PASS"),
     ("test_pause_ending_actions", r"Pause ending actions: 27/27 passed"),
     ("test_day_clock_boundary", r"Day clock boundary: 44/44 passed"),

@@ -22,7 +22,7 @@ static func create(assets, appearance: Dictionary) -> ShaderMaterial:
 		return null
 	var offset: Dictionary = colors.get("_OverlayOffset", {})
 	var material := ShaderMaterial.new()
-	material.shader = SHADER
+	material.shader = preload("res://scripts/ui/source_lit_material.gd").card_shader(assets, source, SHADER)
 	material.resource_name = str(source.get("name", "SourceCardSurface"))
 	material.set_shader_parameter("base_texture", base)
 	material.set_shader_parameter("overlay_texture", art)

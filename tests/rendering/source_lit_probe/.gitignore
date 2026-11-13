@@ -1,0 +1,5 @@
+.godot/
+scripts/
+result.json
+*.png
+*.uid
