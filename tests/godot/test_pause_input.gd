@@ -87,7 +87,7 @@ func run() -> void:
 	check(board.pause_overlay.visible and not board.session.paused, "unfocused pause menu does not toggle manual pause")
 	board._toggle_pause_menu()
 	board._open_options()
-	board.options_panel.sliders.sfx.grab_focus()
+	board.options_panel.source_slider_adapters.get("sfx", board.options_panel.sliders.sfx).grab_focus()
 	await stroke(KEY_SPACE)
 	check(board.options_panel.visible and not board.session.paused, "options retain input ownership")
 	board.options_panel.request_close()

@@ -486,3 +486,103 @@ with dummy-audio fallback; no listening acceptance is claimed. Engine warnings
 about names shadowing built-ins remain. Missing TMP glyph metrics, the separate
 Chinese variant, source control/slot templates, exact tween/noise math and
 Unity/Godot lighting/color-space equivalence remain separate open work.
+
+
+## Source controls / Options / Pause follow-up (2026-11-12)
+
+A fresh native Godot 4.6.3 Compatibility / Mesa llvmpipe process at 1280×800
+exercised Title → Options → Close, New Game → duration drag (120 to 150) and
+Friendly ON → Cancel → reopen (120/OFF restored), Confirm → gameplay → Pause →
+Game Options → Escape (back to Pause) → Continue (gameplay restored). Source panel
+sizes were contained on screen. The native run discovered the silent volume-set
+adapter refresh defect; a failing focused test reproduced it. After correction,
+a new native process showed both 100% handles at the right edge, and a regression
+also checks reopening at 25%. No saved options were deliberately changed and no
+existing save was overwritten or removed. The test process was stopped after
+resuming gameplay. Original assets/screenshots remain private.
+
+This does not verify combat-animation rendering, touch/outside-window behavior,
+original TMP typography, cross-engine pixels or listening. Embedded-window mode
+and VSync limitations remain explicitly reported; no Unity instance was run.
+
+
+## Source components / font / input follow-up (2026-11-12)
+
+Fresh native Godot 4.6.3 Compatibility / Mesa llvmpipe at 1280×800 exercised
+Title → Saved Games, three source-template rows, Archive one → Cancel (all rows
+retained), Recovery tools → Close, and Saved Games → Close. New Game with default
+120/OFF preferences entered gameplay and opened two Starter outputs. A real
+wheel-down sequence while hovering journal UI zoomed the board and recovered an
+initially cropped output. With Pause open, wheel-up over the pause panel changed
+the world framing without dismissing Pause; Continue resumed gameplay. These
+observations cover the restored source input route, not calibrated hardware
+wheel-unit equivalence. The initial crop was not hidden by an invented auto-fit.
+
+A native Villager-to-Berry-Bush drag formed the stack. Its thin world-space
+progress bar was visible above it during the natural day-end pause. The run was
+stopped with the editor's F8, without claiming a finished harvest or a normal
+production Quit. The UI and card text rendered with the newly bound static font
+inputs; dynamic journal font fallback and TMP layout/SDF parity remain unverified.
+No existing save was archived, overwritten or removed; New Game created its own
+slot. Listening, native middle-button motion, touch, cross-engine pixels and
+Windows QA were not performed in this follow-up.
+
+
+## Saved timestamp / Elastic scroll follow-up (2026-11-12 UTC)
+
+A fresh 1280×800 native build displayed all four existing rows with unchanged
+explicit File modified labels. Real pointer dragging inside the list visibly
+pulled the rows down elastically and compressed the scroll handle; a later
+observation showed the rows returned to the top, with no Load/Archive action.
+The first row and right-side action geometry fit inside the viewport immediately.
+This supplements, but does not replace, numerical motion and first-layout tests.
+
+New Game created a separate fifth slot, then Pause → Quit to Title & Save returned
+to Title. Saved Games displayed its persisted Last Saved timestamp including the
+host's +08:00 offset; existing four legacy rows retained their explicit file-mtime
+labels. This did not change the host timezone or infer absent legacy save times.
+The native process was stopped with F8. No existing slot was loaded/overwritten,
+archived or removed. Long overflowing lists, native scrollbar page/key behavior,
+touch and .NET culture formatting were not accepted in this bounded run.
+
+
+## Source scrollbar / title-pose follow-up (2026-11-12 UTC)
+
+A new native Godot 4.6.3 Compatibility/Mesa llvmpipe run at 1280×800 opened
+Saved Games with all five existing rows retained. The source-gray flat handle
+rendered at the right edge. Content dragging visibly displaced rows and shortened
+the handle, then the list returned; wheel input over the handle reached the list.
+All five rows fit, so long-list scrolling and exact ×6 hardware wheel displacement
+were not established by this run. No Load, Archive or Restore was activated.
+
+New Game created its own slot with unchanged default 120/OFF preferences. Starter
+pack title, a spawned Villager title and its health label were visibly rendered
+after replacing native title fitting with bounded source TMP point-size selection
+and removing invented source-path +0.01 lifts. The first output remained cropped
+by the existing source camera/placement relationship and was moved into view by
+a real drag, not auto-repositioned by new code. A later Berry Bush output was
+partially cropped too. Its attempted drag coincided with natural day-end locking
+and did not move it; this run did not establish its full title visibility.
+
+F8 stopped the game. No existing save was overwritten/archived/removed, no Unity
+execution or audio listening occurred. This is bounded native evidence, not
+Unity/Godot image equivalence, full title-raster acceptance or complete highlight
+interaction verification. Automated full regression also exposed an obsolete test
+expecting the removed title lift; both synthetic and cached-mesh assertions now
+compare the authored reflected pose directly rather than restoring the extra lift.
+
+
+## TMP baseline / ordinary Continue follow-up (2026-11-12 UTC)
+
+Native Godot 4.6.3 at 1280×800 opened the six-row Saved Games list and loaded
+the QA slot created in the preceding run, without creating another slot. A wheel
+zoom-out followed by opening one Starter output showed the full Villager card,
+its title within the colored header, and health text. The Starter title was also
+visible with the source-formula baseline correction. Escape opened Pause and an
+actual Continue click closed it and resumed ordinary Playing. F8 then stopped
+the process; Archive, Restore and Save & Title were not invoked in this run.
+
+This does not visually resolve a one-frame threshold boundary. That branch and
+Continue during feeding/overlapping vendor pause are covered by real Board button
+callbacks in the automated suite. Native baseline visibility is not original TMP
+SDF pixel equivalence. No Unity execution, touch hardware or listening occurred.

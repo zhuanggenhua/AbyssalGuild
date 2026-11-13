@@ -118,8 +118,9 @@ static func hit_popup(assets, record: Dictionary, kind: String, damage_text: Str
 	var pivot: Dictionary = damage.get("pivot", {})
 	label.position += label.basis * Vector3((0.5 - float(pivot.get("x", 0.5))) * float(size.get("x", 0.0)), (0.5 - float(pivot.get("y", 0.5))) * float(size.get("y", 0.0)), 0)
 	label.modulate = assets.source_color(damage.get("color", {}))
+	preload("res://scripts/ui/source_font_registry.gd").shared().bind_label(label, damage)
 	label.font_size = 32
-	label.pixel_size = font_size / ThemeDB.fallback_font.get_height(label.font_size)
+	label.pixel_size = font_size / (label.font if label.font != null else ThemeDB.fallback_font).get_height(label.font_size)
 	label.outline_size = 0
 	label.no_depth_test = false
 	label.render_priority = 2

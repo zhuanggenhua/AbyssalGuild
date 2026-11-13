@@ -84,7 +84,7 @@ func run() -> void:
 	var position: Vector3 = popup.position
 	board.combat_presentation.advance(0.1)
 	board._sync_views()
-	check(is_equal_approx(board.views[enemy].hurt_flash, 0.5), "impact drives CardView flash without replacing selection emission")
+	check(is_equal_approx(board.views[enemy].hurt_flash, 0.75), "impact drives CardView flash without replacing selection emission")
 	board.session._remove_card(enemy)
 	check(is_instance_valid(popup) and popup.position == position, "popup owns position after lethal target removal")
 	popup._process(0.4)

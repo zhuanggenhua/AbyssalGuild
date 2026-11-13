@@ -121,19 +121,19 @@ func restore(raw: Variant) -> Dictionary:
 	return staged
 
 ## Describes intent only; unsupported entries must be handled explicitly by UI.
-func application_plan() -> Dictionary:
+func application_plan(intent: String = "refresh") -> Dictionary:
 	var unsupported: Array = ["unity_shadow_preset"]
 	if values.vsync == 2: unsupported.append("half_vsync")
 	if values.resolution.is_empty() or not resolutions.has(values.resolution): unsupported.append("resolution")
-	return {"options": values.duplicate(true), "unsupported": unsupported, "fps_overridden_by_vsync": values.vsync != 0}
+	return {"options": values.duplicate(true), "unsupported": unsupported, "fps_overridden_by_vsync": values.vsync != 0, "intent": intent}
 
 ## Adapter owns capability mapping/application and reports its own result.
 ## No automatic application occurs on configure/load/change/reset/save.
-func apply_with(adapter: Callable) -> Dictionary:
+func apply_with(adapter: Callable, intent: String = "refresh") -> Dictionary:
 	var valid := _stage(snapshot())
 	if not valid.ok: return valid
 	if not adapter.is_valid(): return _fail("No options application adapter")
-	var result = adapter.call(application_plan())
+	var result = adapter.call(application_plan(intent))
 	return result if result is Dictionary and result.get("ok") is bool else _fail("Adapter must return an ok/error result")
 
 static func _read(path: String) -> Dictionary:

@@ -109,7 +109,10 @@ func run() -> void:
 		board._confirm_title_new_game()
 		check(board.title_home.visible and not board.running and board.active_slot == 1, "return title clears stale intent")
 		board.title_load_button.pressed.emit()
-		board.continue_button.pressed.emit()
+		if board.source_saved_rows != null:
+			board.source_saved_rows.rows[0].load_button.pressed.emit()
+		else:
+			board.continue_button.pressed.emit()
 		board._process(1.0)
 		board._process(1.0)
 		board.set_process(false)

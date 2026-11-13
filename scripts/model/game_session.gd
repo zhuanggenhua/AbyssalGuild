@@ -467,6 +467,7 @@ func _check_recipe(stack) -> void:
 
 func tick(delta: float) -> void:
 	if delta <= 0:
+		if delta == 0: _advance_day_clock(0.0)
 		return
 	# Source real-time combat travel/return continues while scaled gameplay pauses.
 	if paused or phase != "playing":
@@ -477,20 +478,29 @@ func tick(delta: float) -> void:
 	combat.tick(step, delta)
 	if crafting.advance(step):
 		return # Never advance old-scene tasks or destination time after travel.
-	elapsed += step
-	if elapsed >= day_duration:
-		# Automatic day-end pause is silent in TimeManager, unlike user cycling.
-		cycle.request_end_day()
+	_advance_day_clock(step)
 	changed.emit()
+
+## TimeManager.Update chooses its branch before adding this frame's delta.
+## Crossing the duration remains playing until the next Update, even if that
+## next frame is user/external-paused or has zero delta. Automatic pause is silent.
+func _advance_day_clock(scaled_delta: float) -> void:
+	if phase != "playing": return
+	if elapsed < day_duration:
+		elapsed += scaled_delta
+	else:
+		cycle.request_end_day()
 
 ## Source Update still checks completed tasks when scaled time is zero. Share
 ## this path with external menu/vendor pauses; incomplete tasks cannot advance.
 func tick_paused(delta: float) -> void:
 	if delta <= 0:
+		if delta == 0: _advance_day_clock(0.0)
 		return
 	combat.tick(0.0, delta)
 	if not travel_pending and crafting.advance(0.0):
 		return
+	_advance_day_clock(0.0)
 	cycle.advance(delta)
 
 func _complete_recipe(stack) -> void:

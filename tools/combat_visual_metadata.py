@@ -1,5 +1,6 @@
 """Private combat sprite/rectangle bindings, resolved by serialized references."""
 from __future__ import annotations
+from source_font_metadata import font_reference
 import copy
 import math
 import struct
@@ -104,7 +105,7 @@ def hit_ui_metadata(documents, component_ref):
         geometry.update({'color': copy.deepcopy(tf.get('m_fontColor' if role == 'damage' else 'm_Color', {})),
                          'material': copy.deepcopy(tf.get('m_Material', {}))})
         if role == 'damage':
-            geometry.update({'font_size': tf.get('m_fontSize'), 'font_asset': copy.deepcopy(tf.get('m_fontAsset', {})),
+            geometry.update({**font_reference(tf), 'font_size': tf.get('m_fontSize'), 'font_asset': copy.deepcopy(tf.get('m_fontAsset', {})),
                              'horizontal_alignment': tf.get('m_HorizontalAlignment'), 'vertical_alignment': tf.get('m_VerticalAlignment')})
         else:
             geometry.update({'image_type': tf.get('m_Type'), 'preserve_aspect': tf.get('m_PreserveAspect')})

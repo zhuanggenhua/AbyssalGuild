@@ -8,10 +8,11 @@ import shutil
 import yaml
 from import_stackcraft import parse_unity, json_bytes, sha256, UnityLoader
 from visual_scene_metadata import apply_overrides, camera_records, light_records, transform_chain
-from card_visual_metadata import annotations
+from card_visual_metadata import annotations, single_line_text_fields
 from combat_visual_metadata import combat_metadata, sprite_metadata
 from puff_visual_metadata import scene_puff_metadata
 from world_visual_metadata import world_metadata
+from progress_visual_metadata import progress_metadata, world_canvas_chain, board_effective_pose
 from trade_visual_metadata import trade_metadata
 from outline_visual_metadata import outline_metadata
 
@@ -103,7 +104,7 @@ def build(source, catalog, output):
             text = next((d['fields'] for d in docs if d['object_type'] == 'MonoBehaviour' and d['fields'].get('m_GameObject') == title_owner and 'm_fontColor' in d['fields']), {})
             keys = ('m_LocalPosition', 'm_LocalRotation', 'm_LocalScale')
             if pose and text and all(k in rect for k in keys) and str(rect.get('m_Father', {}).get('fileID')) == str(root_transform.get('file_id')):
-                title = {'transform_chain': pose + [{k: rect[k] for k in keys}], 'color': text['m_fontColor'], 'rect_size': rect.get('m_SizeDelta', {})}
+                title = {**single_line_text_fields(text), 'transform_chain': pose + [{k: rect[k] for k in keys}], 'color': text['m_fontColor'], 'rect_size': rect.get('m_SizeDelta', {}), 'rect_pivot': rect.get('m_Pivot', {})}
         overlays = annotations(docs, owner)
         title = overlays['labels'].get('title', title)
         result['prefabs'][guid] = {'source_path': index.get(guid, {}).get('source_path', ''),
@@ -118,6 +119,8 @@ def build(source, catalog, output):
         config.update(world_metadata(docs))
         for doc in docs:
             f = doc['fields']
+            if 'progressUIPrefab' in f:
+                config['progress'] = progress_metadata(f, read)
             if any(key in f for key in ('arrowProjectile', 'magicProjectile', 'hitUIPrefab')):
                 config['combat'] = combat_metadata(f, read)
             if 'buyerPrefab' in f and 'vendorPrefab' in f:
@@ -150,6 +153,10 @@ def build(source, catalog, output):
                     config['cameras'].append(camera)
                 if not external_parent:
                     config['lights'].extend(light_records(effective))
+                    canvas = world_canvas_chain(effective)
+                    if canvas: config['world_canvas_chain'] = canvas
+                    if guid in config['boards']:
+                        config.setdefault('board_poses', {})[guid] = board_effective_pose(effective)
         result['scenes'][scene['name']] = config
     (output / 'manifest.json').write_bytes(json_bytes(result))
     return result

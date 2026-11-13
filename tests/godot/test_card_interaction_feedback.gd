@@ -310,9 +310,9 @@ func check_renderers(session) -> void:
 	check(progress.bars.size() == 1, "native progress creates one task view")
 	var record: Dictionary = progress.bars[101]
 	var first: Node3D = record.root
-	check(first.position.is_equal_approx(Vector3(1, ProgressView.SURFACE_LIFT, 1.45)), "rendered anchor reflects Z exactly once")
-	check(record.fill.scale.x == 2.25 / 8.0, "normalized horizontal fill")
-	check(is_equal_approx(record.fill.position.x - 0.4 * record.fill.scale.x, -0.4), "fill grows from fixed left edge")
+	check(first.position.is_equal_approx(Vector3(1, 0.0, 1.45)), "rendered anchor reflects Z exactly once")
+	check(first.material_override.get_shader_parameter("ratio") == 2.25 / 8.0, "normalized horizontal fill")
+	check(first.mesh.size.is_equal_approx(Vector2(.8,.05)), "fill grows from fixed left edge")
 	for iteration in 6: progress.sync(Descriptors.crafting_progress(session))
 	check(progress.get_child_count() == 1 and progress.bars[101].root == first, "repeat snapshots reuse bar")
 	session.stacks[101].paused = true
@@ -320,10 +320,10 @@ func check_renderers(session) -> void:
 	check(first.get_meta("paused") and first.visible, "paused bar stays visible")
 	session.stacks[101].position = Vector2(12, 4)
 	progress.sync(Descriptors.crafting_progress(session))
-	check(first.position.is_equal_approx(Vector3(12, ProgressView.SURFACE_LIFT, -4.55)), "moving stack retargets bar using root, not stack-top")
+	check(first.position.is_equal_approx(Vector3(12, 0.0, -4.55)), "moving stack retargets bar using root, not stack-top")
 	session.stacks[101].progress = 0
 	progress.sync(Descriptors.crafting_progress(session))
-	check(not record.fill.visible and first.visible, "zero progress has empty fill with visible background")
+	check(first.material_override.get_shader_parameter("ratio") == 0 and first.visible, "zero progress has empty fill with visible background")
 	progress.sync({101: {"anchor": Vector3.ZERO, "ratio": NAN}})
 	check(progress.bars.is_empty() and progress.get_child_count() == 0, "invalid descriptor clears old progress immediately")
 	progress.sync({101: "malformed"})

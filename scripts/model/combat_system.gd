@@ -119,6 +119,7 @@ func _enter(task_id: int, card_id: int, position: Variant = null) -> void:
 	var session = _session.get_ref()
 	Equipment.detach(session, card_id, position)
 	membership[card_id] = task_id
+	session.event_occurred.emit("combat_entered", {"combat_id":task_id,"card_id":card_id})
 	tasks[task_id].combatants.append(card_id)
 	tasks[task_id].progress[card_id] = session.rng.randf_range(0.0, 0.5)
 
@@ -239,6 +240,7 @@ func _impact(task_id: int) -> void:
 		return
 	var result: Dictionary = resolve_attack(execution.actor, execution.target)
 	session.cards[execution.target].health = maxi(0, session.cards[execution.target].health - result.damage)
+	task.erase("visual_motion")
 	execution.phase = "return"
 	execution.remaining = 0.3
 	session.event_occurred.emit("combat_hit", {"combat_id": task_id, "attacker_id": execution.actor, "defender_id": execution.target, "combat_type": execution.combat_type, "result": result})
@@ -259,6 +261,7 @@ func _after_return(task_id: int) -> void:
 		task.combatants.erase(target)
 		membership.erase(target)
 		dragged.erase(target)
+		task.erase("visual_motion")
 		task.execution.phase = "death_wait"
 		task.execution.remaining = 0.5
 		task.execution.target = -1
@@ -278,6 +281,7 @@ func _complete_execution(task_id: int) -> void:
 		if tasks.has(current_id) and tasks[current_id].progress.has(actor):
 			tasks[current_id].progress[actor] = 0.0
 		task.erase("execution")
+		task.erase("visual_motion")
 	if task.attackers.is_empty() or task.defenders.is_empty():
 		_finish(task_id)
 
@@ -320,7 +324,8 @@ func remove_combatant(card_id: int, return_to_board: bool = true) -> void:
 	task.progress.erase(card_id)
 	task.combatants.erase(card_id)
 	if task.has("execution") and task.execution.phase != "death_wait" and card_id in [task.execution.actor, task.execution.target]:
-		task.erase("execution") # Safety: cancel dangling attack; never reroll a replacement.
+		task.erase("execution")
+		task.erase("visual_motion") # Safety: cancel dangling attack; never reroll a replacement.
 	membership.erase(card_id)
 	dragged.erase(card_id)
 	if return_to_board:
@@ -396,6 +401,13 @@ func save_state() -> Dictionary:
 				record["execution"] = execution
 			else:
 				record["execution"] = task.execution # Preserve invalid state for validator.
+		if task.has("visual_motion"):
+			var geometry: Variant = task.visual_motion.duplicate(true) if task.visual_motion is Dictionary else task.visual_motion
+			if geometry is Dictionary:
+				for key in ["start", "finish"]:
+					var value: Variant = geometry.get(key)
+					if value is Vector3: geometry[key] = [value.x,value.y,value.z]
+			record["visual_motion"] = geometry
 		if task.has("layout"):
 			# Derived configuration/positions belong to the current scene adapter.
 			# Preserve invalid live metadata for validation, never silently discard it.
@@ -524,6 +536,24 @@ func stage_state(raw: Variant, cards: Dictionary, scene_name: String = "") -> Di
 						return invalid
 				execution[key] = Vector2(float(axes[0]), float(axes[1]))
 			task["execution"] = execution
+		if record.has("visual_motion"):
+			var raw_geometry: Variant = record.visual_motion
+			if not raw_geometry is Dictionary or raw_geometry.size() != 6 or not task.has("execution"): return invalid
+			var geometry: Dictionary = raw_geometry.duplicate(true)
+			var execution: Dictionary = task.execution
+			if execution.phase not in ["travel", "return"] or geometry.get("phase") != execution.phase: return invalid
+			for key in ["actor", "combat_type"]:
+				if not Equipment.valid_integer(geometry.get(key),0) or int(geometry[key]) != int(execution[key]): return invalid
+			var expected_duration: float = 0.3 if execution.phase == "return" or execution.combat_type not in [2,3] else projectile_duration(execution.combat_type, scene_name)
+			if not Equipment.valid_number(geometry.get("duration")) or float(geometry.duration) != expected_duration or expected_duration <= 0: return invalid
+			for key in ["start", "finish"]:
+				var axes: Variant = geometry.get(key)
+				if not axes is Array or axes.size() != 3: return invalid
+				for axis in axes:
+					if not Equipment.valid_number(axis) or absf(float(axis)) > 1.0e20: return invalid
+				geometry[key] = Vector3(float(axes[0]),float(axes[1]),float(axes[2]))
+				if not geometry[key].is_finite(): return invalid
+			task["visual_motion"] = geometry
 		result.tasks[id] = task
 	return result
 

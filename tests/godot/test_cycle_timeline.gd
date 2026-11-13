@@ -102,6 +102,8 @@ func _test_boundaries() -> void:
 	food = s.spawn_card("food")
 	s.day_duration = 1
 	s.tick(1)
+	check(s.phase == "playing" and s.elapsed == 1, "Threshold crossing stays playing until next Update")
+	s.tick(0)
 	check(s.phase == "feeding" and s.cycle.stage == "await_feed" and s.elapsed == 0, "Automatic timeout awaits explicit feeding confirmation")
 	s.tick(20)
 	check(s.cycle.stage == "await_feed" and s.cards[food].nutrition == 4, "Awaiting feed has no automatic consumption")

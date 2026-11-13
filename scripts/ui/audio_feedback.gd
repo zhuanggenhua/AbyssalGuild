@@ -1,6 +1,14 @@
 extends Node
 ## Source AudioId names resolved through the original AudioManager prefab.
 ## Call play_event only at the corresponding confirmed source event.
+const RequestState = preload("res://scripts/ui/audio_request_state.gd")
+var requests = RequestState.new()
+var source_initialized := false
+## Optional explicit acoustic policy configures real 3D voices. No policy is
+## installed by default. Persistent slot ownership handles all lifecycle paths.
+const SlotOwner = preload("res://scripts/ui/audio_slot_owner.gd")
+var spatial_policy: Callable = Callable()
+var slot_owners: Dictionary = {}
 var clips: Dictionary = {}
 var stream_cache: Dictionary = {}
 var last_played: Dictionary = {}
@@ -16,12 +24,19 @@ var shutting_down: bool = false
 
 func configure(catalog, visual_assets) -> void:
 	shutting_down = false
+	# A source singleton survives scene loads. Explicit media refresh may rebuild
+	# voices but must not cancel its live coroutine or replace live mixer gain.
+	requests.slots.clear()
+	if not source_initialized: requests.set_mixer(user_bgm_db)
+	source_initialized = true
 	assets = visual_assets
 	next_player = 0
 	clips.clear()
 	stream_cache.clear()
 	last_played.clear()
 	source_settings.clear()
+	for owner in slot_owners.values(): owner.shutdown()
+	slot_owners.clear()
 	for player in pool:
 		_stop_slot(player)
 		player.queue_free()
@@ -82,6 +97,11 @@ func _stream(guid: String) -> AudioStream:
 	return stream
 
 func play_event(event_name: String) -> bool:
+	# Keep the established default API (including existing test/host overrides).
+	return play_source_event(event_name)
+
+func play_source_event(event_name: String, world_position: Variant = null, interrupt_bgm: bool = false) -> bool:
+	if world_position != null and (not world_position is Vector3 or not world_position.is_finite()): return false
 	if shutting_down or pool.is_empty() or not is_inside_tree():
 		return false
 	var now: float = Time.get_ticks_msec() / 1000.0
@@ -92,25 +112,25 @@ func play_event(event_name: String) -> bool:
 	var stream := stream_for_event(event_name)
 	if stream == null:
 		return false
+	if world_position != null and not spatial_policy.is_valid(): return false
+	var slot_index := next_player
 	var player: AudioStreamPlayer = pool[next_player]
 	next_player = (next_player + 1) % pool.size()
-	# Unity PlayOneShot overlaps even when a pooled source wraps. Reassigning a
-	# Godot player's stream would cut off its earlier sound, so keep that voice
-	# and add a temporary child only while this logical source is occupied.
-	var voice := player
-	if player.playing:
-		voice = AudioStreamPlayer.new()
-		player.add_child(voice)
-		voice.finished.connect(voice.queue_free)
 	var pitch: float = randf_range(0.95, 1.05) if bool(source_settings.get("_randomizeSFXPitch", true)) else 1.0
-	# Source pitch is a property of the pooled AudioSource, including sounds
-	# already playing on it. Godot child players do not inherit audio gain/pitch.
-	for active_voice in _slot_voices(player):
-		active_voice.volume_db = user_sfx_db
-		active_voice.pitch_scale = pitch
-	voice.stream = stream
-	voice.play()
+	var slot_state: Dictionary = requests.configure_slot(slot_index, pitch, world_position)
+	var owner = _owner_for(player)
+	if not owner.play(slot_state, stream): return false
+	if interrupt_bgm: requests.request_interrupt(stream.get_length())
+	_apply_music_mixer()
 	return true
+
+func _owner_for(player: AudioStreamPlayer):
+	var key := player.get_instance_id()
+	if not slot_owners.has(key):
+		slot_owners[key] = SlotOwner.new(player, spatial_policy)
+		slot_owners[key].set_gain(user_sfx_db)
+	slot_owners[key].spatial_policy = spatial_policy
+	return slot_owners[key]
 
 func _slot_voices(player: AudioStreamPlayer) -> Array[AudioStreamPlayer]:
 	var voices: Array[AudioStreamPlayer] = [player]
@@ -120,6 +140,9 @@ func _slot_voices(player: AudioStreamPlayer) -> Array[AudioStreamPlayer]:
 	return voices
 
 func _stop_slot(player: AudioStreamPlayer) -> void:
+	if slot_owners.has(player.get_instance_id()):
+		slot_owners[player.get_instance_id()].stop()
+		return
 	for voice in _slot_voices(player):
 		voice.stop()
 		voice.stream = null
@@ -146,6 +169,10 @@ func shutdown() -> void:
 	# Close admission before stopping voices. A modal action requests Click after
 	# its callback, and a queued music-finished signal must not restart playback.
 	shutting_down = true
+	source_initialized = false
+	requests.reset()
+	for owner in slot_owners.values(): owner.shutdown()
+	slot_owners.clear()
 	for player in pool:
 		if is_instance_valid(player):
 			_stop_slot(player)
@@ -161,15 +188,42 @@ func _exit_tree() -> void:
 
 func music_gain_linear() -> float:
 	# Source per-clip gain and user mixer gain multiply once, never accumulate.
-	return maxf(0.0, float(source_settings.get("_defaultMusicVolume", 0.3))) * db_to_linear(user_bgm_db)
+	return maxf(0.0, float(source_settings.get("_defaultMusicVolume", 0.3))) * db_to_linear(requests.mixer_bgm_db)
 
 func set_user_gains(sfx_db: float, bgm_db: float) -> bool:
 	if not is_finite(sfx_db) or not is_finite(bgm_db) or sfx_db < -80 or sfx_db > 0 or bgm_db < -80 or bgm_db > 0: return false
+	set_user_sfx_gain(sfx_db)
+	set_user_bgm_gain(bgm_db)
+	return true
+
+func set_user_sfx_gain(sfx_db: float) -> bool:
+	if not is_finite(sfx_db) or sfx_db < -80 or sfx_db > 0: return false
 	user_sfx_db = sfx_db
-	user_bgm_db = bgm_db
+	for owner in slot_owners.values(): owner.set_gain(sfx_db)
 	for player in pool:
 		if is_instance_valid(player):
 			for voice in _slot_voices(player):
 				voice.volume_db = user_sfx_db
+	return true
+
+func set_user_bgm_gain(bgm_db: float) -> bool:
+	if not is_finite(bgm_db) or bgm_db < -80 or bgm_db > 0: return false
+	user_bgm_db = bgm_db
+	requests.set_mixer(bgm_db)
 	if is_instance_valid(music): music.volume_linear = music_gain_linear()
 	return true
+
+func live_sfx_slider_value() -> float:
+	return db_to_linear(user_sfx_db)
+
+func live_bgm_slider_value() -> float:
+	# Source GetSavedBGMVolumeSlider reads the live mixer, not PlayerPrefs.
+	return db_to_linear(requests.mixer_bgm_db)
+
+func advance_scaled_time(delta: float) -> void:
+	if shutting_down: return
+	requests.advance_scaled_time(delta)
+	_apply_music_mixer()
+
+func _apply_music_mixer() -> void:
+	if is_instance_valid(music): music.volume_linear = music_gain_linear()

@@ -20,6 +20,29 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_pause_ending_actions", r"Pause ending actions: 27/27 passed"),
+    ("test_day_clock_boundary", r"Day clock boundary: 44/44 passed"),
+    ("test_day_clock_boundary_board", r"Day clock boundary board: 34/34 passed"),
+    ("test_tmp_baselines_imported", r"Imported source TMP title baselines: PASS"),
+    ("test_tmp_titles_imported", r"Imported source TMP titles: PASS"),
+    ("test_source_scrollbar", r"Source scrollbar: PASS"),
+    ("test_drag_highlight_lifetime_board", r"Source highlight live board: PASS \(18 checks\)"),
+    ("test_audio_slot_owner", r"Slot lifecycle: 26/26"),
+    ("test_source_scrollrect", r"Source ScrollRect: 18/18"),
+    ("test_source_scrollrect_layout", r"Source ScrollRect first layout: PASS"),
+    ("test_save_timestamp", r"Persisted save timestamp: PASS \([1-9]\d* checks\)"),
+    ("test_options_audio_lifecycle", r"Options audio scene lifecycle: 9/9"),
+    ("test_audio_clock_board", r"Audio board clock: 16/16"),
+    ("test_source_saved_slots_board", r"Source saved rows board: PASS"),
+    ("test_source_progress_imported", r"Private source progress/board: PASS"),
+    ("test_source_fonts_3d_imported", r"Imported source 3D font components: PASS"),
+    ("test_source_font_imported", r"Imported exact source font identity and TMP metrics: PASS"),
+    ("test_source_fonts_2d_imported", r"Imported source 2D font components: PASS"),
+    ("test_source_control_parameters", r"Source control adapters: PASS \([1-9]\d* private sliders,"),
+    ("test_source_options_pause", r"Source Options/Pause layout: PASS"),
+    ("test_source_tween", r"Source tween mathematics: PASS \([1-9]\d* numeric checks\)"),
+    ("test_source_tween_lifecycle", r"Source tween lifecycle: PASS \([1-9]\d* checks\)"),
+    ("test_combat_motion_capture", r"Combat motion capture: PASS \([1-9]\d* checks\)"),
     ("test_texture_alpha_imported", r"Imported texture alpha cached pixels: PASS"),
     ("test_trade_hover_board", r"Trade hover board: PASS"),
     ("test_source_world_board", r"Source world scene lifecycle: PASS"),
@@ -107,7 +130,7 @@ def read_json(path, base):
 
 def private_inputs(root):
     """Fail before launching Godot when the private input set is incomplete."""
-    read_json(root / "data/stackcraft.json", root)
+    catalog = read_json(root / "data/stackcraft.json", root)
     read_json(root / "data/manifest.json", root)
     manifest = read_json(root / "assets/imported/manifest.json", root)
     for name in ("assets", "materials", "prefabs", "scenes"):
@@ -142,7 +165,44 @@ def private_inputs(root):
         kinds.add(kind)
     if kinds != {"png", "wav", "fbx"}:
         raise ValidationError("Private validation requires PNG, WAV and FBX assets")
+    paths.update(font_inputs(root, catalog))
     return sorted(paths)
+
+
+def font_inputs(root, catalog):
+    """Require supplemental runtime font/metrics/license bytes, never silent fallback."""
+    base = root / "assets/imported/fonts"
+    manifest = read_json(base / "manifest.json", root)
+    if manifest.get("source_commit") != catalog.get("provenance", {}).get("source_commit"):
+        raise ValidationError("Font supplement source commit differs from catalog")
+    if manifest.get("missing") != [] or not manifest.get("fonts"):
+        raise ValidationError("Private font manifest needs complete nonempty source bindings")
+    if not isinstance(manifest.get("inputs"), dict) or not manifest["inputs"]:
+        raise ValidationError("Private font input provenance required")
+    for source in manifest["inputs"].values():
+        if not isinstance(source, dict) or not re.fullmatch(r"[0-9a-f]{64}", str(source.get("sha256", ""))) or not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_blob_sha1", ""))) or not source.get("repository_path"):
+            raise ValidationError("Invalid private font input provenance")
+    paths = {"fonts/manifest.json"}
+    for guid, entry in manifest["fonts"].items():
+        if not isinstance(entry, dict):
+            raise ValidationError("Invalid private font binding")
+        for path_key, hash_key in (("font_path", "ttf_sha256"), ("metrics_path", "metrics_sha256"), ("license_path", "license_sha256")):
+            relative = entry.get(path_key, "")
+            if not isinstance(relative, str) or not relative or ".." in relative or "\\" in relative or ":" in relative or PurePosixPath(relative).is_absolute() or PurePosixPath(relative).as_posix() != relative:
+                raise ValidationError("Unsafe private font path")
+            path = base / relative
+            require_regular(path, root)
+            digest = entry.get(hash_key, "")
+            if not re.fullmatch(r"[0-9a-f]{64}", str(digest)) or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                raise ValidationError("Private font SHA-256 mismatch: " + relative)
+            paths.add("fonts/" + relative)
+        try:
+            metrics = json.loads((base / entry["metrics_path"]).read_text())
+        except (ValueError, UnicodeError) as error:
+            raise ValidationError("Invalid private font metrics") from error
+        if metrics.get("source_font_guid") != guid or metrics.get("source_ttf_guid") != entry.get("ttf_guid"):
+            raise ValidationError("Private font metrics GUID mismatch")
+    return paths
 
 
 def copy_file(source, destination, root):

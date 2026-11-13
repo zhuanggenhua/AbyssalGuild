@@ -8,8 +8,12 @@ static func create(assets, record: Dictionary, lift: float, source_style: bool) 
 	if pose.is_empty() or float(rect.get("x", 0.0)) <= 0 or float(rect.get("y", 0.0)) <= 0:
 		return null
 	var label := Label3D.new()
+	preload("res://scripts/ui/source_font_registry.gd").shared().bind_label(label, record)
 	label.transform = pose.transform
-	label.position.y += lift
+	# Source transform already includes its authored separation from the card.
+	# Only generated fallback geometry may request an additional native lift.
+	if not source_style:
+		label.position.y += lift
 	label.font_size = 32
 	label.outline_size = 0
 	label.no_depth_test = false
@@ -20,7 +24,7 @@ static func create(assets, record: Dictionary, lift: float, source_style: bool) 
 static func set_value(label: Label3D, value: String) -> void:
 	label.text = value
 	var rect: Vector2 = label.get_meta("source_rect_size")
-	var font := ThemeDB.fallback_font
+	var font: Font = label.font if label.font != null else ThemeDB.fallback_font
 	var pixel_width: float = maxf(font.get_string_size(value, HORIZONTAL_ALIGNMENT_LEFT, -1, label.font_size).x, 1.0)
 	var pixel_height: float = maxf(font.get_height(label.font_size), 1.0)
 	label.pixel_size = minf(rect.x / pixel_width, rect.y * 0.8 / pixel_height)

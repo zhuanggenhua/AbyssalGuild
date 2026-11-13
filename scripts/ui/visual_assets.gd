@@ -198,6 +198,12 @@ func create_board_mesh(scene_name: String, normalized_boost: float = 0.0) -> Nod
 			instance.free()
 			continue
 		instance.name = "SourceBoard"
+		var chain: Array = scene_configuration(scene_name).get("board_poses", {}).get(guid, [])
+		if chain.is_empty():
+			instance.free()
+			continue # Never substitute an unoverridden prefab transform.
+		var pose: Transform3D = preload("res://scripts/ui/craft_progress_view.gd").effective_transform(chain)
+		instance.transform = pose * Transform3D(Basis.from_scale(Vector3(1,1,-1)),Vector3.ZERO) * instance.transform
 		instance.set_meta("source_prefab_guid", guid)
 		_apply_board_materials(instance, prefab.get("materials", []))
 		update_board_mesh_boost(instance, normalized_boost)
@@ -314,3 +320,8 @@ func create_scene_background(scene_name: String) -> Node3D:
 
 func apply_source_environment(environment: Environment, scene_name: String) -> bool:
 	return preload("res://scripts/ui/source_world.gd").environment(environment, scene_configuration(scene_name))
+
+func progress_configuration(scene_name: String) -> Dictionary:
+	var result: Dictionary = scene_configuration(scene_name).get("progress", {}).duplicate(true)
+	result["world_canvas_chain"] = scene_configuration(scene_name).get("world_canvas_chain", [])
+	return result

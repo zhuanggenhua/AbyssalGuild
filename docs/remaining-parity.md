@@ -2,7 +2,7 @@
 
 This is a source-audit checklist, not a claim that the game is complete. Reference:
 StackCraft `a11a89b04cea8370476f2559b639bb9b4cbc08d8`. No Unity execution was used.
-The full private source and assets now pass the 1327-file source lock.
+The private StackCraft subtree passes the 1327-file source lock; supplemental external font inputs have their own same-commit hash lock.
 
 ## Source-backed presentation audit (2026-11-12)
 
@@ -20,12 +20,32 @@ alpha was wrong. The adapter now applies that importer semantic to both cached
 and raw loads, retaining byte-identical originals. All 115 affected locked-source
 textures are grayscale, so this does not guess colored luminance coefficients.
 
-These are not a claim of global one-to-one completion. Actual remaining code
-work includes source slider/text-toggle components, slot-template/scroll/footer
-composition, Options/Pause tree mapping, exact dependency tween/noise behavior,
-and particle/built-in-shader/lighting differences. The source TMP font is absent
-from the accessible imported source; the provided Chinese screenshot and locked
-English catalog are different variants, so no invented localization is supplied.
+These are not a claim of global one-to-one completion. Source Slider/text-toggle,
+Selectable transitions and Options/Pause component trees now have explicit adapters
+and synthetic/private tests. See [controls](source-control-adapters.md). Locked
+DOTween 1.2.790 OutQuad/jump/punch behavior and actual attack/return Transform captures
+are implemented; [tween evidence](source-tween-parity.md) distinguishes these from
+unresolved shake/RNG behavior. Source saved-slot templates and callback routing are now connected; source vertical Scrollbar geometry/input and static ASCII card-title autosizing now have bounded adapters. Dynamic TMP defaults/complex text and particle/built-in-shader/lighting differences remain.
+
+Correction: the source TMP font is present in the full locked Git tree, outside
+the sparse StackCraft working copy. GUID 8f586378b4e144a9851e7b34d9b748ee resolves to
+LiberationSans SDF; the original TTF, SDF metrics/atlas and OFL license have been
+retrieved and hash-checked privately. Static 2D/3D components now resolve their actual font references through the private registry; the separate dynamic TMP default reference remains unresolved. Its
+250 static characters include no CJK. The supplied Chinese screenshot and locked
+English catalog cannot be treated as the same source variant, and no invented
+localization is supplied.
+
+See [method audit status](source-method-audit-status.md) for the 824-member
+inventory's evidence limits and still-open branches. Source method names or passing
+related tests are not exhaustive method equivalence.
+
+Recent source-backed additions: [font bindings](source-fonts.md),
+[saved slots](source-saved-slots.md), [progress and effective Board transforms](source-progress-board-mapping.md),
+and [optional audio branches](audio-optional-branches.md). The original Board -.05
+scene override is retained; the unrelated ProgressUI .08/.002 lifts are removed.
+Camera wheel behavior over GUI and unscaled Pause-menu pan/zoom follow the source
+InputManager boundary, not the former convenience restriction. Raw hardware scroll
+unit equivalence remains unverified.
 
 ## Implemented behavior awaiting broader acceptance
 
@@ -65,7 +85,7 @@ English catalog are different variants, so no invented localization is supplied.
   connected; source built-in shader, Unity random distribution and GPU output
   are not identical or visually verified. Source-parameter camera smoothing, zoom and cycle navigation locks
   are connected, with hierarchy/pointer acceptance limitations documented. Combat jump/projectile/hurt/shake adapters are now
-  connected but use documented interpolation/noise approximations.
+  connected; jump/punch use verified dependency math, while shake/noise remains approximate.
 - Original Card/Pack FBX and independently rewritten UV/material composition are
   now bound when complete private inputs exist. This has structural/resource
   coverage, not pixel/GPU acceptance. Source-referenced price/health/nutrition labels
@@ -101,8 +121,7 @@ pending references instead of following source dangling-coroutine failures.
 The UI advances real combat time while its menu pauses scaled gameplay, emits
 attack and additive hit/critical sounds separately, and creates generated damage
 popups. Attack/return motion, private Arrow/Magic and HitUI art, hurt flash/punch and
-camera shake are now connected through a read-only presentation adapter. Native
-fonts, easing/noise and current-target approximations remain.
+camera shake are now connected through a read-only presentation adapter. Original font binding and shake/noise remain. Attack/return endpoints are now captured from actual three-dimensional presentation poses, not continuously retargeted; legacy native saves without optional visual geometry retain an explicit fallback.
 
 Expanded equipment interaction preserves panel toggles, outside-click equipment
 exceptions, day locks and unequip-drag position. Its cosmetic RNG is independent
@@ -368,3 +387,42 @@ checkpoints passed native restore/capture validation and 36 read-only evidence
 checks passed. Neither pack supplied the probabilistic Acolyte prerequisite.
 See the [bounded Blacksmith continuation](gui-smoke.md#bounded-natural-blacksmith-combat-continuation)
 for the remaining random-grind cost; this does not close natural endgame acceptance.
+
+
+Source ScrollRect vertical Elastic motion and save-operation LastSaved are now
+implemented with focused regression coverage. Remaining boundaries are native
+scrollbar skin/minimum handle/page-key behavior, touch, .NET culture formatting
+and sub-second timestamp precision. This is not entire ScrollRect/TMP parity.
+
+## Component-lifecycle and text-layout follow-up
+
+[Drag highlight lifetime](drag-highlight-lifecycle.md) now follows source pointer-down, accepted pointer-up, combat-entry and vendor setter events rather than refreshing candidates every frame. Retained target identity and source candidate predicates have live-board tests; destroyed-target exception propagation and secondary-pointer competition remain incomplete.
+
+[Persistent audio slot ownership](audio-slot-lifecycle.md) now retains every admitted voice, including overlapping requests and later null requests. Stop/reconfigure/shutdown cover both node classes. Spatial acoustic policy is deliberately absent in production until listener animation, attenuation and stereo behavior can be mapped, not guessed.
+
+[Source scrollbar](source-scrollbar.md) maps the actual continuous vertical branch, handle-only raycast, driven handle anchors/sizeDelta, unscaled repeat timing and the scene's InputSystem UI wheel multiplier. Other navigation/device branches remain bounded. [Static TMP title layout](source-tmp-single-line.md) measures private source glyph metrics and applies original quantized point-size search; all 406 scene-expanded displayable title cases use that branch, with two unnamed template appearances counted separately. Native glyph raster/SDF baseline/pixel parity remains unproven. [Source label poses](source-label-pose.md) no longer receive invented additional surface lifts.
+
+
+## Day-boundary and title-baseline follow-up
+
+[Day-clock threshold](day-clock-boundary.md) now preserves the original Update
+branch: crossing the duration stays Playing, then the next Update resets elapsed
+and triggers day end, even with zero delta or a newly added external pause. The
+Pause Continue button has its own source callback and can close an already-open
+menu at that boundary without releasing the day/vendor locks; Escape remains
+ending-cycle gated. Global Unity MonoBehaviour Update ordering is not established.
+
+[Middle title baseline](source-tmp-baseline.md) now compensates the exact source
+SDF FaceInfo baseline versus Godot shaped-line baseline formula for the verified
+static ASCII/unit-scale/center-pivot branch. This adjusts text offset, never the
+authored physical transform. The actual font's face and all 250 glyph/character
+scales are one; nonunit native raster scales are explicitly unsupported. Original
+TMP atlas sampling, shader perspective filtering and glyph-edge raster parity
+remain separate work.
+
+
+The remaining existing-Pause Options/Title admission mismatch at day ending is
+now addressed in [Pause ending actions](pause-ending-actions.md). Both use their
+source button callbacks while new-menu/Escape gates remain in force. Actual
+test-owned save/restore/fade, save failure and recoverable game-over archive paths
+are tested separately; no silent widening of deletion or save-failure behavior.

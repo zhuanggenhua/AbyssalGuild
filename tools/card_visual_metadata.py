@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from visual_scene_metadata import transform_chain
 from equipment_interaction_metadata import interaction_metadata
+from source_font_metadata import font_reference
 
 
 def annotations(documents, owner):
@@ -36,9 +37,16 @@ def annotations(documents, owner):
             if 'x' in anchored and 'y' in anchored:
                 pose['m_LocalPosition']['x'] = anchored['x']
                 pose['m_LocalPosition']['y'] = anchored['y']
-            labels[role] = {'transform_chain': copy.deepcopy(root_pose) + [pose],
+            labels[role] = {**font_reference(text), 'transform_chain': copy.deepcopy(root_pose) + [pose],
                             'color': copy.deepcopy(text['m_fontColor']),
                             'rect_size': copy.deepcopy(rect.get('m_SizeDelta', {})),
+                            'rect_pivot': copy.deepcopy(rect.get('m_Pivot', {})),
+                            'is_orthographic': text.get('m_isOrthographic'),
+                            'character_spacing': text.get('m_characterSpacing'),
+                            'word_spacing': text.get('m_wordSpacing'),
+                            'enable_kerning': text.get('m_enableKerning'),
+                            'char_width_max_adjustment': text.get('m_charWidthMaxAdj'),
+                            'font_size_base': text.get('m_fontSizeBase'),
                             'font_size': text.get('m_fontSize'),
                             'auto_size': text.get('m_enableAutoSizing'),
                             'font_size_min': text.get('m_fontSizeMin'),
@@ -65,3 +73,16 @@ def annotations(documents, owner):
                      'center': collider.get('m_Center', {}),
                      'interaction': interaction_metadata(target['fields'])}
     return {'labels': labels, 'equipment_panel': panel}
+
+
+def single_line_text_fields(text):
+    """Retain the fields read by bounded TMP measurement, no synthesized defaults."""
+    names = {'font_size':'m_fontSize', 'font_size_base':'m_fontSizeBase',
+             'font_size_min':'m_fontSizeMin', 'font_size_max':'m_fontSizeMax',
+             'auto_size':'m_enableAutoSizing', 'word_wrap':'m_enableWordWrapping',
+             'overflow_mode':'m_overflowMode', 'is_orthographic':'m_isOrthographic',
+             'character_spacing':'m_characterSpacing', 'word_spacing':'m_wordSpacing',
+             'enable_kerning':'m_enableKerning', 'char_width_max_adjustment':'m_charWidthMaxAdj',
+             'horizontal_alignment':'m_HorizontalAlignment', 'vertical_alignment':'m_VerticalAlignment'}
+    return {**font_reference(text), **{key: text.get(value) for key, value in names.items()},
+            'margin': copy.deepcopy(text.get('m_margin', {}))}

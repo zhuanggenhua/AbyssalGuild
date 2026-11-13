@@ -5,6 +5,8 @@ extends SceneTree
 const Main = preload("res://scenes/main.tscn")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
+const SourceFonts = preload("res://scripts/ui/source_font_registry.gd")
+var fonts = SourceFonts.new()
 var checks := 0
 var failures := 0
 var completed := false
@@ -25,7 +27,7 @@ func audit_directory(path: String, assets) -> void:
 			packed_files += 1
 			var allowed: bool = full in ["res://project.binary", "res://data/stackcraft.json", "res://assets/imported/manifest.json", "res://.godot/global_script_class_cache.cfg", "res://.godot/uid_cache.bin"]
 			if full.begins_with("res://.godot/imported/"):
-				allowed = full.get_extension() in ["ctex", "sample", "scn", "res"]
+				allowed = full.get_extension() in ["ctex", "sample", "scn", "res", "fontdata"]
 			if full.begins_with("res://.godot/exported/"):
 				allowed = full.get_extension() in ["scn", "res", "gdc"]
 			if full.begins_with("res://scripts/") or full.begins_with("res://scenes/"):
@@ -33,6 +35,11 @@ func audit_directory(path: String, assets) -> void:
 			if full.begins_with("res://assets/imported/") and full.ends_with(".import"):
 				for entry in assets.manifest.assets.values():
 					if full == assets.root_path + str(entry.path) + ".import": allowed = true
+			if full == "res://assets/imported/fonts/manifest.json": allowed = true
+			for entry in fonts.manifest.get("fonts", {}).values():
+				for key in ["font_path", "metrics_path", "license_path"]:
+					var font_path: String = fonts.root_path + str(entry[key])
+					if full == font_path or (key == "font_path" and full == font_path + ".import"): allowed = true
 			check(allowed, "runtime-only packed file: " + full)
 		name = directory.get_next()
 	directory.list_dir_end()
@@ -56,6 +63,13 @@ func run() -> void:
 	if not check(catalog.load_file() == OK and assets.load_manifest() == OK, "packed JSON catalog and visual manifest load"):
 		quit(1)
 		return
+	if not check(fonts.load_manifest() == OK and not fonts.manifest.get("fonts", {}).is_empty(), "packed private source-font manifest required"):
+		quit(1)
+		return
+	for guid in fonts.manifest.fonts:
+		var binding: Dictionary = fonts.resolve(str(guid))
+		check(binding.font != null and binding.status == "source_font_bound_native_layout", "packed exact source-font bytes and metrics: " + str(guid))
+		check(FileAccess.file_exists(fonts.root_path + str(fonts.manifest.fonts[guid].license_path)), "packed font license notice")
 	audit_directory("res://", assets)
 	for entry in assets.manifest.assets.values():
 		var path: String = assets.root_path + str(entry.path)

@@ -66,8 +66,8 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 		var pose: Dictionary = preload("res://scripts/ui/source_camera.gd").reflected_pose(title_data.get("transform_chain", []))
 		if not pose.is_empty():
 			caption.transform = pose.transform
-			caption.position.y += 0.01 # Avoid coplanar text on the source flat mesh.
 			caption.modulate = visual_assets.source_color(title_data.get("color", {}))
+	preload("res://scripts/ui/source_font_registry.gd").shared().bind_label(caption, title_data)
 	preload("res://scripts/ui/card_title_label.gd").fit(caption, title, title_data, Vector2(mesh.size.x * 0.875, mesh.size.z * 0.1))
 	add_child(caption)
 	if visual_assets != null and source_material == null:
@@ -90,7 +90,7 @@ func configure(id: int, title: String, category: int, is_pack: bool, visual_asse
 	if visual_assets != null:
 		var labels: Dictionary = appearance.get("prefab", {}).get("labels", {})
 		for role in ["price", "nutrition", "health"]:
-			var label: Label3D = preload("res://scripts/ui/card_stat_labels.gd").create(visual_assets, labels.get(role, {}), 0.01 if source_material != null else mesh.size.y / 2.0 + 0.01, source_material != null)
+			var label: Label3D = preload("res://scripts/ui/card_stat_labels.gd").create(visual_assets, labels.get(role, {}), 0.0 if source_material != null else mesh.size.y / 2.0 + 0.01, source_material != null)
 			if label != null:
 				label.name = role.capitalize()
 				stat_labels[role] = label

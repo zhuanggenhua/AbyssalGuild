@@ -7,6 +7,8 @@ const Equipment = preload("res://scripts/model/equipment_system.gd")
 const FORMAT = "abyssal-guild-campaign"
 var _session: WeakRef
 var current_scene: String = "Main"
+const SavedTime = preload("res://scripts/model/save_timestamp.gd")
+var last_saved: Dictionary = {}
 var slot_number: int = 1
 var saved_scenes: Dictionary = {}
 ## Live-only departure checkpoint; never copied into staging or serialization.
@@ -16,6 +18,7 @@ func configure(session, scene_name: String = "Main", slot: int = 1) -> void:
 	_session = weakref(session)
 	current_scene = scene_name
 	slot_number = slot
+	last_saved = {}
 
 static func next_slot(taken: Array) -> int:
 	var candidate := 1
@@ -174,13 +177,18 @@ func _restore_card(session, original, position: Vector2) -> int:
 func capture() -> Dictionary:
 	var scenes := saved_scenes.duplicate(true)
 	scenes[current_scene] = Codec.capture(_session.get_ref())
-	return {"format": FORMAT, "version": 1, "slot_number": slot_number, "current_scene": current_scene, "scenes": scenes, "global_progress": {"collection": _session.get_ref().collection.save_state(), "discovered_recipes": _session.get_ref().discovered_recipes.duplicate()}}
+	var result := {"format": FORMAT, "version": 1, "slot_number": slot_number, "current_scene": current_scene, "scenes": scenes, "global_progress": {"collection": _session.get_ref().collection.save_state(), "discovered_recipes": _session.get_ref().discovered_recipes.duplicate()}}
+
+	if not last_saved.is_empty(): result["last_saved"] = last_saved.duplicate(true)
+	return result
 
 func restore(snapshot: Variant) -> Dictionary:
 	if not snapshot is Dictionary or snapshot.get("format") != FORMAT or snapshot.get("version") != 1 or not Codec._integer(snapshot.get("slot_number"), 1):
 		return Codec._fail("Invalid campaign header")
 	if not snapshot.get("scenes") is Dictionary or not snapshot.get("current_scene") is String or not snapshot.scenes.has(snapshot.current_scene):
 		return Codec._fail("Invalid campaign scenes")
+	if snapshot.has("last_saved") and not SavedTime.valid(snapshot.last_saved):
+		return Codec._fail("Invalid persisted last_saved timestamp")
 	var merged := {"discovered_cards": {}, "seen_items": {}}
 	var recipes: Dictionary = {}
 	for name in snapshot.scenes:
@@ -217,6 +225,7 @@ func restore(snapshot: Variant) -> Dictionary:
 	var live = _session.get_ref()
 	current_scene = snapshot.current_scene
 	slot_number = int(snapshot.slot_number)
+	last_saved = snapshot.get("last_saved", {}).duplicate(true)
 	saved_scenes = snapshot.scenes.duplicate(true)
 	live.scene_name = snapshot.current_scene
 	live.world.configure(live, snapshot.current_scene)
@@ -235,6 +244,7 @@ func _validate_snapshot(snapshot: Variant) -> Dictionary:
 
 func save_file(path: String = "user://campaign.json") -> Dictionary:
 	var snapshot := capture()
+	snapshot["last_saved"] = SavedTime.now()
 	var valid := _validate_snapshot(snapshot)
 	if not valid.ok:
 		return valid
@@ -266,6 +276,7 @@ func save_file(path: String = "user://campaign.json") -> Dictionary:
 	error = DirAccess.rename_absolute(temporary, path)
 	if error != OK:
 		return Codec._fail("Campaign commit failed: " + error_string(error))
+	last_saved = snapshot.last_saved.duplicate(true)
 	return {"ok": true, "path": path}
 
 func load_file(path: String = "user://campaign.json") -> Dictionary:

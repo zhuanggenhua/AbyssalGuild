@@ -158,3 +158,18 @@ Dummy audio, so it does not prove sound quality, other distributions/machines,
 Windows/controller/touch support or original Unity rendering. The same exported
 bytes were used for both launches. Their private hashes, screenshots and save
 comparisons are retained locally, not published in the public repository.
+
+
+## Source-font PCK follow-up (2026-11-12)
+
+The source-component snapshot was imported into a fresh isolated project and
+exported as a private PCK with the official Godot 4.6.3 editor. After deleting the
+copied project, the editor-hosted pack probe passed 754 checks, including source
+font/metrics/license presence, 150 PNG, 19 WAV, four FBX and New/Save/Continue/
+production-Quit model paths. The runtime-only allowlist audited 535 pack files.
+The pack and licensed media remain outside Git and must not be published.
+
+This follow-up did not build a new standalone release executable: the verified
+export-template archive was not available at the checked locations. It proves
+pack inclusion and editor-hosted loading, not release-binary installation, GPU
+rendering or listening acceptance.

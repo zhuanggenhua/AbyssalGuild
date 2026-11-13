@@ -17,7 +17,15 @@ var volume_labels: Dictionary = {}
 var reset_dialog: ConfirmationDialog
 var last_application: Dictionary = {}
 var focus_controls: Array = []
+var source_view
+var source_slider_adapters: Dictionary = {}
+var reset_button: Button
+var close_button: Button
 var restore_focus: WeakRef
+var live_volume_reader: Callable
+var volume_initialized := false
+var volume_display: Dictionary = {}
+var source_initial_volume: Dictionary = {}
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -67,8 +75,8 @@ func _ready() -> void:
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.custom_minimum_size = Vector2(540, 110)
 	box.add_child(status_label)
-	_button(box, "Reset options…", _request_reset)
-	_button(box, "Save & close", request_close)
+	reset_button = _button(box, "Reset options…", _request_reset)
+	close_button = _button(box, "Save & close", request_close)
 	reset_dialog = ConfirmationDialog.new()
 	reset_dialog.title = "Reset application options?"
 	reset_dialog.dialog_text = "Restore audio and graphics preferences to their defaults? Saved games and campaign settings will not be changed."
@@ -87,6 +95,12 @@ func _button(parent: Node, label: String, action: Callable) -> Button:
 
 func configure(apply_adapter: Callable, hardware_modes: Array = [], save_path: String = "user://options.json") -> Dictionary:
 	adapter = apply_adapter
+	volume_initialized = false
+	volume_display.clear()
+	live_volume_reader = Callable()
+	var adapter_owner = adapter.get_object()
+	if is_instance_valid(adapter_owner) and adapter_owner.has_method("live_volume_slider"):
+		live_volume_reader = adapter_owner.live_volume_slider
 	path = save_path
 	var configured: Dictionary = model.configure(hardware_modes)
 	if not configured.ok:
@@ -95,7 +109,7 @@ func configure(apply_adapter: Callable, hardware_modes: Array = [], save_path: S
 	var result: Dictionary = model.load_file(path)
 	load_warning = not result.ok
 	dirty = false
-	last_application = model.apply_with(adapter)
+	last_application = model.apply_with(adapter, "initialize")
 	capabilities = last_application.get("capabilities", {})
 	_refresh_controls()
 	var summary: String = _application_summary()
@@ -111,10 +125,11 @@ func open() -> void:
 	if visible: return
 	var previous := get_viewport().gui_get_focus_owner()
 	restore_focus = weakref(previous) if previous != null else null
+	_initialize_volume_sliders()
 	_refresh_controls()
 	show()
 	MenuFocus.loop(focus_controls)
-	sliders.sfx.grab_focus()
+	(source_slider_adapters.get("sfx", sliders.sfx)).grab_focus()
 
 func _input(event: InputEvent) -> void:
 	if visible and not reset_dialog.visible:
@@ -122,8 +137,9 @@ func _input(event: InputEvent) -> void:
 
 func _refresh_controls() -> void:
 	for channel in sliders:
-		var value: float = model.volume_slider(channel)
+		var value: float = float(volume_display.get(channel, model.volume_slider(channel)))
 		sliders[channel].set_value_no_signal(value)
+		if source_slider_adapters.has(channel): source_slider_adapters[channel].refresh()
 		volume_labels[channel].text = "%s · %d%%" % [channel.to_upper(), roundi(value * 100)]
 	var values: Dictionary = model.values
 	buttons.resolution.text = "Resolution · unavailable (no verified mode list)" if values.resolution.is_empty() else "Resolution · %d × %d" % [values.resolution[0], values.resolution[1]]
@@ -137,17 +153,27 @@ func _refresh_controls() -> void:
 	buttons.fps_cap.disabled = not bool(capabilities.get("fps_cap", false))
 	buttons.shadow_preset.text = "Shadows · " + ["Off", "Low", "Medium", "High", "Ultra"][int(values.shadow_preset)] + (" (URP mapping unavailable)" if not capabilities.get("shadow_presets", false) else "")
 	buttons.shadow_preset.disabled = not bool(capabilities.get("shadow_presets", false))
+	if source_view != null:
+		for key in buttons:
+			buttons[key].tooltip_text = buttons[key].text
+		buttons.resolution.text = "Resolution unavailable" if values.resolution.is_empty() else "Resolution %dx%d" % [values.resolution[0], values.resolution[1]]
+		buttons.fullscreen.text = "Fullscreen (Windowed)" if values.fullscreen == "windowed" else "Fullscreen (Enabled)"
+		buttons.vsync.text = ["vSync Off", "vSync On", "vSync Half"][int(values.vsync)]
+		buttons.fps_cap.text = "FPS Unlimited" if int(values.fps_cap) == -1 else "FPS %d" % int(values.fps_cap)
+		buttons.shadow_preset.text = "Shadows " + ["Off", "Low", "Medium", "High", "Ultra"][int(values.shadow_preset)]
+		for channel in volume_labels: volume_labels[channel].text = "%s %d%%" % [channel.to_upper(),roundi(float(volume_display.get(channel, model.volume_slider(channel)))*100)]
 	if visible: MenuFocus.loop(focus_controls)
 
 func _application_summary() -> String:
 	if not last_application.get("ok", false): return "Application failed: " + str(last_application.get("error", "Unknown adapter error"))
 	var warnings: Array = last_application.get("warnings", [])
-	return "\n".join(warnings) if not warnings.is_empty() else "Supported options applied."
+	return "\n".join(warnings) if not warnings.is_empty() else ("" if source_view != null else "Supported options applied.")
 
 func _volume_changed(value: float, channel: String) -> void:
 	var result: Dictionary = model.set_volume(channel, value)
 	if not result.ok: status_label.text = str(result.error); return
-	_apply_and_save()
+	volume_display[channel] = value
+	_apply_and_save(channel)
 
 func _cycle(key: String) -> void:
 	if buttons.has(key) and buttons[key].disabled:
@@ -155,11 +181,11 @@ func _cycle(key: String) -> void:
 		return
 	var result: Dictionary = model.cycle(key)
 	if not result.ok: status_label.text = str(result.error); return
-	_apply_and_save()
+	_apply_and_save(key)
 
-func _apply_and_save() -> void:
+func _apply_and_save(intent: String = "refresh") -> void:
 	dirty = true
-	last_application = model.apply_with(adapter)
+	last_application = model.apply_with(adapter, intent)
 	capabilities = last_application.get("capabilities", capabilities)
 	_refresh_controls()
 	var result: Dictionary = model.save_file(path)
@@ -194,7 +220,84 @@ func _request_reset() -> void:
 
 func _confirm_reset() -> void:
 	model.reset_defaults()
-	_apply_and_save()
+	_apply_and_save("reset")
+	_initialize_volume_sliders(true)
+	_refresh_controls()
+
+func _initialize_volume_sliders(reset: bool = false) -> void:
+	# GameOptionsUI has Start, not OnEnable. Reopening the same instance does
+	# not resample mixer values. Start/Reset assign Slider.value after listeners.
+	if volume_initialized and not reset: return
+	var first := not volume_initialized
+	volume_initialized = true
+	if not live_volume_reader.is_valid():
+		if reset: volume_display.clear()
+		return
+	for channel in ["sfx", "bgm"]:
+		var value: float = float(live_volume_reader.call(channel))
+		if not is_finite(value) or value < 0: continue
+		sliders[channel].step = 0
+		if first: sliders[channel].set_value_no_signal(float(source_initial_volume.get(channel, 0.5)))
+		# Do not use set_value_no_signal: a changed value invokes SetSFX/BGMVolume
+		# and persists it in the source, including first activation during a mute.
+		sliders[channel].value = value
+		volume_display[channel] = float(sliders[channel].value)
+
+func reset_source_lifecycle() -> void:
+	# Native reuses this node; Unity recreates its scene-local GameOptionsUI.
+	# Defer the new Start's mixer sampling until its first actual activation.
+	volume_initialized = false
+	volume_display.clear()
+	hide() # Newly loaded source prefab starts inactive.
+	reset_dialog.hide()
+	restore_focus = null
 
 func _sound() -> void:
 	if play_click.is_valid(): play_click.call()
+
+func configure_source(data: Dictionary, assets) -> bool:
+	if source_view != null: return true
+	var candidate = preload("res://scripts/ui/source_panel_view.gd").new()
+	add_child(candidate)
+	candidate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if not candidate.configure_panel(data,"GameOptionsUI","GameOptionsUI","",assets):
+		candidate.queue_free()
+		return false
+	source_view = candidate
+	for child in get_children():
+		if child is Control and child != candidate: child.hide()
+	for key in buttons:
+		var leaf: String = {"resolution":"ResolutionButton","fullscreen":"FullscreenButton","vsync":"vSyncButton","fps_cap":"FpsButton","shadow_preset":"ShadowButton"}[key]
+		candidate.mount_path("MainPanel/"+leaf,buttons[key])
+	candidate.mount_path("MainPanel/Footer/ResetButton",reset_button)
+	candidate.mount_path("MainPanel/Footer/CloseButton",close_button)
+	reset_button.text = "[Reset]"
+	close_button.text = "[Close]"
+	var documents: Array = []
+	var fields: Dictionary = {}
+	for prefab in data.get("referenced_prefabs",[]):
+		if prefab.get("name") == "GameOptionsUI": documents = preload("res://scripts/ui/source_prefab_documents.gd").resolve(data,"GameOptionsUI")
+	for document in documents:
+		if document.get("fields",{}).has("sliderSFX"): fields = document.fields
+	for channel in sliders:
+		var suffix: String = channel.to_upper()
+		candidate.mount_path("MainPanel/Volume"+suffix+"/Label"+suffix,volume_labels[channel])
+		candidate.mount_path("MainPanel/Volume"+suffix+"/Slider"+suffix,sliders[channel])
+		var metadata = preload("res://scripts/ui/source_control_metadata.gd").slider(documents,fields.get("slider"+suffix,{}))
+		if not metadata.is_empty():
+			source_initial_volume[channel] = float(metadata.control.get("m_Value", 0.5))
+			sliders[channel].step = 0 # Source continuous Slider, not native hundredths.
+			var view = preload("res://scripts/ui/source_slider_adapter.gd").new()
+			view.bind(sliders[channel],metadata)
+			view.allowed = func(): return is_visible_in_tree() and not reset_dialog.visible
+			source_slider_adapters[channel] = view
+	focus_controls = [buttons.resolution,buttons.fullscreen,buttons.vsync,buttons.fps_cap,buttons.shadow_preset,source_slider_adapters.get("sfx",sliders.sfx),source_slider_adapters.get("bgm",sliders.bgm),reset_button,close_button]
+	status_label.reparent(candidate.canvas)
+	status_label.show()
+	status_label.custom_minimum_size = Vector2.ZERO
+	status_label.size = Vector2(600,110)
+	status_label.add_theme_font_size_override("font_size",18)
+	var place_status := func(): status_label.position = Vector2((candidate.canvas.size.x-600)/2,(candidate.canvas.size.y+670)/2+10)
+	candidate.resized.connect(place_status)
+	place_status.call()
+	return true

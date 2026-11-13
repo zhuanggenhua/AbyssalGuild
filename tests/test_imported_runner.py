@@ -16,6 +16,29 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_pause_ending_actions": "Pause ending actions: 27/27 passed",
+    "test_day_clock_boundary": "Day clock boundary: 44/44 passed",
+    "test_day_clock_boundary_board": "Day clock boundary board: 34/34 passed",
+    "test_tmp_baselines_imported": "Imported source TMP title baselines: PASS",
+    "test_tmp_titles_imported": "Imported source TMP titles: PASS",
+    "test_source_scrollbar": "Source scrollbar: PASS",
+    "test_drag_highlight_lifetime_board": "Source highlight live board: PASS (18 checks)",
+    "test_audio_slot_owner": "Slot lifecycle: 26/26 (no acoustic parity claim)",
+    "test_source_scrollrect": "Source ScrollRect: 18/18",
+    "test_source_scrollrect_layout": "Source ScrollRect first layout: PASS",
+    "test_save_timestamp": "Persisted save timestamp: PASS (17 checks)",
+    "test_options_audio_lifecycle": "Options audio scene lifecycle: 9/9",
+    "test_audio_clock_board": "Audio board clock: 16/16",
+    "test_source_saved_slots_board": "Source saved rows board: PASS",
+    "test_source_progress_imported": "Private source progress/board: PASS",
+    "test_source_fonts_3d_imported": "Imported source 3D font components: PASS",
+    "test_source_font_imported": "Imported exact source font identity and TMP metrics: PASS",
+    "test_source_fonts_2d_imported": "Imported source 2D font components: PASS",
+    "test_source_control_parameters": "Source control adapters: PASS (3 private sliders, synthetic)",
+    "test_source_options_pause": "Source Options/Pause layout: PASS",
+    "test_source_tween": "Source tween mathematics: PASS (57 numeric checks)",
+    "test_source_tween_lifecycle": "Source tween lifecycle: PASS (16 checks)",
+    "test_combat_motion_capture": "Combat motion capture: PASS (28 checks)",
     "test_texture_alpha_imported": "Imported texture alpha cached pixels: PASS (115 textures)",
     "test_trade_hover_board": "Trade hover board: PASS",
     "test_source_world_board": "Source world scene lifecycle: PASS",
@@ -140,6 +163,16 @@ class ImportedRunnerTests(unittest.TestCase):
             self.manifest["assets"][kind] = {"path": name, "kind": kind, "sha256": hashlib.sha256(data).hexdigest()}
         (self.root / "assets/imported/image.png.import").write_text("original sidecar")
         (self.root / "assets/imported/unlisted.txt").write_text("do not copy")
+        font_root = self.root / "assets/imported/fonts"
+        font_root.mkdir()
+        metrics = canonical({"source_font_guid": "synthetic-font", "source_ttf_guid": "synthetic-ttf"})
+        blobs = {"source.ttf": b"synthetic font", "metrics.json": metrics, "LICENSE.txt": b"synthetic license"}
+        for name, payload in blobs.items(): (font_root / name).write_bytes(payload)
+        font_manifest = {"schema_version": 1, "source_commit": "synthetic", "missing": [],
+                         "inputs": {"font": {"sha256": "a" * 64, "git_blob_sha1": "b" * 40, "repository_path": "Assets/synthetic.ttf"}},
+                         "fonts": {"synthetic-font": {"ttf_guid": "synthetic-ttf", "font_path": "source.ttf", "metrics_path": "metrics.json", "license_path": "LICENSE.txt",
+                                   "ttf_sha256": hashlib.sha256(blobs["source.ttf"]).hexdigest(), "metrics_sha256": hashlib.sha256(metrics).hexdigest(), "license_sha256": hashlib.sha256(blobs["LICENSE.txt"]).hexdigest()}}}
+        (font_root / "manifest.json").write_bytes(canonical(font_manifest))
         self.save_manifest()
         groups = ("cards", "packs", "recipes", "quests", "encounters", "settings", "scenes", "referenced_prefabs")
         catalog = {"schema_version": 1, "provenance": {"source_commit": "synthetic"}, "counts": {}, "guid_index": {}}
@@ -307,6 +340,31 @@ class ImportedRunnerTests(unittest.TestCase):
                 result, calls = self.run_fixture(FAKE_MODE=mode, FAIL_PHASE="test_imported_resources", GODOT_TEST_TIMEOUT="2")
                 self.assertEqual(code, result.returncode)
                 self.assertEqual("test_imported_resources", calls[-1]["phase"])
+
+    def test_font_supplement_copied_and_hashed(self):
+        paths = runner.private_inputs(self.root)
+        self.assertIn("fonts/manifest.json", paths)
+        self.assertIn("fonts/source.ttf", paths)
+        destination = self.base / "copy"
+        runner.copy_project(self.root, destination, paths)
+        self.assertEqual((self.root / "assets/imported/fonts/metrics.json").read_bytes(),
+                         (destination / "assets/imported/fonts/metrics.json").read_bytes())
+
+    def test_font_supplement_missing_rejected_before_engine(self):
+        (self.root / "assets/imported/fonts/manifest.json").unlink()
+        with self.assertRaises(runner.ValidationError): runner.private_inputs(self.root)
+
+    def test_font_supplement_tampering_rejected(self):
+        (self.root / "assets/imported/fonts/source.ttf").write_bytes(b"tampered")
+        with self.assertRaisesRegex(runner.ValidationError, "font SHA-256 mismatch"):
+            runner.private_inputs(self.root)
+
+    def test_font_source_revision_mismatch_rejected(self):
+        path = self.root / "assets/imported/fonts/manifest.json"
+        manifest = json.loads(path.read_text()); manifest["source_commit"] = "other"
+        path.write_bytes(canonical(manifest))
+        with self.assertRaisesRegex(runner.ValidationError, "source commit differs"):
+            runner.private_inputs(self.root)
 
 
 if __name__ == "__main__":

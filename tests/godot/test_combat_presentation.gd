@@ -4,8 +4,8 @@ const Impact = preload("res://scripts/model/impact_feedback.gd")
 class SpriteAssets extends RefCounted:
 	func create_projectile(_type: int, _scene: String) -> Sprite3D: return Sprite3D.new()
 class FlashView extends Node3D:
-	var flash: float = 0
-	func set_hurt_flash(value: float) -> void: flash = value
+	var hurt_flash: float = 0
+	func set_hurt_flash(value: float) -> void: hurt_flash = value
 var checks := 0
 func check(value: bool, label: String) -> void:
 	checks += 1
@@ -24,13 +24,13 @@ func run() -> void:
 	var original: Dictionary = tasks.duplicate(true)
 	actor.position = Vector3(-2,0.12,-3)
 	p.sync(tasks, views, {}, parent)
-	check(actor.position.is_equal_approx(Vector3(0,1.145,-3)), "half melee travel source power1 and reflected Z")
+	check(actor.position.is_equal_approx(Vector3(1,0.916875,-3)), "half melee travel source power1 and reflected Z")
 	check(tasks == original, "presentation does not mutate model snapshots")
 	check(p.projectiles.is_empty(), "melee creates no projectile")
 	execution.phase = "return"
 	actor.position = Vector3(-4,0.12,-3)
 	p.sync(tasks,views,{},parent)
-	check(actor.position.is_equal_approx(Vector3(-1,1.145,-3)), "return uses current layout home with source jump")
+	check(actor.position.is_equal_approx(Vector3(-2.5,0.873125,-3)), "return uses current layout home with source jump")
 	execution.phase = "death_wait"
 	actor.position = Vector3(-4,0.12,-3)
 	p.sync(tasks,views,{},parent)
@@ -47,14 +47,14 @@ func run() -> void:
 	p.hit(2,Impact.describe(1,{"type":"normal","damage":1}))
 	p.advance(0.1)
 	p.sync({},views,{},parent)
-	check(is_equal_approx(target.flash,0.5), "source flash delay then ascending leg")
+	check(is_equal_approx(target.hurt_flash,0.75), "source flash delay then ascending leg")
 	check(p.camera_offset().length() <= 0.15 and p.camera_offset() != Vector2.ZERO, "bounded additive shake independent of gameplay RNG")
 	p.hit(2,Impact.describe(1,{"type":"normal","damage":1}))
-	check(p.hurts[2] == 0, "later hurt replaces prior timeline")
+	check(p.hurts[2].age == 0, "later hurt replaces prior timeline")
 	p.advance(0.2); p.sync({},views,{},parent)
-	check(is_equal_approx(target.flash,0.5), "source descending flash leg")
+	check(is_equal_approx(target.hurt_flash,0.9375), "source descending flash leg")
 	p.advance(0.1); p.sync({},views,{},parent)
-	check(target.flash == 0 and target.rotation == Vector3.ZERO, "expired hurt clears shader and rotation")
+	check(is_equal_approx(target.hurt_flash,0.75), "expired replacement returns to captured residual flash")
 	check(p.camera_offset() == Vector2.ZERO, "shake expires without base camera drift")
 	p.hit(2,Impact.describe(1,{"type":"miss"}))
 	check(p.hurts.is_empty(), "miss causes no hurt flash or shake")
@@ -69,7 +69,7 @@ func run() -> void:
 	p.hit(2,Impact.describe(1,{"type":"critical","damage":2}))
 	p.advance(0.1); p.sync({},views,{},parent)
 	p.reset()
-	check(p.hurts.is_empty() and target.flash == 0 and target.rotation == Vector3.ZERO, "scene reset clears transient state")
+	check(p.hurts.is_empty() and target.hurt_flash == 0 and target.rotation == Vector3.ZERO, "scene reset clears transient state")
 	parent.queue_free()
 	await process_frame
 	print("Combat presentation checks: %d passed" % checks)

@@ -39,9 +39,14 @@ func run() -> void:
 	root.add_child(board)
 	await process_frame
 	board.set_process(false)
-	var options_surface: PanelContainer = board.options_panel.get_node("OptionsSurface")
-	var surface_style: StyleBox = options_surface.get_theme_stylebox("panel")
-	check(surface_style is StyleBoxFlat and is_equal_approx(surface_style.bg_color.a, 1.0), "options surface is opaque above the paused menu")
+	if board.options_panel.source_view != null:
+		var source = board.options_panel.source_view
+		var surface: ColorRect = source.surfaces[source.layout.resolve("MainPanel")]
+		check(surface.color.is_equal_approx(Color(0.7,0.7,0.7,1)), "source options surface is opaque above paused menu")
+	else:
+		var options_surface: PanelContainer = board.options_panel.get_node("OptionsSurface")
+		var surface_style: StyleBox = options_surface.get_theme_stylebox("panel")
+		check(surface_style is StyleBoxFlat and is_equal_approx(surface_style.bg_color.a, 1.0), "fallback options surface is opaque above paused menu")
 	board.catalog.configure({})
 	board.session.configure(board.catalog)
 	board.title_panel.hide()
@@ -72,30 +77,30 @@ func run() -> void:
 		board.pause_controls[1].grab_focus()
 		await stroke(KEY_ENTER)
 		var panel = board.options_panel
-		check(panel.visible and root.gui_get_focus_owner() == panel.sliders.sfx, "Options starts at its first slider")
+		check(panel.visible and root.gui_get_focus_owner() == panel.source_slider_adapters.get("sfx", panel.sliders.sfx), "Options starts at its first slider")
 		var ring: Array = MenuFocus.loop(panel.focus_controls)
 		check(ring.size() == 4, "unsupported graphics controls are excluded from the focus loop")
 		root.gui_release_focus()
 		await stroke(KEY_TAB, true)
 		check(root.gui_get_focus_owner() == ring.back(), "lost options focus recovers inside options")
-		panel.sliders.sfx.grab_focus()
+		panel.source_slider_adapters.get("sfx", panel.sliders.sfx).grab_focus()
 		for index in range(8):
 			await stroke(KEY_TAB)
 			check(root.gui_get_focus_owner() == ring[(index + 1) % ring.size()], "options Tab cannot escape behind overlay")
 		await stroke(KEY_TAB, true)
 		check(root.gui_get_focus_owner() == ring.back(), "options reverse Tab wraps")
-		panel.sliders.sfx.grab_focus()
+		panel.source_slider_adapters.get("sfx", panel.sliders.sfx).grab_focus()
 		var volume: float = panel.sliders.sfx.value
 		await stroke(KEY_LEFT)
-		check(root.gui_get_focus_owner() == panel.sliders.sfx and panel.sliders.sfx.value < volume, "slider arrows still edit volume without losing focus")
+		check(root.gui_get_focus_owner() == panel.source_slider_adapters.get("sfx", panel.sliders.sfx) and panel.sliders.sfx.value < volume, "slider arrows still edit volume without losing focus")
 		panel._request_reset()
 		await process_frame
 		await stroke(KEY_ESCAPE)
 		check(panel.visible and not panel.reset_dialog.visible and board.pause_overlay.visible, "cancel reset keeps options and pause open")
-		panel.sliders.bgm.grab_focus()
+		panel.source_slider_adapters.get("bgm", panel.sliders.bgm).grab_focus()
 		DirAccess.make_dir_absolute(board.options_path + ".tmp")
 		await stroke(KEY_ESCAPE)
-		check(panel.visible and root.gui_get_focus_owner() == panel.sliders.bgm, "save failure keeps current options focus")
+		check(panel.visible and root.gui_get_focus_owner() == panel.source_slider_adapters.get("bgm", panel.sliders.bgm), "save failure keeps current options focus")
 		DirAccess.remove_absolute(board.options_path + ".tmp")
 		await stroke(KEY_ESCAPE)
 		check(not panel.visible and board.pause_overlay.visible and root.gui_get_focus_owner() == board.pause_controls[1], "options close restores its menu opener")

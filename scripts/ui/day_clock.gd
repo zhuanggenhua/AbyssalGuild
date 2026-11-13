@@ -27,7 +27,7 @@ static func resolve(source: Dictionary, scene_name: String) -> Dictionary:
 				if not reference is Dictionary or str(reference.get("guid", "")).is_empty(): return fallback
 				guids.append(str(reference.guid))
 			var color: Dictionary = fill.get("m_Color", {})
-			return {"source_backed": true, "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
+			return {"source_backed": true, "text_record": Prefs._fields(documents, fields.get("dayText", {})), "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
 	return fallback
 
 func _init() -> void:
@@ -57,6 +57,7 @@ func _init() -> void:
 func configure(source: Dictionary, scene_name: String, visual_assets) -> void:
 	source_config = resolve(source, scene_name)
 	assets = visual_assets
+	preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(self, source_config.get("text_record", {}))
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = source_config.color
 	progress.add_theme_stylebox_override("fill", fill)

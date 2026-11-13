@@ -50,9 +50,9 @@ options, save archives, legacy adoption, modal transactions and settings remain
 caller-owned. The save viewport hosts a native scrollable transaction list; its
 footer says Archive All and retains recoverable archiving, not permanent deletion.
 Original TMP font is unresolved, and character spacing/glyph metrics are not
-claimed equivalent. Native mounted slider/toggle widgets still need their own
-source graphics/interaction adapter; the static source hierarchy alone does not
-make them equivalent. Horizontal footer layouts currently use serialized source
+claimed equivalent. Mounted Prefs slider/toggle widgets now use the source component adapters
+described in source-control-adapters.md; source TMP glyph metrics and untested
+touch/out-of-window pointer behavior remain explicit limits. Horizontal footer layouts currently use serialized source
 RectTransforms; dynamic preferred-text-width relayout is not implemented.
 External modal/options prefab instances and screen fade remain caller-owned.
 Source version text runtime updates and saved-slot prefab population are not

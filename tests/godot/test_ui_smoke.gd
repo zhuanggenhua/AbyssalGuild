@@ -354,7 +354,7 @@ func _test_source_camera_interaction(board) -> void:
 	zoom.button_index = MOUSE_BUTTON_WHEEL_UP
 	zoom.pressed = true
 	zoom.position = screen
-	board._unhandled_input(zoom)
+	board._input(zoom) # Source wheel is observed before GUI can consume it.
 	board._update_camera_motion(0.016) # Source zoom changes a smoothed target, not an immediate transform.
 	check(not board.camera.global_transform.is_equal_approx(before_transform) or not is_equal_approx(board.camera.fov, before_fov) or not is_equal_approx(board.camera.size, before_size), "wheel zoom changes camera")
 	var destination := Vector2(4, -1)

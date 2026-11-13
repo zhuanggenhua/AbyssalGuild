@@ -45,7 +45,7 @@ func run() -> void:
 	panel._cycle("resolution")
 	check(plans.back().options.resolution == [1280, 720], "resolution cycles only verified modes")
 	panel._cycle("fps_cap")
-	check(plans.back().options.fps_cap == 30 and plans.back().fps_overridden_by_vsync and panel.buttons.fps_cap.text.contains("overridden"), "VSync precedence is explicit")
+	check(plans.back().options.fps_cap == 30 and plans.back().fps_overridden_by_vsync and (panel.buttons.fps_cap.text.contains("overridden") or panel.buttons.fps_cap.tooltip_text.contains("overridden")), "VSync precedence is explicit")
 	panel._cycle("vsync")
 	check(panel.model.values.vsync == 2 and panel.status_label.text.contains("Half VSync unsupported"), "Half VSync reported unsupported rather than silently mapped")
 	panel._cycle("vsync")

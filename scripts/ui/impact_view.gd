@@ -1,6 +1,9 @@
 extends Node3D
 ## Generated semantic popup, independent of target lifetime and simulation speed.
-## Source punch amplitude/lifetime with an explicitly approximate decaying sine.
+## Source DOTween 1.2.790 additive piecewise OutQuad punch.
+const SourceTween = preload("res://scripts/ui/source_tween.gd")
+var punch_plan: Dictionary = {}
+var fallback_scale := Vector3.ONE
 var elapsed: float = 0.0
 var duration: float = 1.0
 var caption: Label3D
@@ -10,6 +13,8 @@ func configure(descriptor: Dictionary, target: Vector3, kind: String, assets = n
 	var offset: Vector3 = descriptor.popup.defender_local_offset
 	position = target + Vector3(offset.x, offset.y, -offset.z)
 	duration = float(descriptor.popup.duration)
+	punch_plan = SourceTween.punch_plan(descriptor.popup.punch_scale, duration)
+	fallback_scale = scale
 	caption = Label3D.new()
 	caption.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	caption.no_depth_test = true
@@ -26,13 +31,9 @@ func configure(descriptor: Dictionary, target: Vector3, kind: String, assets = n
 			caption.hide()
 func _process(delta: float) -> void:
 	elapsed += delta
+	if source_popup != null:
+		source_popup.scale = SourceTween.punch_sample(punch_plan, source_scale, elapsed)
+	else:
+		scale = SourceTween.punch_sample(punch_plan, fallback_scale, elapsed)
 	if elapsed >= duration:
 		queue_free()
-		return
-	var punch: float = 0.15 * sin(elapsed / duration * TAU * 10.0) * (1.0 - elapsed / duration)
-	if source_popup != null:
-		source_popup.scale = source_scale * Vector3(1.0 + punch, 1.0 + punch, 1.0)
-	else:
-		scale = Vector3(1.0 + punch, 1.0 + punch, 1.0)
-	if caption != null:
-		caption.modulate.a = clampf((duration - elapsed) * 3.0, 0.0, 1.0)

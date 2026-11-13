@@ -1,0 +1,20 @@
+extends SceneTree
+const Registry = preload("res://scripts/ui/source_font_registry.gd")
+func _init() -> void:
+	var registry = Registry.new()
+	assert(registry.load_manifest("user://missing-font-manifest.json") == ERR_FILE_NOT_FOUND)
+	var missing = registry.resolve("synthetic-unmapped-guid")
+	assert(missing.font == null and missing.status == "missing_source_font_binding")
+	var label := Label3D.new()
+	var result = registry.bind_label(label, {"font_guid": "synthetic-unmapped-guid"})
+	assert(result.font == null and label.font == null)
+	assert(label.get_meta("source_font_status") == "missing_source_font_binding")
+	label.free()
+	var path := "user://unsafe-font-manifest.json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(JSON.stringify({"schema_version": 1, "fonts": {"synthetic": {"font_path": "../outside.ttf", "metrics_path": "metrics.json", "license_path": "LICENSE"}}}))
+	file.close()
+	assert(registry.load_manifest(path) == ERR_PARSE_ERROR)
+	DirAccess.remove_absolute(path)
+	print("Source font registry explicit fallback and path safety: PASS")
+	quit()

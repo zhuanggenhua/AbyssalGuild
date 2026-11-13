@@ -66,6 +66,7 @@ var equipment_display = EquipmentDisplay.new()
 var pressed_panel: int = -1
 var right_pressed_panel: int = -1
 var feedback = AudioFeedback.new()
+var source_audio_clock = preload("res://scripts/ui/source_audio_clock.gd").new()
 var slot_root: String = "user://slots"
 var legacy_paths: Array[String] = ["user://session.json", "user://campaign.json"]
 var slots = SaveSlots.new()
@@ -112,6 +113,7 @@ var session = Session.new()
 var camera: Camera3D
 var source_light: DirectionalLight3D
 var panning: bool = false
+var camera_drag_origin := Vector2.ZERO
 var views: Dictionary = {}
 var running: bool = false
 var selected: int = -1
@@ -139,6 +141,11 @@ var title_cancel_button: Button
 var title_back_button: Button
 var title_panel: Control
 var source_title
+var source_saved_rows
+var recovery_window: Window
+var recovery_button: Button
+var duration_adapter: Control
+var friendly_adapter: Control
 var title_options_button: Button
 var title_status: Label
 var day_clock
@@ -169,6 +176,7 @@ var hovered_trade_index: int = -1
 var hovered_card_id: int = -1
 var hovered_panel_owner: int = -1
 var card_drag_targets: Dictionary = {}
+var drag_highlights = preload("res://scripts/ui/drag_highlight_lifetime.gd").new()
 var _card_pointer := Vector2.ZERO
 var _card_pointer_known: bool = false
 var _hover_view_instance: int = 0
@@ -201,6 +209,8 @@ func _ready() -> void:
 	friendly_choice.text = TitleGameplayPrefs.friendly_text(friendly_choice.button_pressed)
 	visual_assets.load_manifest()
 	_configure_source_title()
+	options_panel.configure_source(catalog.data, visual_assets)
+	_configure_source_pause()
 	hud_layout.configure(catalog.data)
 	_configure_source_hud()
 	feedback.configure(catalog, visual_assets)
@@ -310,12 +320,16 @@ func _play_ui_click() -> void:
 	feedback.play_event("Click")
 
 func _text_button_allowed(button: Button) -> bool:
+	if recovery_window != null and recovery_window.visible and not recovery_window.is_ancestor_of(button): return false
 	if scene_transition.blocks_input() or quit_dispatched or _navigation_modal_active(): return false
 	if options_panel != null and options_panel.visible: return false
 	if title_panel != null and title_panel.is_ancestor_of(button):
 		if source_title != null and title_home.is_ancestor_of(button) and title_navigation.destination != TitleNavigation.HOME: return false
 		return _title_navigation_allowed()
-	if pause_overlay != null and pause_overlay.is_ancestor_of(button): return running and session.phase == "playing"
+	if pause_overlay != null and pause_overlay.is_ancestor_of(button):
+		# Existing source Pause buttons remain usable if day end arrives later.
+		# Cancel/new-menu admission is gated separately; these retain their owner.
+		return running and pause_overlay.visible
 	return running and not _ui_pause_active()
 
 func _friendly_changed(enabled: bool) -> void:
@@ -548,6 +562,15 @@ func _configure_source_title() -> void:
 	var native_saves := title_saves
 	for pair in [["new", title_new_button], ["load", title_load_button], ["options", title_options_button], ["quit", title_quit_button], ["duration_label", duration_label], ["duration", duration], ["friendly", friendly_choice], ["confirm", title_confirm_button], ["cancel", title_cancel_button], ["saves_close", title_back_button], ["saves_clear", archive_all_button]]:
 		candidate.mount(pair[0], pair[1])
+	var source_controls: Dictionary = candidate.bind_source_controls(catalog.data)
+	if not source_controls.get("duration", {}).is_empty():
+		duration_adapter = preload("res://scripts/ui/source_slider_adapter.gd").new()
+		duration_adapter.bind(duration, source_controls.duration)
+		duration_adapter.allowed = _title_navigation_allowed
+	if not source_controls.get("friendly", {}).is_empty():
+		friendly_adapter = preload("res://scripts/ui/source_text_toggle_adapter.gd").new()
+		friendly_adapter.bind(friendly_choice, source_controls.friendly)
+		friendly_adapter.allowed = _title_navigation_allowed
 	title_confirm_button.text = "Confirm"
 	title_cancel_button.text = "Cancel"
 	title_back_button.text = "Close"
@@ -576,6 +599,7 @@ func _configure_source_title() -> void:
 	title_saves = candidate.saves_overlay
 	old_panel.hide()
 	old_panel.queue_free()
+	_install_saved_rows()
 	_sync_title_destination()
 	board_mesh.hide() # Source Title is Canvas artwork, not a generated 3D board.
 
@@ -583,6 +607,7 @@ func _title_navigation_allowed() -> bool:
 	return not scene_transition.active() and not running and not quit_dispatched and not options_panel.visible and not _navigation_modal_active()
 
 func _sync_title_destination() -> void:
+	if recovery_window != null and title_navigation.destination != TitleNavigation.SAVES: recovery_window.hide()
 	title_home.visible = source_title != null or title_navigation.destination == TitleNavigation.HOME
 	title_preferences.visible = title_navigation.destination == TitleNavigation.PREFS
 	title_saves.visible = title_navigation.destination == TitleNavigation.SAVES
@@ -594,7 +619,8 @@ func _open_title_preferences() -> void:
 	if not _title_navigation_allowed(): return
 	title_navigation.open(TitleNavigation.PREFS)
 	_sync_title_destination()
-	duration.grab_focus()
+	(duration_adapter if duration_adapter != null else duration).grab_focus()
+	MenuFocus.loop([duration_adapter if duration_adapter != null else duration, friendly_adapter if friendly_adapter != null else friendly_choice, title_confirm_button, title_cancel_button])
 
 func _open_title_saves() -> void:
 	if not _title_navigation_allowed(): return
@@ -602,9 +628,11 @@ func _open_title_saves() -> void:
 	_refresh_slots()
 	_sync_title_destination()
 	title_back_button.grab_focus()
+	if source_saved_rows != null: source_saved_rows.update_focus()
 
 func _title_back() -> void:
 	if not _title_navigation_allowed(): return
+	if recovery_window != null: recovery_window.hide()
 	var previous: String = title_navigation.destination
 	title_navigation.open(TitleNavigation.HOME)
 	_sync_title_destination()
@@ -650,6 +678,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game() -> void:
+	options_panel.reset_source_lifecycle()
 	world_post_process.configure(catalog.data, session.scene_name)
 	journal_slide.reset(MenuSlide.initial_state(catalog.data).open)
 	title_navigation.open(TitleNavigation.HOME)
@@ -722,6 +751,7 @@ func _enter_game() -> void:
 	if not focus.is_empty(): _focus_camera_position(focus.target_position, float(focus.duration))
 
 func _process(delta: float) -> void:
+	_advance_source_audio_frame(delta)
 	_sync_source_info()
 	_transition_pause_frame = scene_transition.blocks_input()
 	if _transition_pause_frame:
@@ -737,6 +767,13 @@ func _process(delta: float) -> void:
 	scene_transition.advance(delta)
 	_sync_scene_fader()
 	_advance_running_frame(delta)
+
+func _advance_source_audio_frame(real_delta: float) -> void:
+	# One sample at root-frame entry, before gameplay/transition callbacks can
+	# admit new waits. Title retains the last global scale after TimeManager dies.
+	var pace: int = session.time_pace() if running and session.phase == "playing" else 0
+	var blocked: bool = running and (scene_transition.blocks_input() or _ui_pause_active() or vendor_unlock.is_active())
+	feedback.advance_scaled_time(source_audio_clock.sample(real_delta, running, pace, blocked))
 
 func _advance_running_frame(delta: float) -> void:
 	if not running:
@@ -810,7 +847,7 @@ func _sync_views(real_delta: float = 0.0) -> void:
 		views[id].highlight(id == selected)
 		if session.combat.membership.has(id):
 			var combat_position: Vector2 = session.cards[id].position + (drag_delta if dragging == id else Vector2.ZERO)
-			views[id].position = Vector3(combat_position.x, 0.12, -combat_position.y)
+			views[id].position = Vector3(combat_position.x, 0.0, -combat_position.y)
 	var motion_records: Array = []
 	var motion_settings: Dictionary = CardDragInput.source_settings(catalog, session.scene_name)
 	var cycle_id: int = int(session.cycle.presentation_state().get("card_id", -1))
@@ -889,6 +926,7 @@ func _configure_source_hud() -> void:
 			icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			stats_box.add_child(icon)
 			var stat_label := _label("", stats_box, int(hud_layout.field(field + "Label", "m_fontSize", 30)))
+			preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(stat_label, hud_layout.text_record("CardStatsUI/" + field + "Label"))
 			stat_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			stat_labels.append(stat_label)
 	var stats_style := StyleBoxFlat.new()
@@ -904,10 +942,22 @@ func _configure_source_hud() -> void:
 	journal_tabs.position = header.position
 	journal_tabs.size = header.size
 	journal_tabs.add_theme_constant_override("separation", 0)
-	for tab in journal_tabs.get_children(): tab.add_theme_font_size_override("font_size", 32)
+	for index in journal_tabs.get_child_count():
+		var tab: Control = journal_tabs.get_child(index)
+		tab.add_theme_font_size_override("font_size", 32)
+		var source_path := "MenuPanel/Header/" + ("QuestsToggle" if index == 0 else "RecipesToggle") + "/Label"
+		preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(tab, hud_layout.text_record(source_path))
 	ledger.position = Vector2(20, header.size.y+10)
 	ledger.size = Vector2(menu.size.x-40, menu.size.y-header.size.y-20)
 	ledger.add_theme_font_size_override("normal_font_size", 30)
+	var source_fonts = preload("res://scripts/ui/source_font_registry.gd").shared()
+	# Source MenuView adds TMP dynamically; its font is the locked TMP Settings default.
+	source_fonts.bind_control(ledger, {"font_guid": str(source_fonts.manifest.get("tmp_default_font_guid", ""))})
+	source_fonts.bind_control(detail_toggle, hud_layout.text_record("MenuPanel/MenuToggle/Label"))
+	source_fonts.bind_control(watermark, hud_layout.text_record("Watermark"))
+	source_fonts.bind_control(card_hover.header, hud_layout.text_record("InfoPanel/InfoText"))
+	source_fonts.bind_control(card_hover.body, hud_layout.text_record("InfoPanel/InfoText"))
+	source_fonts.bind_control(info_action, hud_layout.text_record("InfoPanel/ActionButton"))
 	var backdrop := StyleBoxFlat.new()
 	backdrop.bg_color = hud_layout.color("MenuToggle", Color(0, 0, 0, 0.9019608))
 	detail_panel.add_theme_stylebox_override("panel", backdrop)
@@ -977,8 +1027,11 @@ func _clear_card_hover() -> void:
 		_sync_source_info()
 
 func _clear_drag_target_feedback() -> void:
-	card_drag_targets = {}
-	CardInteraction.apply_target_highlights(views, {})
+	if drag_highlights.accepted_up(): card_drag_targets = {}
+
+func _capture_drag_highlights(id: int) -> void:
+	if session.combat.membership.has(id): return
+	card_drag_targets.merge(drag_highlights.capture(session,views,trade_zones,trade_views,id))
 
 func _clear_card_feedback() -> void:
 	_card_pointer_known = false
@@ -986,6 +1039,8 @@ func _clear_card_feedback() -> void:
 	_feedback_scene = ""
 	_clear_card_hover()
 	_clear_drag_target_feedback()
+	drag_highlights.dispose()
+	card_drag_targets.clear()
 	if is_instance_valid(craft_progress): craft_progress.reset()
 
 func _hover_source_visible(id: int, panel: bool = false) -> bool:
@@ -1050,26 +1105,20 @@ func _sync_card_feedback() -> void:
 		_feedback_session_instance = session.get_instance_id()
 		_feedback_scene = session.scene_name
 	if not running or not hud.visible or title_panel.visible:
-		_clear_card_feedback()
+		_clear_card_hover()
+		if is_instance_valid(craft_progress): craft_progress.reset()
 		return
 	if _ui_pause_active() or _navigation_modal_active():
 		_clear_card_hover()
-		_clear_drag_target_feedback()
 		craft_progress.reset()
 		return # Existing held pointer permission/model pause is never changed here.
 	var progress: Dictionary = CardInteraction.crafting_progress(session)
 	if vendor_unlock.is_active():
 		for descriptor in progress.values(): descriptor.paused = true
+	craft_progress.bind_source(visual_assets, session.scene_name)
 	craft_progress.sync(progress)
 	var gui: Control = get_viewport().gui_get_hovered_control()
 	_sync_card_hover(gui)
-	var candidates: Array = []
-	var allowed: bool = _card_pointer_known and _allows_card_actions() and dragging >= 0 and drag_grant == dragging and session.cards.has(dragging) and (gui == null or gui == hud)
-	if allowed:
-		for stack_id in session.stacks:
-			if session.can_move_to_stack(dragging, stack_id): candidates.append(stack_id)
-	card_drag_targets = CardInteraction.drag_targets(session, dragging, candidates, allowed)
-	CardInteraction.apply_target_highlights(views, card_drag_targets)
 
 # Pointer routing is separate from ray casting for deterministic adapter tests.
 func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
@@ -1121,6 +1170,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	drag_anchor = session.card_target_position(dragging) if session.cards.has(dragging) else Vector2.ZERO
 	drag_delta = Vector2.ZERO
 	drag_moved = false
+	if dragging >= 0: _capture_drag_highlights(dragging)
 	_sync_card_feedback()
 
 func _board_point(screen: Vector2) -> Vector2:
@@ -1138,10 +1188,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if not running or _ui_pause_active(): return
 	if event is InputEventMouseButton:
-		if event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
-			_zoom_camera(1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0)
-		if event.button_index == MOUSE_BUTTON_MIDDLE:
-			panning = event.pressed and _camera_input_enabled()
 		if event.button_index == MOUSE_BUTTON_RIGHT:
 			var right_hit: Dictionary = _pick_target(event.position)
 			if event.pressed:
@@ -1154,10 +1200,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				var hit: Dictionary = _pick_target(event.position)
-				panning = _camera_input_enabled() and int(hit.card_id) < 0
+				if _camera_input_enabled() and int(hit.card_id) < 0:
+					panning = true
+					camera_drag_origin = event.position
 				_begin_card_press(hit, event.position)
 			else:
-				panning = false
+				if _camera_input_enabled(): panning = false
 				_finish_drag(event.position)
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
@@ -1180,13 +1228,20 @@ func _input(event: InputEvent) -> void:
 		return
 	if running and (event is InputEventMouseMotion or event is InputEventMouseButton):
 		_record_card_pointer(event.position)
-	# Middle-button pan bypasses GUI blocking, matching the source input path.
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE:
-		panning = event.pressed and _camera_input_enabled()
-	if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_MIDDLE] and not event.pressed:
-		panning = false
-	if event is InputEventMouseMotion and panning and _camera_input_enabled():
-		camera_motion.pan(event.relative, camera.position.y)
+	# Source HandleZoom never checks EventSystem: observe wheel before GUI, but
+	# do not consume it (the same event can also scroll a source-style panel).
+	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP,MOUSE_BUTTON_WHEEL_DOWN]:
+		_zoom_camera(event.factor * (1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0))
+	# Middle press bypasses GUI; real InputManager locks skip all HandlePan work.
+	if _camera_input_enabled():
+		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
+			panning = true
+			camera_drag_origin = event.position
+		if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_MIDDLE] and not event.pressed:
+			panning = false
+		if event is InputEventMouseMotion and panning:
+			camera_motion.pan(event.position - camera_drag_origin,camera.position.y)
+			camera_drag_origin = event.position
 	if event is InputEventMouseButton and not event.pressed and get_viewport().gui_get_hovered_control() != null:
 		pressed_panel = -1
 		right_pressed_panel = -1
@@ -1221,7 +1276,7 @@ func _finish_drag(screen: Vector2) -> void:
 	drag_grant = -1
 	session.combat.dragged.clear()
 	dragging = -1
-	_clear_drag_target_feedback()
+	if id >= 0 and session.cards.has(id): _clear_drag_target_feedback()
 	if (not _allows_card_actions() and not carried_press) or not session.cards.has(id):
 		session.drag.finish_standard()
 		drag_delta = Vector2.ZERO
@@ -1491,6 +1546,7 @@ func _refresh_slots() -> void:
 	if not inventory.ok:
 		title_status.text = "Cannot read saves: " + str(inventory.error)
 		continue_button.disabled = true
+		if source_saved_rows != null: source_saved_rows.sync([])
 		return
 	var selected_index: int = -1
 	for entry in inventory.slots:
@@ -1526,6 +1582,7 @@ func _refresh_slots() -> void:
 	archive_selected_button.disabled = selected_slot <= 0
 	archive_all_button.disabled = listed_slot_ids.is_empty()
 	_refresh_archives()
+	if source_saved_rows != null: source_saved_rows.sync(inventory.slots)
 
 func _select_slot(index: int) -> void:
 	var entry: Variant = slot_picker.get_item_metadata(index)
@@ -1620,6 +1677,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	if running: options_panel.reset_source_lifecycle()
 	world_post_process.cancel()
 	journal_slide.reset(false)
 	_clear_card_feedback()
@@ -1663,7 +1721,6 @@ func _notification(what: int) -> void:
 	if what in [NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]:
 		_card_pointer_known = false
 		_clear_card_hover()
-		_clear_drag_target_feedback()
 		return
 	if what != NOTIFICATION_WM_CLOSE_REQUEST or scene_transition.active() or quit_dispatched or _navigation_modal_active(): return
 	if options_panel != null and options_panel.visible and options_panel.dirty:
@@ -1757,6 +1814,8 @@ func _engage_selected() -> void:
 	_refresh()
 
 func _on_session_event(kind: String, payload: Dictionary) -> void:
+	if kind == "combat_entered":
+		if drag_highlights.enter_combat(): card_drag_targets.clear()
 	if running: world_post_process.event(kind, payload)
 	if kind == "day_ended":
 		journal_slide.day_ended()
@@ -1782,9 +1841,12 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 	elif kind == "recipe_pop_requested": feedback.play_event("Pop")
 	elif kind == "puff_requested": _spawn_puff(payload)
 	elif kind == "combat_attack_started":
+		_capture_combat_motion(payload)
 		feedback.play_event(ImpactFeedback.attack_sound(int(payload.combat_type)))
 	elif kind == "combat_hit":
 		_present_impact(payload)
+	elif kind == "combat_return_started":
+		_capture_combat_motion(payload)
 	elif kind == "encounter":
 		notice.text = "Event: " + str(payload.get("message", ""))
 
@@ -1874,8 +1936,6 @@ func _update_board_geometry() -> void:
 	original_board = visual_assets.create_board_mesh(session.scene_name, boost)
 	if original_board != null:
 		add_child(original_board)
-		original_board.position.y = -0.05
-		original_board.scale.z = -1.0
 		board_mesh.hide()
 	else:
 		board_mesh.show()
@@ -1907,7 +1967,7 @@ func _combat_geometry() -> Array:
 
 # Model coordinates retain Unity XZ. Only the view reflects source +Z to Godot -Z.
 func _camera_input_enabled() -> bool:
-	return running and session.phase in ["playing", "selling"] and not _ui_pause_active() and not vendor_unlock.is_active()
+	return running and session.phase in ["playing", "selling"] and not vendor_unlock.is_active() and not scene_transition.blocks_input()
 
 func _clamp_camera() -> void:
 	if session.board_bounds is Rect2: camera_motion.set_bounds(session.board_bounds)
@@ -1925,17 +1985,11 @@ func _focus_camera_position(source_position: Vector3, duration: float = 0.5) -> 
 func _update_camera_motion(delta: float) -> void:
 	_clamp_camera()
 	var enabled: bool = _camera_input_enabled()
-	if not enabled: panning = false
-	if enabled:
-		# Explicit native convenience extension; source only supports pointer pan.
-		var direction := Vector3.ZERO
-		if Input.is_physical_key_pressed(KEY_A): direction.x -= 1
-		if Input.is_physical_key_pressed(KEY_D): direction.x += 1
-		if Input.is_physical_key_pressed(KEY_W): direction.z -= 1
-		if Input.is_physical_key_pressed(KEY_S): direction.z += 1
-		if direction != Vector3.ZERO:
-			camera_motion.target += direction * delta * 8
-			camera_motion.clamp_target()
+	# Source early-return under input locks preserves dragOrigin/isDragging.
+	# On unlock, sample the accumulated pointer delta even without a new motion.
+	if enabled and panning and _card_pointer_known:
+		camera_motion.pan(_card_pointer - camera_drag_origin,camera.position.y)
+		camera_drag_origin = _card_pointer
 	camera.position = camera_motion.step(camera.position, delta, enabled)
 
 func _layout_states() -> Array:
@@ -2243,7 +2297,7 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	_label("PAUSED · MENU", box, 26)
 	_label("Your selected time pace is preserved.", box, 15)
 	pause_controls = [
-		_button("Continue [Escape]", box, _toggle_pause_menu, true),
+		_button("Continue [Escape]", box, _continue_pause_menu, true),
 		_button("Options", box, _open_options, true),
 		_button("Save & return to title", box, _request_return_title, true),
 	]
@@ -2254,6 +2308,15 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 
 func _ui_pause_active() -> bool:
 	return scene_transition.blocks_input() or (running and ((pause_overlay != null and pause_overlay.visible) or (options_panel != null and options_panel.visible)))
+
+## Source ContinueButton invokes ToggleActiveState directly, independently of
+## PauseMenu.Update's IsEndingCycle Cancel gate. Close only this existing owner.
+func _continue_pause_menu() -> void:
+	if not running or not pause_overlay.visible or scene_transition.blocks_input() or options_panel.visible: return
+	pause_overlay.hide()
+	_refresh()
+	MenuFocus.restore(pause_restore_focus, day_clock)
+	pause_restore_focus = null
 
 func _toggle_pause_menu() -> void:
 	if scene_transition.blocks_input(): return
@@ -2276,7 +2339,7 @@ func _open_options() -> void:
 	if scene_transition.blocks_input(): return
 	if quit_dispatched or _navigation_modal_active(): return
 	if running:
-		if session.phase != "playing": return
+		if session.phase != "playing" and not pause_overlay.visible: return
 		if not pause_overlay.visible: _toggle_pause_menu()
 	options_panel.open()
 	if running: _refresh()
@@ -2288,10 +2351,31 @@ func _handle_escape() -> void:
 	if running and session.phase != "playing": return
 	if options_panel.visible:
 		options_panel.request_close()
+	elif recovery_window != null and recovery_window.visible:
+		_close_recovery()
 	elif running:
 		_toggle_pause_menu()
 	else:
 		_title_back()
+
+func _sample_combat_pose(id: int) -> Vector3:
+	# Sample same-frame tween time, not the previous rendered transform.
+	var animated: Variant = combat_presentation.sample_actor(id)
+	if animated is Vector3: return animated
+	if views.has(id) and is_instance_valid(views[id]): return views[id].global_position
+	return _sample_combat_home(id)
+
+func _sample_combat_home(id: int) -> Vector3:
+	# Rect.ArrangeRow forces ground Y=0 and caches that layout position.
+	var point: Vector2 = session.card_target_position(id)
+	return to_global(Vector3(point.x, 0, -point.y))
+
+func _capture_combat_motion(payload: Dictionary) -> void:
+	var id: int = int(payload.combat_id)
+	if not session.combat.tasks.has(id): return
+	var task: Dictionary = session.combat.tasks[id]
+	if not task.has("execution"): return
+	task["visual_motion"] = combat_presentation.capture(id, task.execution, _sample_combat_pose, _sample_combat_home, float(payload.duration))
 
 func _present_impact(payload: Dictionary) -> void:
 	var descriptor: Dictionary = ImpactFeedback.describe(int(payload.get("combat_type", 0)), payload.get("result", {}), ImpactFeedback.hit_ui_fields(catalog.data, session.scene_name))
@@ -2305,6 +2389,11 @@ func _present_impact(payload: Dictionary) -> void:
 	var popup = ImpactView.new()
 	add_child(popup)
 	popup.configure(descriptor, Vector3(target.x, 0.12, -target.y), str(payload.result.get("type", "")), visual_assets, session.scene_name, int(payload.result.get("advantage", 0)))
+	if views.has(defender) and is_instance_valid(views[defender]):
+		var local_offset: Vector3 = descriptor.popup.defender_local_offset
+		var sampled_transform: Transform3D = views[defender].global_transform
+		sampled_transform.origin = _sample_combat_pose(defender)
+		popup.global_position = sampled_transform * Vector3(local_offset.x, local_offset.y, -local_offset.z)
 
 func _sample_cycle_pose(id: int) -> Vector3:
 	var state: Dictionary = session.cycle.presentation_state()
@@ -2391,6 +2480,9 @@ func _confirm_archive_slots() -> void:
 	var result: Dictionary = slots.delete_slots(plan)
 	archive_dialog.hide()
 	_refresh_slots()
+	if source_saved_rows != null and title_saves.is_visible_in_tree() and (recovery_window == null or not recovery_window.visible):
+		var focused := get_viewport().gui_get_focus_owner()
+		if focused == null or not MenuFocus.eligible(focused): title_back_button.grab_focus()
 	if not result.ok:
 		title_status.text = "Archive failed: " + str(result.get("error", "Unknown error")) + ". Review the current files and confirm a new plan to retry."
 		if result.has("archive"):
@@ -2474,7 +2566,8 @@ func _request_scene_change(action: Callable) -> bool:
 	if quit_dispatched or not scene_transition.begin(action): return false
 	panning = false
 	pending_quit = ""
-	_clear_card_feedback()
+	_clear_card_hover()
+	if is_instance_valid(craft_progress): craft_progress.reset()
 	_sync_scene_fader()
 	return true
 
@@ -2543,3 +2636,60 @@ func _exit_tree() -> void:
 	world_post_process.cancel()
 	scene_transition.cancel()
 	session.travel_pending = false
+
+func _configure_source_pause() -> void:
+	var candidate = preload("res://scripts/ui/source_panel_view.gd").new()
+	pause_overlay.add_child(candidate)
+	candidate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if not candidate.configure_panel(catalog.data,"UIRoot","UICanvas","PauseMenu",visual_assets):
+		candidate.queue_free()
+		return
+	for child in pause_overlay.get_children():
+		if child is Control and child != candidate: child.hide()
+	for i in pause_controls.size():
+		var path: String = ["MainPanel/ContinueButton","MainPanel/OptionsButton","MainPanel/TitleButton"][i]
+		candidate.mount_path(path,pause_controls[i])
+		pause_controls[i].text = str(candidate.layout.field(candidate.layout.resolve(path),"m_text",pause_controls[i].text))
+
+func _install_saved_rows() -> void:
+	if source_title == null: return
+	source_saved_rows = source_title.install_saved_rows(catalog.data,slot_picker,_request_continue_game,_request_archive_selected,func(): return _title_navigation_allowed() and title_navigation.destination == TitleNavigation.SAVES and (recovery_window == null or not recovery_window.visible),_play_ui_click)
+	if source_saved_rows == null: return
+	# Keep selector and old action objects alive as transaction state, not duplicate UI.
+	slot_picker.hide()
+	continue_button.hide()
+	archive_selected_button.hide()
+	recovery_window = Window.new()
+	recovery_window.title = "Native recovery tools · recoverable archives and legacy saves"
+	recovery_window.exclusive = true
+	recovery_window.transient = true
+	recovery_window.size = Vector2i(660,420)
+	recovery_window.visible = false
+	title_saves.add_child(recovery_window)
+	recovery_window.close_requested.connect(_close_recovery)
+	var margin := MarginContainer.new()
+	recovery_window.add_child(margin)
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["left","top","right","bottom"]: margin.add_theme_constant_override("margin_"+side,16)
+	var box := VBoxContainer.new()
+	margin.add_child(box)
+	_label("Recoverable archives · originals retained",box,22)
+	for control in [archive_picker,restore_archive_button,legacy_picker,legacy_button]: control.reparent(box)
+	var close := _button("Close recovery tools",box,_close_recovery,true)
+	var header: Control = source_title.nodes[source_title.layout.resolve("SavedGamesUI/MainPanel/Label")]
+	recovery_button = _button("Recovery tools",header,func():
+		if not _title_navigation_allowed(): return
+		recovery_window.popup_centered()
+		MenuFocus.loop([archive_picker,restore_archive_button,legacy_picker,legacy_button,close])
+		close.grab_focus(),true)
+	recovery_button.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	recovery_button.position = Vector2(570,10)
+	recovery_button.size = Vector2(190,40)
+	source_saved_rows.footer_controls = [archive_all_button,title_back_button,recovery_button]
+	var reflow := func(): source_title.reflow_saved_footer([archive_all_button,title_back_button])
+	source_title.resized.connect(reflow)
+	reflow.call_deferred()
+
+func _close_recovery() -> void:
+	if recovery_window != null: recovery_window.hide()
+	if recovery_button != null and recovery_button.is_visible_in_tree(): recovery_button.grab_focus()

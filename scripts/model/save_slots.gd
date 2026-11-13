@@ -90,6 +90,8 @@ func _inspect_at(slot: int, root: String) -> Dictionary:
 				if read.ok and not entry.valid:
 					var current: Dictionary = snapshot.scenes[snapshot.current_scene].session
 					entry.merge({"valid": true, "recovered": candidate != path, "selected_path": candidate, "scene": snapshot.current_scene, "day": int(current.day), "quest_progress": int(current.quests.QuestProgress), "modified_unix": FileAccess.get_modified_time(candidate)}, true)
+					if snapshot.has("last_saved"):
+						entry["saved_timestamp"] = {"provenance": "persisted_save_field", "display": Campaign.SavedTime.describe(snapshot.last_saved), "value": snapshot.last_saved.duplicate(true)}
 		if not read.ok:
 			entry.errors.append({"path": candidate, "error": read.error})
 	if not entry.valid and entry.errors.is_empty():

@@ -44,6 +44,16 @@ class LinuxExportTests(unittest.TestCase):
             manifest["assets"][kind] = {"kind": kind, "path": "asset." + kind, "sha256": hashlib.sha256(content).hexdigest()}
         (self.root / "assets/imported/manifest.json").write_bytes(encoded(manifest))
         (self.root / "assets/imported/unlisted.png").write_text("never copy")
+        font_root = self.root / "assets/imported/fonts"
+        font_root.mkdir()
+        metrics = encoded({"source_font_guid": "synthetic-font", "source_ttf_guid": "synthetic-ttf"})
+        blobs = {"source.ttf": b"synthetic font", "metrics.json": metrics, "LICENSE.txt": b"synthetic license"}
+        for name, payload in blobs.items(): (font_root / name).write_bytes(payload)
+        font_manifest = {"schema_version": 1, "source_commit": "synthetic", "missing": [],
+                         "inputs": {"font": {"sha256": "a" * 64, "git_blob_sha1": "b" * 40, "repository_path": "Assets/synthetic.ttf"}},
+                         "fonts": {"synthetic-font": {"ttf_guid": "synthetic-ttf", "font_path": "source.ttf", "metrics_path": "metrics.json", "license_path": "LICENSE.txt",
+                                   "ttf_sha256": hashlib.sha256(blobs["source.ttf"]).hexdigest(), "metrics_sha256": hashlib.sha256(metrics).hexdigest(), "license_sha256": hashlib.sha256(blobs["LICENSE.txt"]).hexdigest()}}}
+        (font_root / "manifest.json").write_bytes(encoded(font_manifest))
         catalog = {"schema_version": 1, "provenance": {"source_commit": "synthetic"}, "counts": {}, "guid_index": {}}
         for group in ("cards", "packs", "recipes", "quests", "encounters", "settings", "scenes", "referenced_prefabs"):
             catalog[group] = []
@@ -91,6 +101,8 @@ class LinuxExportTests(unittest.TestCase):
         project = self.base / "project"
         runner.copy_export_project(self.root, project, runner.private_inputs(self.root))
         self.assertTrue((project / "scripts/main.gd").is_file())
+        self.assertTrue((project / "assets/imported/fonts/source.ttf").is_file())
+        self.assertTrue((project / "assets/imported/fonts/LICENSE.txt").is_file())
         for path in ("source", "tests", "tools", ".godot", ".env", "scripts/main.gd.uid", "scripts/private.txt", "assets/imported/unlisted.png"):
             self.assertFalse((project / path).exists(), path)
 
@@ -206,7 +218,7 @@ class LinuxExportTests(unittest.TestCase):
 
     def test_preset_explicitly_includes_json_and_excludes_provenance(self):
         preset = (ROOT / "export_presets.cfg").read_text()
-        self.assertIn('include_filter="data/stackcraft.json,assets/imported/manifest.json"', preset)
+        self.assertIn('include_filter="data/stackcraft.json,assets/imported/manifest.json,assets/imported/fonts/*"', preset)
         self.assertIn('data/manifest.json"', preset)
         self.assertIn('binary_format/embed_pck=false', preset)
 

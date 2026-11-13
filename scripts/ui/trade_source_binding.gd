@@ -1,5 +1,5 @@
 extends RefCounted
-## Narrow source adapter. Missing original font and built-in icon shader stay explicit.
+## Source font identity is bound; TMP layout and built-in icon shader parity stay explicit.
 const Pose = preload("res://scripts/ui/source_camera.gd")
 const MeshBinding = preload("res://scripts/ui/card_mesh_binding.gd")
 const Outline = preload("res://scripts/ui/source_card_outline.gd")
@@ -57,10 +57,12 @@ static func _label(record: Dictionary, assets) -> Label3D:
 	if float(size.get("x", 0)) <= 0: return null
 	var label := Label3D.new()
 	label.transform = pose.transform
-	label.font = ThemeDB.fallback_font
+	var font_binding: Dictionary = preload("res://scripts/ui/source_font_registry.gd").shared().bind_label(label, source)
+	if label.font == null:
+		label.font = ThemeDB.fallback_font
 	label.font_size = 100
 	# TMP world text uses one tenth of its point size in scene units. Native font
-	# glyph metrics are not TMP's missing font; retain source size rather than fit.
+	# glyph metrics differ from TMP layout; retain source size rather than fit.
 	label.pixel_size = float(source.get("m_fontSize", 1)) / 1000.0
 	label.width = float(size.x) / label.pixel_size
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if bool(source.get("m_enableWordWrapping", false)) else TextServer.AUTOWRAP_OFF
@@ -69,7 +71,7 @@ static func _label(record: Dictionary, assets) -> Label3D:
 	label.horizontal_alignment = {1:HORIZONTAL_ALIGNMENT_LEFT, 2:HORIZONTAL_ALIGNMENT_CENTER, 4:HORIZONTAL_ALIGNMENT_RIGHT}.get(int(source.get("m_HorizontalAlignment", 2)), HORIZONTAL_ALIGNMENT_CENTER)
 	label.vertical_alignment = {256:VERTICAL_ALIGNMENT_TOP, 512:VERTICAL_ALIGNMENT_CENTER, 1024:VERTICAL_ALIGNMENT_BOTTOM}.get(int(source.get("m_VerticalAlignment", 512)), VERTICAL_ALIGNMENT_CENTER)
 	label.text = str(source.get("m_text", "")) if source.get("m_text") != null else ""
-	label.set_meta("source_font_missing", true)
+	label.set_meta("source_font_missing", font_binding.font == null)
 	label.set_meta("source_text", label.text)
 	label.set_meta("source_color", label.modulate)
 	return label

@@ -6,7 +6,8 @@ func submit(key: String, priority: int, info: Dictionary) -> void:
 	if info.is_empty():
 		requests.erase(key)
 		return
-	if requests.has(key) and requests[key].info == info and requests[key].priority == priority: return
+	# Source increments RequestID on every request, even identical text.
+	# Only InfoPanel.UpdateInfo suppresses redundant text writes, not arbitration.
 	serial += 1
 	requests[key] = {"priority": priority, "serial": serial, "info": info.duplicate(true)}
 func current() -> Dictionary:

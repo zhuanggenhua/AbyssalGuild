@@ -40,3 +40,31 @@ static func vector(value: Dictionary) -> Vector2: return Vector2(float(value.get
 func color(object_name: String, fallback: Color) -> Color:
 	var value: Dictionary = field(object_name, "m_Color", {})
 	return Color(float(value.get("r", fallback.r)), float(value.get("g", fallback.g)), float(value.get("b", fallback.b)), float(value.get("a", fallback.a)))
+
+func text_record(path: String) -> Dictionary:
+	# Resolve exact UICanvas-relative hierarchy. Repeated "Label" names are not aliases.
+	var objects: Dictionary = {}
+	var transforms: Dictionary = {}
+	var owner_transforms: Dictionary = {}
+	for doc in documents:
+		if doc.get("object_type") == "GameObject": objects[str(doc.file_id)] = str(doc.fields.get("m_Name", ""))
+		if doc.get("object_type") in ["RectTransform", "Transform"]:
+			transforms[str(doc.file_id)] = doc.fields
+			owner_transforms[str(doc.fields.get("m_GameObject", {}).get("fileID", ""))] = str(doc.file_id)
+	for doc in documents:
+		var fields: Dictionary = doc.get("fields", {})
+		if not fields.has("m_fontAsset") or not fields.has("m_text"): continue
+		var current: String = str(owner_transforms.get(str(fields.get("m_GameObject", {}).get("fileID", "")), ""))
+		var names: Array[String] = []
+		var seen: Dictionary = {}
+		while transforms.has(current) and not seen.has(current):
+			seen[current] = true
+			var transform: Dictionary = transforms[current]
+			var object_name: String = str(objects.get(str(transform.get("m_GameObject", {}).get("fileID", "")), ""))
+			if object_name == "UICanvas":
+				names.reverse()
+				if "/".join(names) == path: return fields
+				break
+			names.append(object_name)
+			current = str(transform.get("m_Father", {}).get("fileID", ""))
+	return {}

@@ -105,7 +105,7 @@ func run() -> void:
 	var camera_target: Vector3 = board.camera_motion.target
 	var wheel := InputEventMouseButton.new(); wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN; wheel.pressed = true; wheel.position = panel_point
 	root.push_input(wheel); await process_frame
-	check(board.camera_motion.target == camera_target and board.hovered_card_id == fighter, "actual wheel input scrolls information without zooming board")
+	check(board.camera_motion.target != camera_target and board.hovered_card_id == fighter, "source wheel over information also zooms without dismissing tooltip")
 	var panel_click := InputEventMouseButton.new(); panel_click.button_index = MOUSE_BUTTON_LEFT; panel_click.pressed = true; panel_click.position = panel_point
 	root.push_input(panel_click); await process_frame
 	check(board.dragging == -1 and board.selected == -1, "actual information-panel click never selects or drags a card behind it")
@@ -200,11 +200,11 @@ func test_drag_targets(board) -> void:
 	for iteration in 5: board._sync_card_feedback()
 	check(JSON.stringify(Codec._capture_unsettled(board.session)) == snapshot and board.session.rng.state == rng_before, "presentation refresh does not alter live hold/model/RNG")
 	board._notification(Node.NOTIFICATION_WM_WINDOW_FOCUS_OUT); board._sync_card_feedback()
-	check(board.card_drag_targets.is_empty() and not board.views[target].drag_target.visible and board.drag_grant == incoming, "focus loss clears targets without revoking captured drag")
+	check(board.card_drag_targets.has(target) and board.views[target].drag_target.visible and board.drag_grant == incoming, "focus loss preserves source down-sampled highlights")
 	point(board, incoming)
-	check(board.card_drag_targets.has(target), "fresh pointer update restores eligible target snapshot")
+	check(board.card_drag_targets.has(target), "fresh pointer update leaves existing source snapshot intact")
 	board._toggle_pause_menu()
-	check(board.card_drag_targets.is_empty() and not board.views[target].drag_target.visible and board.drag_grant == incoming, "menu removes outlines but preserves held permission")
+	check(board.card_drag_targets.has(target) and board.views[target].drag_target.visible and board.drag_grant == incoming, "menu preserves source highlight and held permission")
 	board._toggle_pause_menu(); point(board, incoming)
 	var release := InputEventMouseButton.new(); release.button_index = MOUSE_BUTTON_LEFT; release.pressed = false; release.position = Vector2(950, 350)
 	board._input(release)
@@ -212,7 +212,7 @@ func test_drag_targets(board) -> void:
 	board._input(release)
 	check(board.card_drag_targets.is_empty(), "duplicate release cannot restore targets")
 	press(board, incoming); board.session.kill_card(incoming); board._sync_views()
-	check(board.dragging == -1 and board.card_drag_targets.is_empty() and not board.views[target].drag_target.visible, "dead held source removes outlines and pointer state")
+	check(board.dragging == -1 and board.card_drag_targets.has(target) and board.views[target].drag_target.visible, "destroyed held source has no source OnPointerUp to clear other target outlines")
 
 func test_craft_and_lifecycle(board) -> void:
 	var ids := fruit(board)

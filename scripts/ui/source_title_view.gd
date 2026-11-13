@@ -1,5 +1,6 @@
 extends Control
 ## Source scene shell only. Transactions and their callbacks belong to the caller.
+const SourceFonts = preload("res://scripts/ui/source_font_registry.gd")
 const Layout = preload("res://scripts/ui/title_scene_layout.gd")
 var layout = Layout.new()
 var source_backed := false
@@ -87,9 +88,12 @@ func mount(role: String, control: Control) -> bool:
 	return true
 
 func _style(control: Control, id: String) -> void:
+	# Bind this exact source TMP component, not a view-wide assumed font.
+	SourceFonts.shared().bind_control(control, text_record(id))
 	control.add_theme_font_size_override("font_size", int(layout.field(id, "m_fontSize", 24)))
 	var tint: Dictionary = layout.field(id, "m_fontColor", {})
 	control.add_theme_color_override("font_color", Layout.color(tint))
+	for state in ["font_hover_color", "font_pressed_color", "font_focus_color"]: control.add_theme_color_override(state, Layout.color(tint))
 	if control is Button:
 		control.flat = true
 		control.custom_minimum_size = Vector2.ZERO
@@ -100,7 +104,13 @@ func _style(control: Control, id: String) -> void:
 		control.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if horizontal == 2 else (HORIZONTAL_ALIGNMENT_RIGHT if horizontal == 4 else HORIZONTAL_ALIGNMENT_LEFT)
 		var vertical := int(layout.field(id, "m_VerticalAlignment", 256))
 		control.vertical_alignment = VERTICAL_ALIGNMENT_CENTER if vertical == 512 else (VERTICAL_ALIGNMENT_BOTTOM if vertical == 1024 else VERTICAL_ALIGNMENT_TOP)
-	# The referenced TMP font is unresolved. Native glyph metrics are not parity.
+	# Accurate font identity does not establish TMP shaping/SDF rendering parity.
+
+func text_record(id: String) -> Dictionary:
+	for component in layout.records.get(id, {}).get("components", []):
+		if component.has("m_fontAsset") and component.has("m_text"):
+			return component
+	return {}
 
 func set_overlay(page: String, active: bool) -> void:
 	if page == "preferences" and preferences_overlay != null: preferences_overlay.visible = active
@@ -124,3 +134,67 @@ func _layout_children(parent_id: String, parent: Control) -> void:
 		nodes[id].position = rect.position
 		nodes[id].size = rect.size
 		_layout_children(id, nodes[id])
+
+func bind_source_controls(data: Dictionary) -> Dictionary:
+	var documents: Array = []
+	for scene in data.get("scenes", []):
+		if scene.get("name") == "Title": documents = scene.get("documents", [])
+	for document in documents:
+		var fields: Dictionary = document.get("fields", {})
+		if not fields.has("durationSlider") or not fields.has("isFriendlyToggle"): continue
+		var metadata = preload("res://scripts/ui/source_control_metadata.gd")
+		return {"duration": metadata.slider(documents, fields.durationSlider), "friendly": metadata.text_toggle(documents, fields.isFriendlyToggle)}
+	return {}
+
+func install_saved_rows(data: Dictionary, selector: OptionButton, load_action: Callable, archive_action: Callable, guard: Callable, sound: Callable):
+	var documents: Array = []
+	for prefab in data.get("referenced_prefabs",[]):
+		if prefab.get("name") == "SavedGameSlot": documents = prefab.get("documents",[])
+	var host_id := layout.resolve("SavedGamesUI/MainPanel/ScrollView")
+	var content_id := layout.resolve("SavedGamesUI/MainPanel/ScrollView/Viewport/Content")
+	if not nodes.has(host_id): return null
+	var host = preload("res://scripts/ui/source_saved_slot_host.gd").new()
+	host.name = "SourceSavedRows"
+	host.play_click = sound
+	var scrollbar_id := layout.resolve("SavedGamesUI/MainPanel/ScrollView/ScrollbarVertical")
+	var fields := {"m_Padding":layout.field(content_id,"m_Padding",{}),"m_Spacing":layout.field(content_id,"m_Spacing",0),"scrollbar_width":Layout.vector(layout.records.get(scrollbar_id,{}).get("rect",{}).get("m_SizeDelta",{})).x}
+	fields["drag_threshold"] = layout.field(layout.resolve("EventSystem"),"m_DragThreshold",10)
+	fields["scrollrect"] = {}
+	for key in ["m_Horizontal","m_Vertical","m_MovementType","m_Elasticity","m_Inertia","m_DecelerationRate","m_ScrollSensitivity"]:
+		fields.scrollrect[key] = layout.field(host_id,key,null)
+	for scene in data.get("scenes",[]):
+		if scene.get("name")=="Title":
+			fields["scrollbar"] = preload("res://scripts/ui/source_scrollbar_adapter.gd").metadata(scene.get("documents",[]),layout.field(host_id,"m_VerticalScrollbar",{}))
+			for document in scene.get("documents",[]):
+				var input_fields: Dictionary=document.get("fields",{})
+				if input_fields.has("m_ScrollDeltaPerTick"):
+					fields["scroll_delta_per_tick"]=input_fields.m_ScrollDeltaPerTick
+					fields.scrollbar["repeat_delay"]=input_fields.m_MoveRepeatDelay
+					fields.scrollbar["repeat_rate"]=input_fields.m_MoveRepeatRate
+	if not host.configure(documents,fields,selector,load_action,archive_action,guard):
+		host.free()
+		return null
+	for child in nodes[host_id].get_children(): child.hide()
+	nodes[host_id].add_child(host)
+	host.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return host
+
+func reflow_saved_footer(controls: Array) -> Dictionary:
+	var id := layout.resolve("SavedGamesUI/MainPanel/Footer")
+	if not nodes.has(id): return {"ok":false}
+	var widths: Array = []
+	var heights: Array = []
+	for control in controls:
+		widths.append(control.get_theme_font("font").get_string_size(control.text,HORIZONTAL_ALIGNMENT_LEFT,-1,control.get_theme_font_size("font_size")).x)
+		var source_height := 0.0
+		for child_id in layout.children.get(id,[]):
+			if nodes.get(child_id) == control.get_parent(): source_height = Layout.vector(layout.records[child_id].rect.m_SizeDelta).y
+		heights.append(source_height)
+	var padding: Dictionary = layout.field(id,"m_Padding",{})
+	var result = preload("res://scripts/ui/source_saved_layout.gd").footer(nodes[id].size,widths,heights,Vector4(float(padding.get("m_Left",0)),float(padding.get("m_Top",0)),float(padding.get("m_Right",0)),float(padding.get("m_Bottom",0))),float(layout.field(id,"m_Spacing",0)))
+	if result.ok:
+		for index in controls.size():
+			controls[index].get_parent().position = result.rectangles[index].position
+			controls[index].get_parent().size = result.rectangles[index].size
+	result.measurement_provenance = "native_font_measurement_not_verified_TMP_preferred_width"
+	return result

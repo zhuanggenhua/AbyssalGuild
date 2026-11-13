@@ -57,9 +57,10 @@ func _layout_content() -> void:
 	var width: float = maxf(0, size.x-PADDING*2)
 	header.add_theme_font_size_override("font_size", 34)
 	body.add_theme_font_size_override("normal_font_size", 30)
-	var font := ThemeDB.fallback_font
-	var header_height: float = font.get_multiline_string_size(header.text, HORIZONTAL_ALIGNMENT_LEFT, width, 34).y if not header.text.is_empty() else 0.0
-	var body_height: float = font.get_multiline_string_size(body.text, HORIZONTAL_ALIGNMENT_LEFT, width, 30).y if not body.text.is_empty() else 0.0
+	var header_font := header.get_theme_font("font")
+	var body_font := body.get_theme_font("normal_font")
+	var header_height: float = header_font.get_multiline_string_size(header.text, HORIZONTAL_ALIGNMENT_LEFT, width, 34).y if not header.text.is_empty() else 0.0
+	var body_height: float = body_font.get_multiline_string_size(body.text, HORIZONTAL_ALIGNMENT_LEFT, width, 30).y if not body.text.is_empty() else 0.0
 	var action_height: float = 40.0 if not str(descriptor.get("action", "")).is_empty() else 0.0
 	var preferred := minf(header_height+body_height+PADDING*2+action_height, maxf(60, bottom_anchor.y-30))
 	if not is_equal_approx(size.y, preferred): size.y = preferred

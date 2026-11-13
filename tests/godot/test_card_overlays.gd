@@ -37,6 +37,7 @@ func assets_fixture():
 	var assets = VisualAssets.new()
 	assets.manifest = {"scenes":{"Main":{"categories":{"2":"prefab"},"packPrefab":"pack"}},
 		"prefabs":{"prefab":{"size":{"x":2,"y":0,"z":3},"materials":[{"guid":"card_mat"}],"mesh":{"guid":"mesh"},"transform_chain":[pose()],
+			"title":label_record(Vector3(0,0.001,0.4)),
 			"labels":{"price":label_record(Vector3(-0.6,0,-1)),"health":label_record(Vector3(0.6,0,-1)),"nutrition":label_record(Vector3(0,0,-1))},
 			"equipment_panel":{"size":{"x":1.2,"z":0.3},"transform_chain":[pose(Vector3(0,0,-2))],"mesh":{"guid":"mesh"},"materials":[{"guid":"panel_mat"}]}}, "pack":{}},
 		"materials":{"card_mat":{"shader_source_path":"Shaders/Card.shadergraph","textures":{"_BaseTex":{"m_Texture":{"guid":"art"}},"_OverlayTex":{"m_Texture":{"guid":"art"}}}},
@@ -53,9 +54,20 @@ func run() -> void:
 	var card = CardView.new()
 	card.configure(1, "Synthetic", 2, false, assets, {"sellPrice":9,"maxHealth":12,"nutrition":3,"isSellable":false})
 	check(card.stat_labels.size() == 3, "roles are explicit, not guessed from category")
+	check(card.caption.transform.is_equal_approx(SourceCamera.reflected_pose(assets.manifest.prefabs.prefab.title.transform_chain).transform), "source caption preserves full authored transform with no extra lift")
+	for role in card.stat_labels:
+		check(card.stat_labels[role].transform.is_equal_approx(SourceCamera.reflected_pose(assets.manifest.prefabs.prefab.labels[role].transform_chain).transform), "source stat transform has no extra lift: " + role)
+	var record := label_record(Vector3(0, 0.001, 0.4))
+	var stat = preload("res://scripts/ui/card_stat_labels.gd").create(assets, record, 99.0, true)
+	check(stat.transform.is_equal_approx(SourceCamera.reflected_pose(record.transform_chain).transform), "source stat rejects caller native lift")
+	check(not stat.no_depth_test and not card.caption.no_depth_test, "no depth-test bypass used to hide offsets")
+	stat.free()
+	stat = preload("res://scripts/ui/card_stat_labels.gd").create(assets, record, 0.02, false)
+	check(is_equal_approx(stat.position.y, 0.021), "generated fallback retains explicit native geometry lift")
+	stat.free()
 	check(card.stat_labels.price.text == "9", "source Price exists even when not sellable")
 	check(card.stat_labels.health.text == "12" and card.stat_labels.nutrition.text == "3", "configure defaults")
-	check(card.stat_labels.price.position.is_equal_approx(Vector3(-0.6,0.01,1)), "reflected label anchor")
+	check(card.stat_labels.price.position.is_equal_approx(Vector3(-0.6,0,1)), "reflected label anchor")
 	check(card.stat_labels.price.modulate.is_equal_approx(Color(0.9,0.8,0.7,1)), "source label color")
 	check(card.equipment_panel != null and not card.equipment_panel.visible, "empty equipment panel hidden")
 	check(card.equipment_panel.uses_source_mesh, "cached panel uses source mesh")
@@ -147,13 +159,18 @@ func test_private() -> void:
 			var appearance: Dictionary = assets.appearance(int(key),int(key)==0,{},scene)
 			var card = CardView.new()
 			card.configure(count,"Private test",int(key),int(key)==0,assets,{},scene)
+			if card.source_material != null:
+				var title_pose := SourceCamera.reflected_pose(appearance.prefab.title.transform_chain)
+				check(card.caption.transform.is_equal_approx(title_pose.transform), "actual source title full transform, no native lift")
 			card.update_state({"health":7,"nutrition":4,"sell_price":5,"equipment_slots":[0,2]})
 			for role in ["price","health","nutrition"]:
 				check(card.stat_labels.has(role) == appearance.prefab.labels.has(role), "exact source label roles")
 				if not card.stat_labels.has(role): continue
 				var record: Dictionary = appearance.prefab.labels[role]
 				var expected: Dictionary = SourceCamera.reflected_pose(record.transform_chain)
-				var lift: float = 0.01 if card.source_material != null else 0.02
+				if card.source_material != null:
+					check(card.stat_labels[role].transform.is_equal_approx(expected.transform), "actual source stat full transform, no native lift")
+				var lift: float = 0.0 if card.source_material != null else 0.02
 				check(card.stat_labels[role].position.is_equal_approx(expected.transform.origin + Vector3(0,lift,0)), "actual label anchor")
 				check(card.stat_labels[role].text == {"price":"5","health":"7","nutrition":"4"}[role], "actual label update")
 				count += 1
