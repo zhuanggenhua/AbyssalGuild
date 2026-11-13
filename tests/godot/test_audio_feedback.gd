@@ -76,7 +76,7 @@ func run():
 	var unknown_stamp: float = audio.last_played.Unknown
 	audio.clips.Unknown = "click"
 	check(not audio.play_event("Unknown") and audio.last_played.Unknown == unknown_stamp, "late-resolved AudioId still respects the failed attempt's cooldown")
-	audio.last_played.Unknown = Time.get_ticks_msec() / 1000.0 - audio.cooldown - 0.1
+	audio.last_played.Unknown = audio.unscaled_frame_clock.now() - audio.cooldown - 0.1
 	audio.source_settings._randomizeSFXPitch = true
 	check(audio.play_event("Unknown"), "expired cooldown permits replay")
 	var randomized: float = audio.pool[0].pitch_scale
@@ -152,7 +152,9 @@ func run():
 	check(not audio.play_event("Click"), "detached configured node cannot start audio")
 	audio.free()
 	await process_frame
-	await create_timer(0.5).timeout
+	var drain_deadline := Time.get_ticks_usec() + 500000
+	while Time.get_ticks_usec() < drain_deadline:
+		await create_timer(maxf(0.001,(drain_deadline-Time.get_ticks_usec())/1000000.0),true,false,true).timeout
 	check(is_equal_approx(AudioServer.get_bus_volume_db(0), master_gain), "adapter leaves app master/host settings untouched")
 	print("Audio feedback checks: %d passed / %d total" % [checks - failures, checks])
 	quit(0 if failures == 0 else 1)

@@ -6,6 +6,26 @@ package, or use the source checkout's import cache or normal save directories.
 The resulting PCK contains licensed media and generated content. Keep it private
 until redistribution rights are confirmed; public CI must not upload it.
 
+## Later renderer-batch pack-only verification
+
+The renderer-routing snapshot `a77407f` (local content-equivalent `bea7c17`)
+passed a separate normal `--export-pack` flow on 2026-11-13. That command exports
+project data only and did not require the otherwise unavailable full template
+archive. It does not bypass the release workflow's template checks: no release
+executable was built or tested by this route.
+
+The existing private-input/hash checks, isolated runtime-only copy, fresh import,
+export preset and strict external `export_smoke.gd` probe were retained. The
+copied project was removed before the official editor loaded the resulting PCK.
+The probe passed 776 checks with 150 PNG, 19 WAV and four FBX; the 555-file runtime
+allowlist and New/Save/Continue/production Quit passed. It also loaded and checked
+the new rendering graph and the selected PC renderer's absent custom pass. Every
+owned packaged input matched the stated commit; later audio changes are not
+covered. All package files and detailed input/hash records remain private.
+
+This narrows packaged-resource acceptance only. It is not standalone release
+execution, a new binary installation test, GPU equivalence or listening evidence.
+
 ## Prerequisites
 
 - Linux x86_64, Python 3.10+, Git and the existing `requirements.txt` dependency.

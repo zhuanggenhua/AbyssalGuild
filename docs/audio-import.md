@@ -31,7 +31,8 @@ Static reference: locked CardLoop commit
 - `PlaySFX` records the unscaled request time before looking up the clip. A
   missing AudioId therefore still consumes its cooldown; a rejected repeat
   neither refreshes that timestamp nor advances the round-robin source index.
-  The adapter uses monotonic elapsed time, unaffected by gameplay time scaling.
+  The adapter caches a monotonic timestamp for each engine process frame, unaffected
+  by gameplay time scaling. See `audio-transport.md` for exact sampling boundaries.
 - Unity `PlayOneShot` does not stop earlier sounds when a source slot wraps.
   The adapter now preserves that overlap for both equal and different clips.
   A busy slot keeps its current player and starts a temporary child player,
@@ -49,8 +50,10 @@ Static reference: locked CardLoop commit
   state and copies source settings without mutating the imported catalog.
   User gains survive reconfiguration. Leaving the tree stops all voices.
 
-Playback remains 2D. Optional positional playback and interrupt-BGM behavior
-are not ported; the audited source call sites above use the default arguments.
+Production callers remain 2D. Optional positional playback explicitly fails without
+a verified acoustic policy. Interrupt-BGM waits, mixer ownership and persistent
+source clock are implemented; see `audio-optional-branches.md`. The audited source
+call sites above use the default arguments.
 Platform mixing, voice virtualization, allocation cost and audible quality are
 not certified as identical by these structural tests.
 
@@ -79,3 +82,7 @@ bash tools/test_godot.sh res://tests/godot/test_options_ui.gd
 
 The first command always runs synthetic checks and reports a skip if private
 imports are absent. The options integration check requires imported source data.
+
+BGM now uses an independent whole-clip looping WAV stream instead of a main-thread
+finished callback that restarts playback. Shared one-shot resources remain unchanged.
+See [transport and frame clock](audio-transport.md) for evidence and test boundaries.

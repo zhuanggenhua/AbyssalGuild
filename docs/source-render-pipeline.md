@@ -146,9 +146,10 @@ absent custom pass. Actual before/paused captures are kept privately; the game
 was stopped without saving this transient campaign. This is not a same-state
 Unity comparison, alternative-pipeline acceptance, or audio listening test.
 
-The export allowlist and exported-resource probe were updated and their tests
-passed, but no new release PCK was built for this checkpoint. Earlier release
-export evidence does not verify the new pipeline graph's packaged execution.
+At this checkpoint the export allowlist/probe tests passed, but no fresh PCK had
+yet been built. A later pack-only check of the published renderer batch now
+verifies packaged execution; see the follow-up below. It is not a new standalone
+release executable validation.
 
 ### RenderGraph admission correction
 
@@ -199,3 +200,15 @@ settings also remain separately unmapped. The Unity evidence is the official
 17.5.0, not a byte-for-byte verification of a local package cache. A future shader
 mapping needs explicit source-equation and render-state tests; simply switching
 Godot's diffuse mode or tuning a tint is not full equivalence.
+
+### Pack-only follow-up
+
+The exact `a77407f` / local `bea7c17` owned runtime was subsequently exported with
+Godot's supported `--export-pack` command. No export template or release binary
+was installed or substituted. After removing the temporary source project, the
+existing strict external probe loaded that PCK with the official editor host:
+776 checks passed, including 150 PNG, 19 WAV, four FBX, a 555-file runtime allowlist,
+New/Save/Continue/production Quit and the rendering graph's hash/no-PC-pass checks.
+All captured owned inputs matched that commit. The package and original media
+remain private. This proves that renderer batch's packaged resource route, not
+later audio changes, standalone release execution, GPU parity or listening.

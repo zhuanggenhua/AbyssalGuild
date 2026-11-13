@@ -3,6 +3,7 @@ extends Node
 ## Call play_event only at the corresponding confirmed source event.
 const RequestState = preload("res://scripts/ui/audio_request_state.gd")
 var requests = RequestState.new()
+var unscaled_frame_clock = preload("res://scripts/ui/audio_frame_clock.gd").new()
 var source_initialized := false
 ## Optional explicit acoustic policy configures real 3D voices. No policy is
 ## installed by default. Persistent slot ownership handles all lifecycle paths.
@@ -21,6 +22,15 @@ var cooldown: float = 0.05
 var user_sfx_db: float = 0.0
 var user_bgm_db: float = 0.0
 var shutting_down: bool = false
+
+func _enter_tree() -> void:
+	# SceneTree's pre-process signal snapshots before Node._process callbacks.
+	# Input callbacks may precede it; their first sample wins for that same token.
+	if not get_tree().process_frame.is_connected(_sample_unscaled_frame):
+		get_tree().process_frame.connect(_sample_unscaled_frame)
+
+func _sample_unscaled_frame() -> void:
+	unscaled_frame_clock.now()
 
 func configure(catalog, visual_assets) -> void:
 	shutting_down = false
@@ -104,7 +114,7 @@ func play_source_event(event_name: String, world_position: Variant = null, inter
 	if world_position != null and (not world_position is Vector3 or not world_position.is_finite()): return false
 	if shutting_down or pool.is_empty() or not is_inside_tree():
 		return false
-	var now: float = Time.get_ticks_msec() / 1000.0
+	var now: float = unscaled_frame_clock.now()
 	if now - float(last_played.get(event_name, -INF)) < cooldown:
 		return false
 	# Source records an admitted request even when the AudioId has no clip.
@@ -153,17 +163,27 @@ func play_music() -> bool:
 	var stream := _stream(str(source_settings.get("_BGMClip", {}).get("guid", "")))
 	if stream == null:
 		return false # Missing licensed music is silent, never substituted.
+	var looping_stream := _looping_music_stream(stream)
+	if looping_stream == null: return false
 	if music == null:
 		music = AudioStreamPlayer.new()
 		add_child(music)
-		music.finished.connect(_restart_music)
-	music.stream = stream
+	music.stream = looping_stream
 	music.volume_linear = music_gain_linear()
 	music.play()
 	return true
 
-func _restart_music() -> void:
-	if not shutting_down and is_instance_valid(music): music.play()
+static func _looping_music_stream(source: AudioStream) -> AudioStreamWAV:
+	# Source AudioSource.loop loops the whole clip in the audio transport. Never
+	# mutate the cached clip: a source may also be used by a one-shot SFX request.
+	if not source is AudioStreamWAV or source.mix_rate <= 0: return null
+	var frames := roundi(source.get_length() * source.mix_rate)
+	if frames <= 0: return null
+	var result: AudioStreamWAV = source.duplicate()
+	result.loop_mode = AudioStreamWAV.LOOP_FORWARD
+	result.loop_begin = 0
+	result.loop_end = frames
+	return result
 
 func shutdown() -> void:
 	# Close admission before stopping voices. A modal action requests Click after
@@ -184,6 +204,8 @@ func shutdown() -> void:
 	assets = null
 
 func _exit_tree() -> void:
+	if get_tree().process_frame.is_connected(_sample_unscaled_frame):
+		get_tree().process_frame.disconnect(_sample_unscaled_frame)
 	shutdown()
 
 func music_gain_linear() -> float:

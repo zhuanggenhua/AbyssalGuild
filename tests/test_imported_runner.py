@@ -76,6 +76,7 @@ MARKERS = {
     "test_puff_view": "Private native Puff view: PASS",
     "test_puff_simulation": "Private Puff simulation: PASS (synthetic)",
     "test_equipment_display": "Private equipment interaction: PASS",
+    "test_audio_transport": "Private audio transport: PASS",
     "test_audio_feedback": "Private source audio: 1 SFX decoded and playback-start checked",
     "test_native_quit": "Private native quit: PASS (Save & Title, cached WAV playback, actual engine exit)",
     "test_visual_assets": "Visual source bindings: PASS",

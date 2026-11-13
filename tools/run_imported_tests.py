@@ -58,6 +58,7 @@ SUITES = (
     ("test_puff_view", r"Private native Puff view: PASS"),
     ("test_puff_simulation", r"Private Puff simulation: PASS"),
     ("test_equipment_display", r"Private equipment interaction: PASS"),
+    ("test_audio_transport", r"Private audio transport: PASS"),
     ("test_audio_feedback", r"Private source audio: [1-9]\d* SFX decoded and playback-start checked"),
     ("test_native_quit", r"Private native quit: PASS \(Save & Title, cached WAV playback, actual engine exit\)"),
     ("test_visual_assets", r"Visual source bindings: PASS"),
