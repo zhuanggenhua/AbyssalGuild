@@ -31,12 +31,14 @@ Automatic nearby spawn merging and physics-based spawn separation are not modele
 
 ## Verification
 
-Run with Godot 4.6 (tested 4.6.3):
+Run with the verified official Godot 4.7.2 target:
 
 ```sh
+export GODOT=/absolute/path/to/Godot_v4.7.2-stable_linux.x86_64
+test "$("$GODOT" --version)" = "4.7.2.stable.official.ed1daf0bf" || exit 1
 HOME=/tmp/godot-runtime-home XDG_CACHE_HOME=/tmp/godot-runtime-cache \
 XDG_DATA_HOME=/tmp/godot-runtime-data \
-godot --headless --path . --script res://tests/godot/test_runtime.gd
+"$GODOT" --headless --path . --script res://tests/godot/test_runtime.gd
 ```
 
 Use writable HOME/XDG directories in restricted containers. The first attempt using the default unwritable Godot user directory failed before script startup; the writable-directory run passed. The test is independent of a UI scene and returns a nonzero exit code on assertion failure.

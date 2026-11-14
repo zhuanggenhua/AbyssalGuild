@@ -10,6 +10,8 @@ const ImpactView = preload("res://scripts/ui/impact_view.gd")
 const CombatMergeGeometry = preload("res://scripts/model/combat_merge_geometry.gd")
 const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
+const SourceRestoreLayout = preload("res://scripts/model/source_restore_layout.gd")
+const SourceRestoreAdmission = preload("res://scripts/ui/source_restore_admission.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardMotion = preload("res://scripts/ui/card_motion.gd")
@@ -57,6 +59,9 @@ var flat_board_lighting
 var source_flat_environment_bound: bool = false
 var geometry_key: String = ""
 var layout_key: String = ""
+## Explicit actual cold scene entry only, not Codec staging or travel admission.
+var source_restore_entry: String = ""
+var source_restore_report: Dictionary = {}
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
 var combat_rectangles: Dictionary = {}
@@ -752,6 +757,15 @@ func _enter_game() -> void:
 	session.spawn_layout_resolver = _resolve_layout
 	layout_locks.clear()
 	layout_key = ""
+	source_restore_report = {}
+	if source_restore_entry == "cold_load":
+		var planned: Dictionary = SourceRestoreAdmission.plan(self)
+		source_restore_report = SourceRestoreLayout.apply(session, planned) if planned.ok else planned
+		if source_restore_report.ok:
+			# The source has already performed finite per-initialize solver calls and
+			# anchor resets. Do not add a second whole-board placement pass.
+			layout_key = _layout_signature()
+	source_restore_entry = ""
 	for view in views.values(): view.queue_free()
 	views.clear()
 	running = true
@@ -1672,6 +1686,7 @@ func _continue_game() -> void:
 	session = candidate
 	slots = candidate_slots
 	active_slot = int(result.slot)
+	source_restore_entry = "cold_load"
 	_enter_game()
 	notice.text = "Slot %d restored." % active_slot + (" Recovered from backup." if result.get("recovered", false) else "")
 
@@ -1697,6 +1712,7 @@ func _adopt_legacy(path: String) -> void:
 	slots = candidate_slots
 	active_slot = int(created.slot)
 	selected_slot = active_slot
+	source_restore_entry = "cold_load"
 	_enter_game()
 	notice.text = "Copied legacy save into slot %d. Original and backup were kept.%s" % [active_slot, " Recovered from legacy backup." if loaded.get("recovered", false) else ""]
 

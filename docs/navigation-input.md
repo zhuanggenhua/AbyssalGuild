@@ -14,18 +14,22 @@
 
 `scripts/ui/navigation_input.gd` 是独立实现的输入适配，不包含游戏规则或存档逻辑。
 
-在当前固定引擎 `4.6.3.stable.official.7d41c59c4` 的隔离空工程中，实测默认 `ui_cancel` 只有 Escape。仅将原有按键判断换成 `is_action_pressed("ui_cancel")`，不会自动补上手柄东侧按钮。
+历史探针在 `4.6.3.stable.official.7d41c59c4` 的隔离空工程中，实测默认 `ui_cancel` 只有 Escape。仅将原有按键判断换成 `is_action_pressed("ui_cancel")`，不会自动补上手柄东侧按钮。
 
 - `ensure_cancel_bindings()` 幂等补入 Escape 和 `JOY_BUTTON_B`，保留已有映射，不改其他 UI action。手柄映射适用于所有设备。
 - `is_cancel_press()` 使用 Godot action 判断，不接受松开事件或键盘自动重复。非取消按钮不触发。
-- 当前引擎的原生 `ConfirmationDialog` 不会仅因添加手柄映射而响应东侧按钮。`enable_modal_cancel()` 通过 `window_input` 将该输入接到真实取消按钮，保留原生取消信号，不触发确认。键盘仍走原生处理。
+- 上述历史探针中的原生 `ConfirmationDialog` 不会仅因添加手柄映射而响应东侧按钮。`enable_modal_cancel()` 通过 `window_input` 将该输入接到真实取消按钮，保留原生取消信号，不触发确认。键盘仍走原生处理。
 - 确认框连接可重复配置；隐藏的确认框不处理取消。普通游戏中的两次独立按下仍是两次切换，不按时间去抖而吞掉有效操作。
 
 调用方应在构建菜单前配置 action，并为各原生确认框启用手柄取消。外层菜单处理应先检查是否有可见确认框，避免同一操作穿透到暂停或选项界面。标题退出、日终退出和存档失败的路由属于桌面接入层，不由此输入适配决定。
 
 ## 验证范围
 
+当前唯一目标为官方 Godot 4.7.2；旧探针记录不冒充新版观测。以下命令校验版本后运行现有适配回归。
+
 ```sh
+export GODOT=/absolute/path/to/Godot_v4.7.2-stable_linux.x86_64
+test "$("$GODOT" --version)" = "4.7.2.stable.official.ed1daf0bf" || exit 1
 bash tools/test_godot.sh res://tests/godot/test_navigation_input.gd
 ```
 

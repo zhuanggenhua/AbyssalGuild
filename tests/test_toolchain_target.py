@@ -38,5 +38,21 @@ class ToolchainTargetTests(unittest.TestCase):
         self.assertIn('material.get_meta("source_board_cull", "") == "back"', text)
         self.assertIn('camera_attributes != null', text)
 
+    def test_active_run_docs_verify_the_same_official_target(self):
+        names = ["README.md", "docs/board-ui.md", "docs/private-validation.md",
+                 "docs/runtime-core.md", "docs/navigation-input.md"]
+        for name in names:
+            with self.subTest(document=name):
+                text = self.read(name)
+                self.assertIn("export GODOT=/absolute/path/to/Godot_v4.7.2-stable_linux.x86_64", text)
+                self.assertIn('test "$("$GODOT" --version)" = "' + VERSION + '" || exit 1', text)
+        self.assertNotIn("Godot 4.6", self.read("README.md"))
+        self.assertNotIn("Godot 4.6", self.read("docs/board-ui.md"))
+        self.assertNotIn("Use Godot 4.6", self.read("docs/private-validation.md"))
+        self.assertNotIn("Run with Godot 4.6", self.read("docs/runtime-core.md"))
+        navigation = self.read("docs/navigation-input.md")
+        self.assertIn("历史探针在 `4.6.3.stable.official.7d41c59c4`", navigation)
+        self.assertNotIn("当前固定引擎 `4.6.3", navigation)
+
 if __name__ == "__main__":
     unittest.main()

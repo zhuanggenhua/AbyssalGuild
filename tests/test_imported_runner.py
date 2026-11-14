@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_source_restore_layout": "Source restore layout planner: 32 checks, 0 failures; no live board integration",
+    "test_source_restore_board": "Source restore board: 93 checks, 0 failures; headless production calls only",
     "test_source_stats_imported": "Source Stats imported layout: PASS (1 checks; no pixel claim)",
     "test_window_mode_observation": "Window mode observation: 30/30 passed",
     "test_source_board_lifetime": "Source board lifetime: 55 checks, 0 failures; mode=detach; no pixel claim",

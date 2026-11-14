@@ -38,6 +38,8 @@ SUITES = (
     ("test_tmp_titles_imported", r"Imported source TMP titles: PASS"),
     ("test_source_scrollbar", r"Source scrollbar: PASS"),
     ("test_drag_highlight_lifetime_board", r"Source highlight live board: PASS \(18 checks\)"),
+    ("test_source_restore_layout", r"Source restore layout planner: [1-9]\d* checks, 0 failures"),
+    ("test_source_restore_board", r"Source restore board: [1-9]\d* checks, 0 failures"),
     ("test_audio_slot_owner", r"Slot lifecycle: 26/26"),
     ("test_source_scrollrect", r"Source ScrollRect: 18/18"),
     ("test_source_scrollrect_layout", r"Source ScrollRect first layout: PASS"),

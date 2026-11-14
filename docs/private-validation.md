@@ -1,19 +1,20 @@
 # Private imported-resource validation
 
 From the repository root, after importing a licensed catalog and visual/audio
-manifest, run:
+manifest, select and verify the official Godot 4.7.2 executable:
 
 ```sh
+export GODOT=/absolute/path/to/Godot_v4.7.2-stable_linux.x86_64
+test "$("$GODOT" --version)" = "4.7.2.stable.official.ed1daf0bf" || exit 1
 bash tools/test_imported.sh
 ```
 
-Use Godot 4.6.3 with its built-in FBX importer, Python 3, and the existing
+Use Godot 4.7.2 with its built-in FBX importer, Python 3, and the existing
 `requirements.txt` dependencies. This command does not install anything, access
-the network, run Unity, export a game, or publish private content. A different
-Godot executable and bounded timeouts can be selected explicitly:
+the network, run Unity, export a game, or publish private content. The verified `GODOT` selection is inherited; bounded timeouts can be set explicitly:
 
 ```sh
-GODOT=/path/to/godot GODOT_IMPORT_TIMEOUT=180 GODOT_TEST_TIMEOUT=90 \
+GODOT_IMPORT_TIMEOUT=180 GODOT_TEST_TIMEOUT=90 \
   bash tools/test_imported.sh
 ```
 

@@ -1,6 +1,6 @@
 # Runnable Godot board
 
-This is an independently implemented Godot 4.6 UI over source-audited gameplay.
+This is an independently implemented Godot 4.7.2 UI over source-audited gameplay.
 It is a functional migration slice, not visual parity or final manual acceptance.
 The public repository includes no original third-party assets or exported content.
 
@@ -8,7 +8,13 @@ The public repository includes no original third-party assets or exported conten
 
 1. Follow `data-import.md` to generate local `data/stackcraft.json` from a licensed
    source copy. Optional private media import is described in `visual-import.md`.
-2. Open `project.godot` in Godot 4.6, or run `godot --path .`.
+2. Use the verified official Godot 4.7.2 executable, not an unverified global `godot` alias. Run from the repository root:
+
+   ```sh
+   export GODOT=/absolute/path/to/Godot_v4.7.2-stable_linux.x86_64
+   test "$("$GODOT" --version)" = "4.7.2.stable.official.ed1daf0bf" || exit 1
+   "$GODOT" --path .
+   ```
 3. Choose New Game, set day duration/friendly mode, then Confirm. Load Game opens
    the native save picker; choose a slot and Continue. Cancel/Back returns home.
 
