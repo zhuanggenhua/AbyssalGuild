@@ -1,0 +1,4 @@
+.godot/
+scripts/
+result*
+*.uid

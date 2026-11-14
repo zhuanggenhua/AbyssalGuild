@@ -51,6 +51,8 @@ var board_mesh: MeshInstance3D
 var original_board: Node3D
 var source_background: Node3D
 var world_environment: Environment
+var flat_board_lighting
+var source_flat_environment_bound: bool = false
 var geometry_key: String = ""
 var layout_key: String = ""
 var layout_locks: Dictionary = {}
@@ -236,6 +238,8 @@ func _ready() -> void:
 		_refresh_slots()
 
 func _build_world() -> void:
+	flat_board_lighting = preload("res://scripts/ui/source_flat_board_lighting.gd").new()
+	add_child(flat_board_lighting)
 	var world := WorldEnvironment.new()
 	world.environment = Environment.new()
 	world_environment = world.environment
@@ -262,6 +266,8 @@ func _build_world() -> void:
 	add_child(craft_progress)
 
 func _restore_title_world() -> void:
+	if is_instance_valid(flat_board_lighting): flat_board_lighting.clear()
+	source_flat_environment_bound = false
 	# Unity returns by loading Title as a fresh scene. This native single-scene
 	# shell must likewise discard gameplay geometry, lighting and camera state.
 	# Preserve the same explicit native title backdrop used on first launch.
@@ -729,8 +735,8 @@ func _enter_game() -> void:
 	visual_assets.apply_source_camera(camera, session.scene_name)
 	camera_motion.configure(camera.position, CameraMotion.source_settings(catalog.data, session.scene_name))
 	panning = false
-	visual_assets.apply_source_light(source_light, session.scene_name)
-	visual_assets.apply_source_environment(world_environment, session.scene_name)
+	source_flat_environment_bound = visual_assets.apply_source_light(source_light, session.scene_name)
+	source_flat_environment_bound = visual_assets.apply_source_environment(world_environment, session.scene_name) and source_flat_environment_bound
 	_replace_scene_background(session.scene_name)
 	# Original mesh is optional; validated source vertex bounds remain the fallback.
 	geometry_key = ""
@@ -1962,12 +1968,15 @@ func _update_board_geometry() -> void:
 		bounds = Rect2(Vector2(-6, -4) * (1.0 + boost), Vector2(12, 8) * (1.0 + boost))
 	var old_bounds: Variant = session.board_bounds
 	session.board_bounds = bounds
+	if is_instance_valid(flat_board_lighting): flat_board_lighting.clear()
 	if original_board != null:
 		original_board.hide()
 		original_board.queue_free()
 	original_board = visual_assets.create_board_mesh(session.scene_name, boost)
 	if original_board != null:
 		add_child(original_board)
+		if is_instance_valid(flat_board_lighting) and source_flat_environment_bound and session.scene_name in ["Main", "Island"]:
+			flat_board_lighting.bind(original_board, world_environment)
 		board_mesh.hide()
 	else:
 		board_mesh.show()

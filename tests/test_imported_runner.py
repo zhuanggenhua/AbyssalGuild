@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_flat_board_lighting": "Flat board lighting lifecycle: 82 checks, 0 failures",
+    "test_flat_board_lighting_imported": "Private flat board lighting: PASS (1 checks; actual Main/Island FBX, no pixel claim)",
     "test_trade_drop_height": "Trade drop height: 139/139 passed",
     "test_primary_touch_camera_board": "Primary touch camera board: 25/25 passed",
     "test_source_lit_material": "Private source direct lit: PASS (2 materials)",
