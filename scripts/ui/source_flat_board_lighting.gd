@@ -98,7 +98,7 @@ func active_count() -> int:
 func _context(world: World3D) -> Dictionary:
 	var rejected := {}
 	var version := Engine.get_version_info()
-	if RenderingServer.get_current_rendering_method() != "gl_compatibility" or version.major != 4 or version.minor != 6 or version.patch != 3 or str(version.get("hash", "")) != "7d41c59c457bd5a245092b4e7eb2d833e3b3f8c3": return rejected
+	if RenderingServer.get_current_rendering_method() != "gl_compatibility" or version.major != 4 or version.minor != 7 or version.patch != 2 or str(version.get("hash", "")) != "ed1daf0bf001b61586d9930840f2f1394092c079": return rejected
 	if bool(ProjectSettings.get_setting("rendering/lights_and_shadows/use_physical_light_units", false)) or bool(ProjectSettings.get_setting("rendering/shading/overrides/force_vertex_shading", false)): return rejected
 	var environment := _environment
 	if environment == null or world.environment != environment: return rejected

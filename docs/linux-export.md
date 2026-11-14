@@ -1,12 +1,12 @@
 # Private Linux export
 
-This local-only workflow builds a Godot **4.6.3 Linux x86_64 release** from
+This local-only workflow builds a Godot **4.7.2 Linux x86_64 release** from
 licensed imported data. It does not publish, upload, run Unity, install a system
 package, or use the source checkout's import cache or normal save directories.
 The resulting PCK contains licensed media and generated content. Keep it private
 until redistribution rights are confirmed; public CI must not upload it.
 
-## Later renderer-batch pack-only verification
+## Historical 4.6.3 renderer-batch pack-only verification
 
 The renderer-routing snapshot `a77407f` (local content-equivalent `bea7c17`)
 passed a separate normal `--export-pack` flow on 2026-11-13. That command exports
@@ -29,22 +29,22 @@ execution, a new binary installation test, GPU equivalence or listening evidence
 ## Prerequisites
 
 - Linux x86_64, Python 3.10+, Git and the existing `requirements.txt` dependency.
-- The official Godot editor `4.6.3.stable.official.7d41c59c4`.
+- The official Godot editor `4.7.2.stable.official.ed1daf0bf`.
 - A complete private import prepared according to [recovery](recovery.md),
   [data import](data-import.md) and [visual import](visual-import.md).
 - The standard, non-Mono official export-template archive. Download it from
-  [Godot's 4.6.3 release](https://github.com/godotengine/godot/releases/tag/4.6.3-stable).
+  [Godot's 4.7.2 release](https://github.com/godotengine/godot/releases/tag/4.7.2-stable).
 
-The archive is `Godot_v4.6.3-stable_export_templates.tpz` (1,255,918,323 bytes).
+The archive is `Godot_v4.7.2-stable_export_templates.tpz` (1,281,349,702 bytes).
 Its pinned SHA-256 is:
 
 ```text
-3fbe2c0e2dec9d537ab9ec97bcf8da91dcf23357fc51f67092dd068d839290a8
+f298490b8d44d934be425a5a65a51bf15f422428b229a06a6e11d9ffea248011
 ```
 
 This is the digest published by the
-[official release asset API](https://api.github.com/repos/godotengine/godot/releases/assets/425557321),
-checked on 2026-11-12. The entire archive was downloaded from the official release
+[official release asset API](https://api.github.com/repos/godotengine/godot/releases/assets/519686380),
+checked on 2026-11-14. The entire archive was downloaded from the official release
 and verified in the live validation. No mirror, custom template or locally
 compiled engine was substituted. The runner itself never downloads anything.
 
@@ -55,7 +55,7 @@ checkouts** for the installation:
 
 ```sh
 GODOT=/absolute/path/to/godot python3 tools/export_linux.py \
-  --templates /private/downloads/Godot_v4.6.3-stable_export_templates.tpz \
+  --templates /private/downloads/Godot_v4.7.2-stable_export_templates.tpz \
   --output /private/exports/abyssal-linux-001
 ```
 
@@ -120,11 +120,11 @@ export runner does not claim those desktop observations.
 
 ## Important testing limits
 
-Official 4.6.3 release templates disable command-line path overrides. `--script`
+Official 4.7.2 release templates disable command-line path overrides. `--script`
 is ignored rather than executing the external test. The runner therefore does
 not use that flag on the release binary or mislabel an editor-hosted probe as a
 release-binary gameplay pass. See the
-[official startup code](https://github.com/godotengine/godot/blob/4.6.3-stable/main/main.cpp)
+[official startup code](https://github.com/godotengine/godot/blob/4.7.2-stable/main/main.cpp)
 for the `OVERRIDE_PATH_ENABLED` behavior.
 
 Using `--quit-after` to forcibly tear down the live title reproduced one retained
@@ -132,6 +132,8 @@ audio resource diagnostic. That is not accepted as a clean-shutdown test and is
 not suppressed. The editor-hosted PCK probe uses the production Quit flow and
 requires a clean complete log. The actual release binary's normal Quit must be
 observed through native interaction separately.
+
+## Historical 4.6.3 validation (not 4.7.2 acceptance)
 
 On 2026-11-12 the real export and editor-hosted PCK probe passed **700 checks**
 with **150 PNG, 19 WAV and 4 FBX**, including a **486-file** runtime-only audit.

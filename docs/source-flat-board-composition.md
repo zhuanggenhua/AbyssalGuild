@@ -22,7 +22,7 @@ With exactly one non-shadowed light, the sum is encoded once in the base pass. W
 
 - Board binds only after the actual source FBX enters the scene, and only for successfully mapped Main/Island light and flat environment.
 - Only exact, previously admitted opaque board shaders are considered. Card fragment/overlay/flash/emission, backgrounds, outlines, progress, transparent materials and generated StandardMaterial fallback are unchanged.
-- The known official 4.6.3 engine hash and Compatibility renderer are required. Other versions, vertex shading overrides and physical-light units fall back.
+- The known official 4.7.2 engine hash `ed1daf0bf001b61586d9930840f2f1394092c079` and Compatibility renderer are required. Other versions, vertex shading overrides and physical-light units fall back.
 - Before drawing, the binder rechecks actual World3D nodes and live properties. Exactly one effective directional light is required; zero/multiple, invisible, sky-only, non-positive-energy or excluded-layer contexts restore originals.
 - Reflection/GI probes, lightmaps, camera environment/exposure, non-flat ambient, fog, nonlinear tone/exposure changes, glow/adjustment, overlay, instance transparency/fade, material changes and mesh ownership/resource changes reject the bridge.
 - The original per-surface material object is retained and restored verbatim. External replacement is never overwritten. Main/Island travel and geometry growth rebind; Title clears all references. The binder is created only when the world is built, so headless Board subclasses that omit UI construction do not leak an orphan Node.
@@ -49,3 +49,9 @@ metadata. Unsupported contexts restore the same Cull.Back original material
 reference. This corrects the real reflected-FBX face path independently of the
 linear-composition formula. See [source-board-faces.md](source-board-faces.md).
 Synthetic QuadMesh results alone do not establish actual FBX front/back behavior.
+
+## 4.7.2 revalidation and single supported target
+
+The historical 4.6.3 evidence above is retained, not relabeled. The project, public CI and private release workflow now target only official 4.7.2. The full official commit matches the verified Linux editor. Its GLES3 base/additive composition still needs this bounded bridge; the engine upgrade alone does not eliminate it.
+
+On the real imported Main/Island FBX, 28 stock cases (binder disabled) produced 14 expected formula failures, maximum linear error 0.548410. The identical 28 cases with the strict 4.7.2 binder passed, maximum error 0.002433 within 0.008. Shadowed ambient residuals were 0.177263/0.490358 stock versus 0.001142/0.001224 candidate. Measured direct-light occlusion reductions remained identical at 0.050002/0.150432. Both retain source shadow strength 0.7 and Cull.Back. The actual GPU lifecycle passed 389 checks with no script/engine error diagnostics (VSync unsupported warning only). These are controlled Godot framebuffer and lifecycle results, not Unity SH or scene-image equivalence. Private images and original licensed input are not published.

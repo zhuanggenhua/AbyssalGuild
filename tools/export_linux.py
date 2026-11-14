@@ -24,11 +24,11 @@ import run_godot_test as watchdog
 from verify_source import verify
 
 ROOT = Path(__file__).resolve().parents[1]
-ENGINE_VERSION = "4.6.3.stable.official.7d41c59c4"
-TEMPLATE_VERSION = "4.6.3.stable"
-TEMPLATE_SHA256 = "3fbe2c0e2dec9d537ab9ec97bcf8da91dcf23357fc51f67092dd068d839290a8"
+ENGINE_VERSION = "4.7.2.stable.official.ed1daf0bf"
+TEMPLATE_VERSION = "4.7.2.stable"
+TEMPLATE_SHA256 = "f298490b8d44d934be425a5a65a51bf15f422428b229a06a6e11d9ffea248011"
 TEMPLATE_MEMBER = "templates/linux_release.x86_64"
-TEMPLATE_SIZE = 71075864
+TEMPLATE_SIZE = 73519416
 BINARY = "AbyssalGuild.x86_64"
 SMOKE_MARKER = r"LINUX EXPORTED PACK SMOKE: PASS \([1-9]\d* checks; [1-9]\d* PNG, [1-9]\d* WAV, [1-9]\d* FBX; New/Save/Continue/production Quit\)"
 VARIABLES = {"HOME": "home", "XDG_CACHE_HOME": "cache", "XDG_CONFIG_HOME": "config",
@@ -59,7 +59,7 @@ def install_template(archive, destination):
     if not archive.is_file() or archive.is_symlink():
         raise ValidationError("Supply a regular official template archive with --templates")
     if sha256(archive) != TEMPLATE_SHA256:
-        raise ValidationError("Official Godot 4.6.3 template archive SHA-256 mismatch")
+        raise ValidationError("Official Godot 4.7.2 template archive SHA-256 mismatch")
     with zipfile.ZipFile(archive) as source:
         if source.read("templates/version.txt").decode().strip() != TEMPLATE_VERSION:
             raise ValidationError("Unexpected export template version")
@@ -217,7 +217,7 @@ def run(archive, output, root=ROOT):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--templates", required=True, type=Path, help="verified official 4.6.3 export_templates.tpz")
+    parser.add_argument("--templates", required=True, type=Path, help="verified official 4.7.2 export_templates.tpz")
     parser.add_argument("--output", required=True, type=Path, help="new private directory outside Git checkouts")
     args = parser.parse_args(argv)
     def interrupt(*_):

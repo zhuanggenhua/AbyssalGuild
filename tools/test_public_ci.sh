@@ -22,8 +22,8 @@ mkdir -p "$TEMP/home" "$TEMP/cache" "$TEMP/config" "$TEMP/data"
 export HOME="$TEMP/home" XDG_CACHE_HOME="$TEMP/cache" XDG_CONFIG_HOME="$TEMP/config" XDG_DATA_HOME="$TEMP/data"
 export GODOT="${GODOT:-godot}"
 version="$("$GODOT" --version)"
-if [[ "$version" != "4.6.3.stable.official.7d41c59c4" ]]; then
-  printf 'PUBLIC-CI REFUSED: expected official Godot 4.6.3, got %s\n' "$version" >&2
+if [[ "$version" != "4.7.2.stable.official.ed1daf0bf" ]]; then
+  printf 'PUBLIC-CI REFUSED: expected official Godot 4.7.2, got %s\n' "$version" >&2
   exit 1
 fi
 printf 'Godot version: %s\n' "$version"
