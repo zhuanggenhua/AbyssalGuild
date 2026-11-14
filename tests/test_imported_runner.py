@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_window_mode_observation": "Window mode observation: 30/30 passed",
     "test_source_board_lifetime": "Source board lifetime: 55 checks, 0 failures; mode=detach; no pixel claim",
     "test_source_board_lifetime_imported": "Headless source board lifecycle: PASS checks=389 failures=0",
     "test_board_face_mapping": "Board face mapping: 125 checks, 0 failures; actual FBX structure, no pixel claims",

@@ -8,6 +8,8 @@ class Display extends RefCounted:
 	func name() -> String: return "synthetic"
 	func set_window_mode(value: int) -> void: mode = value
 	func get_window_mode() -> int: return mode
+	func get_window_size() -> Vector2i: return Vector2i(1364,1024)
+	func get_screen_size() -> Vector2i: return Vector2i(1364,1024)
 	func set_vsync(value: int) -> void: vsync = value
 	func get_vsync() -> int: return vsync
 	func set_frame_cap(_value: int) -> void: pass

@@ -9,6 +9,10 @@ class FakeDisplay extends RefCounted:
 	var vsync: int = DisplayServer.VSYNC_DISABLED
 	var cap := 17
 	var calls: Array = []
+	var clock := 1000
+	func ticks_msec() -> int: return clock
+	func get_window_size() -> Vector2i: return Vector2i(1364,1024)
+	func get_screen_size() -> Vector2i: return Vector2i(1364,1024)
 	func name() -> String: return display_name
 	func set_window_mode(value: int) -> void:
 		calls.append(["window",value])
@@ -39,14 +43,20 @@ func _init() -> void:
 	var adapter = Adapter.new()
 	adapter.configure(audio,platform)
 	var result: Dictionary = adapter.apply(options.application_plan("initialize"))
-	check(result.applied == ["audio","window_mode","vsync","fps_cap"],"accepted mappings recorded")
+	check(result.window_mode.status == "pending" and not result.applied.has("window_mode"),"window observation starts pending")
+	platform.clock += 150
+	result = adapter.poll_window_application(result)
+	check(result.applied == ["audio","vsync","fps_cap","window_mode"],"accepted mappings recorded after stable observation")
 	check(platform.mode == DisplayServer.WINDOW_MODE_FULLSCREEN and platform.cap == 0,"source borderless/VSync precedence mapped")
 	check(not result.capabilities.shadow_presets,"no invented URP shadow adapter")
+	check("\n".join(result.warnings).contains("no hardware/output resolution was applied") and not "\n".join(result.warnings).contains("no screen mode was changed"),"hardware resolution warning does not deny the successful app-window mode change")
 	platform.allow_window = false
 	platform.mode = DisplayServer.WINDOW_MODE_WINDOWED
 	result = adapter.apply(options.application_plan())
-	check(not result.applied.has("window_mode"),"embedded rejection is not reported applied")
-	check("\n".join(result.warnings).contains("not apply the requested fullscreen"),"rejection disclosed separately from saved preference")
+	platform.clock += 2100
+	result = adapter.poll_window_application(result)
+	check(not result.applied.has("window_mode") and result.window_mode.status == "failed","persistent rejection is not reported applied")
+	check("\n".join(result.warnings).contains("not confirmed within"),"rejection disclosed separately from saved preference")
 	check(options.snapshot() == original,"observing rejection never rewrites desired preference")
 	platform.allow_vsync = false
 	platform.vsync = DisplayServer.VSYNC_DISABLED
@@ -57,7 +67,7 @@ func _init() -> void:
 	platform.calls.clear()
 	result = adapter.apply(options.application_plan())
 	check(not result.applied.has("vsync") and not result.applied.has("fps_cap"),"Half VSync remains unsupported")
-	check(platform.calls == [["window",DisplayServer.WINDOW_MODE_FULLSCREEN]],"Half never substitutes adaptive or fixed FPS")
+	check(platform.calls.is_empty(),"Half never substitutes adaptive/FPS or retries the same failed window request")
 	platform.allow_vsync = true
 	options.values.vsync = 0
 	options.values.fps_cap = 60

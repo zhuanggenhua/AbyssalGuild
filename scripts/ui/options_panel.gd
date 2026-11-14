@@ -94,6 +94,7 @@ func _button(parent: Node, label: String, action: Callable) -> Button:
 	return button
 
 func configure(apply_adapter: Callable, hardware_modes: Array = [], save_path: String = "user://options.json") -> Dictionary:
+	_cancel_window_observation()
 	adapter = apply_adapter
 	volume_initialized = false
 	volume_display.clear()
@@ -301,3 +302,27 @@ func configure_source(data: Dictionary, assets) -> bool:
 	candidate.resized.connect(place_status)
 	place_status.call()
 	return true
+
+# Polling belongs to this panel's lifetime, including while hidden after Close.
+# There are no delayed callbacks retaining a panel or publishing an old request.
+func _process(_delta: float) -> void:
+	if last_application.get("window_mode", {}).get("status", "") != "pending" or not adapter.is_valid(): return
+	var owner = adapter.get_object()
+	if not is_instance_valid(owner) or not owner.has_method("poll_window_application"): return
+	var previous_summary := _application_summary()
+	var updated: Dictionary = owner.poll_window_application(last_application)
+	if updated.is_empty(): return
+	last_application = updated
+	# Never overwrite an independent save/validation error or lose its prefix.
+	if not previous_summary.is_empty() and status_label.text.ends_with(previous_summary):
+		status_label.text = status_label.text.left(status_label.text.length() - previous_summary.length()) + _application_summary()
+
+func _cancel_window_observation() -> void:
+	if not adapter.is_valid(): return
+	var owner = adapter.get_object()
+	var id: int = int(last_application.get("window_mode", {}).get("id", -1))
+	if id >= 0 and is_instance_valid(owner) and owner.has_method("cancel_window_observation"):
+		owner.cancel_window_observation(id)
+
+func _exit_tree() -> void:
+	_cancel_window_observation()
