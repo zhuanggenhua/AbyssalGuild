@@ -12,6 +12,7 @@ for test in test_source_stats_group test_source_camera_pointer test_info_text_co
 done
 if [[ -f data/stackcraft.json ]]; then
   python3 tools/verify_source.py --data data
+  bash tools/test_godot.sh res://tests/godot/test_source_board_expansion.gd
   bash tools/test_godot.sh res://tests/godot/test_source_restore_board.gd
   bash tools/test_godot.sh res://tests/godot/test_source_travel_layout_board.gd
   GODOT_RENDERING_METHOD=gl_compatibility bash tools/test_godot.sh res://tests/godot/test_board_face_mapping.gd

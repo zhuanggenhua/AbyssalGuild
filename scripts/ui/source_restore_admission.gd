@@ -1,6 +1,7 @@
 extends RefCounted
 ## Narrow cold-entry admission. Unsupported branches keep their existing behavior
 ## and report the unproven boundary; never pretend a broad source restore match.
+const Expansion = preload("res://scripts/ui/source_board_expansion.gd")
 const Planner = preload("res://scripts/model/source_restore_layout.gd")
 const SOURCE_COMMIT := "a11a89b04cea8370476f2559b639bb9b4cbc08d8"
 static func _fail(reason: String) -> Dictionary: return {"ok": false, "reason": reason}
@@ -53,7 +54,7 @@ static func _owner_panel_bound(catalog, guid: String) -> bool:
 	for document in documents:
 		if str(document.get("file_id", "")) == target: matches.append(document)
 	return matches.size() == 1 and matches[0].get("script_class", "") == "EquipmentPanel"
-static func describe(board) -> Dictionary:
+static func describe(board, allow_initial_expansion: bool = true) -> Dictionary:
 	var session = board.session
 	var catalog = board.catalog
 	if catalog.data.get("provenance", {}).get("source_commit", "") != SOURCE_COMMIT: return _fail("Unknown source restore contract")
@@ -61,7 +62,11 @@ static func describe(board) -> Dictionary:
 	if session.phase not in ["playing", "selling"] or session.cycle.stage != "idle" or session.drag.active(): return _fail("In-flight cycle/held restoration remains separate")
 	if not session.combat.tasks.is_empty() or not session.combat.membership.is_empty(): return _fail("Combat restoration listener order not verified")
 	var boost: int = int(session.stats().card_limit) - int(catalog.settings("CardSettings").get("baseCardLimit", 24))
-	if boost != 0: return _fail("Expanded board Awake/Start ordering not verified")
+	var expansion := {}
+	if boost != 0:
+		if not allow_initial_expansion: return _fail("Expanded travel entry remains outside the verified contract")
+		expansion = Expansion.describe(board, boost)
+		if not expansion.ok: return expansion
 	var defaults: Dictionary = session.campaign._defaults(session.scene_name)
 	var character := ""; var equipment := ""
 	for item in defaults.get("cardPrefabs", []):
@@ -98,7 +103,7 @@ static func describe(board) -> Dictionary:
 			row.cards.append(descriptor)
 		rows.append(row)
 	if seen.size() != session.cards.size(): return _fail("Unstacked source records outside admitted branch")
-	return {"ok": true, "rows": rows, "config": {"scene": session.scene_name, "bounds": session.board_bounds, "step": board._stack_step(), "top_margin": float(session.board_top_margin), "max_iterations": int(catalog.settings("CardSettings").get("maxIterations", 0)), "combat": false, "board_boost": boost, "default_spawn": false}}
+	return {"ok": true, "rows": rows, "config": {"scene": session.scene_name, "bounds": expansion.get("initial_bounds", session.board_bounds), "expansion": expansion, "step": board._stack_step(), "top_margin": float(session.board_top_margin), "max_iterations": int(catalog.settings("CardSettings").get("maxIterations", 0)), "combat": false, "board_boost": boost, "default_spawn": false}}
 
 static func plan(board) -> Dictionary:
 	var description := describe(board)

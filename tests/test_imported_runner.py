@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_source_board_expansion": "Source board expansion: 97 checks, 0 failures",
     "test_source_travel_layout_board": "Source travel layout board: 1 checks, 0 failures; headless production boundary only",
     "test_travel_saved_quest_window": "TRAVEL_SAVED_QUEST_WINDOW PASS 36",
     "test_travel_saved_quest_window_source": "Source saved travel quest window: 13 checks, 0 failures",

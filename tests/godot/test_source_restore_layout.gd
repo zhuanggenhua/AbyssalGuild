@@ -1,4 +1,5 @@
 extends SceneTree
+const Layout = preload("res://scripts/model/board_layout.gd")
 const Restore = preload("res://scripts/model/source_restore_layout.gd")
 class Fixture extends RefCounted:
 	var cards := {}
@@ -90,5 +91,30 @@ func _init():
 			"scene": settings.scene = "Unknown"
 		var unchanged := str(records)
 		check(not Restore.plan([], records, settings).ok and str(records) == unchanged, "unsupported " + invalid + " safely rejects without mutation")
+	var expanded := config()
+	expanded.board_boost = 4
+	expanded.expansion = {"ok": true, "boost": 4, "initial_bounds": expanded.bounds, "final_bounds": Rect2(-6.24, -4.16, 12.48, 8.32)}
+	check(Restore.plan(single, [], expanded).ok, "explicit positive source phase contract admitted")
+	for invalid in ["null", "negative", "mismatch", "initial", "final"]:
+		var bad := expanded.duplicate(true)
+		match invalid:
+			"null": bad.expansion = null
+			"negative": bad.board_boost = -4; bad.expansion.boost = -4
+			"mismatch": bad.expansion.boost = 8
+			"initial": bad.expansion.initial_bounds = Rect2()
+			"final": bad.expansion.final_bounds = Rect2(-1,-1,2,2)
+		check(not Restore.plan(single, [], bad).ok, "invalid expansion phase rejected " + invalid)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 72135
+	for trial in 200:
+		var states: Array = []
+		for id in rng.randi_range(1, 16):
+			var point := Vector2.ZERO if trial % 3 == 0 else Vector2(rng.randf_range(-25,25), rng.randf_range(-25,25))
+			states.append(Layout.stack_state(id+1, point, Vector2(rng.randf_range(0.1,4),rng.randf_range(0.1,4)), rng.randi_range(0,20), id % 5 == 0, Vector3(0,0.002,-0.18)))
+		var initial := states.duplicate(true)
+		var bound := Rect2(-6,-4,12,8)
+		var limit := rng.randi_range(1,10)
+		check(Restore._resolve_cached(states,bound,1.5,limit) == Layout.resolve_overlaps(states,[],bound,1.5,limit), "exact cached resolver result/iteration " + str(trial))
+		check(states == initial, "cached resolver preserves caller input " + str(trial))
 	print("Source restore layout planner: ", checks, " checks, ", failures, " failures; no live board integration")
 	quit(1 if failures else 0)

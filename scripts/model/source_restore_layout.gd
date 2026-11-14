@@ -49,8 +49,38 @@ static func _new_state(context: Dictionary, record: Dictionary, card: Dictionary
 	state["card_ids"] = [card.id]
 	return state
 
+# Source-entry-only resolver. Cache Bounds until a translation changes it.
+# Identical pair order, formulas, clamping and iteration limits to Layout; the
+# ordinary drag/combat/global solver remains untouched. Source entry has no
+# combat rectangles. Positions are the only mutable bounds input per call.
+static func _resolve_cached(stacks: Array, board: Rect2, margin: float, maximum: int) -> Dictionary:
+	var result: Array = stacks.duplicate(true)
+	var bounds: Array[Rect2] = []
+	for stack in result: bounds.append(Layout.stack_bounds(stack))
+	var iterations := 0
+	var any_overlap := true
+	while iterations < maximum and any_overlap:
+		iterations += 1
+		any_overlap = false
+		for i in range(result.size()):
+			var a: Dictionary = result[i]
+			for j in range(i+1,result.size()):
+				var b: Dictionary = result[j]
+				if a.id==b.id or int(a.count)<=0 or int(b.count)<=0 or (a.locked and b.locked):continue
+				var push := Layout.separation(bounds[i],bounds[j])
+				if push==Vector2.ZERO:continue
+				if a.locked:
+					Layout._translate(b,-push,board,margin);bounds[j]=Layout.stack_bounds(b)
+				elif b.locked:
+					Layout._translate(a,push,board,margin);bounds[i]=Layout.stack_bounds(a)
+				else:
+					Layout._translate(a,push*0.5,board,margin);bounds[i]=Layout.stack_bounds(a)
+					Layout._translate(b,-push*0.5,board,margin);bounds[j]=Layout.stack_bounds(b)
+				any_overlap=true
+	return {"stacks":result,"iterations":iterations,"separated_last_pass":any_overlap}
+
 static func _resolve(context: Dictionary, cause: String) -> void:
-	var resolved := Layout.resolve_overlaps(context.states, [], context.bounds, context.margin, context.iterations)
+	var resolved := _resolve_cached(context.states, context.bounds, context.margin, context.iterations)
 	context.states = resolved.stacks
 	context.trace.append({"event": "resolve", "cause": cause, "iterations": resolved.iterations})
 
@@ -105,7 +135,10 @@ static func plan(records: Array, incoming: Array, config: Dictionary) -> Diction
 	if not config.get("step") is Vector3 or not config.step.is_finite(): return _fail("Missing source stack step")
 	if not config.get("max_iterations") is int or config.max_iterations <= 0: return _fail("Missing source solver iteration limit")
 	if not config.get("top_margin") is float or not is_finite(config.top_margin): return _fail("Missing source top margin")
-	if config.get("combat") != false or config.get("board_boost") != 0: return _fail("Combat/board expansion ordering not verified")
+	if config.get("combat") != false: return _fail("Combat/board expansion ordering not verified")
+	if config.get("board_boost") != 0:
+		var expansion: Variant = config.get("expansion")
+		if not expansion is Dictionary or expansion.get("ok") != true or expansion.get("boost") != config.get("board_boost") or not config.board_boost is int or config.board_boost <= 0 or expansion.get("initial_bounds") != config.bounds or not expansion.get("final_bounds") is Rect2 or not expansion.final_bounds.encloses(config.bounds): return _fail("Combat/board expansion ordering not verified")
 	if not config.get("default_spawn") is bool: return _fail("Missing source entry kind")
 	var seen_cards := {}; var seen_stacks := {}
 	var error := _check_records(incoming, seen_cards, seen_stacks, true, false)

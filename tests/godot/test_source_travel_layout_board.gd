@@ -172,6 +172,7 @@ func guard_matrix(board):
 			"combat": probe.session.combat.membership[probe.session.cards.keys()[0]] = 1
 			"boost": probe.session.spawn_card(board.catalog.find_by_name("Warehouse"), Vector2.ZERO, -1, {"refuse_attach": true})
 		var context: Dictionary = entry.context.duplicate(true); context.snapshot = probe.session.campaign.capture()
+		if mode == "boost": check(Travel.plan(probe, context).get("reason") == "Expanded travel entry remains outside the verified contract", "travel explicitly refuses expansion before cold-only metadata branch")
 		rejected(probe, "destination_" + mode, context)
 		check(Codec.restore(probe.session, original).ok, "guard fixture restored")
 	source.campaign.saved_scenes.clear()
