@@ -76,3 +76,12 @@ and retains campaign saves in `user://session.json` (with legacy one-scene adopt
 The integrated runtime recipe path adds five real-data checks: total 35.
 
 Saved-destination arrival quest subscription is specified in [travel-saved-quest-window.md](travel-saved-quest-window.md); new-scene ordering remains outside that correction.
+
+## Saved-destination target geometry
+
+Actual Board entry now has a narrowly admitted traveler-first registration replay
+for the locked single-character portal recipe and an already-saved, unexpanded,
+quiet destination. The staged transaction, quest listener window, RNG samples,
+IDs and departure checkpoint remain unchanged. Unsupported cases retain their
+previous entry path. See [source schedule and exclusions](source-travel-layout.md).
+This does not establish Unity random/PhysX or future gameplay identity.

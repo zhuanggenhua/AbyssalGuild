@@ -53,7 +53,7 @@ static func _owner_panel_bound(catalog, guid: String) -> bool:
 	for document in documents:
 		if str(document.get("file_id", "")) == target: matches.append(document)
 	return matches.size() == 1 and matches[0].get("script_class", "") == "EquipmentPanel"
-static func plan(board) -> Dictionary:
+static func describe(board) -> Dictionary:
 	var session = board.session
 	var catalog = board.catalog
 	if catalog.data.get("provenance", {}).get("source_commit", "") != SOURCE_COMMIT: return _fail("Unknown source restore contract")
@@ -98,4 +98,8 @@ static func plan(board) -> Dictionary:
 			row.cards.append(descriptor)
 		rows.append(row)
 	if seen.size() != session.cards.size(): return _fail("Unstacked source records outside admitted branch")
-	return Planner.plan(rows, [], {"scene": session.scene_name, "bounds": session.board_bounds, "step": board._stack_step(), "top_margin": float(session.board_top_margin), "max_iterations": int(catalog.settings("CardSettings").get("maxIterations", 0)), "combat": false, "board_boost": boost, "default_spawn": false})
+	return {"ok": true, "rows": rows, "config": {"scene": session.scene_name, "bounds": session.board_bounds, "step": board._stack_step(), "top_margin": float(session.board_top_margin), "max_iterations": int(catalog.settings("CardSettings").get("maxIterations", 0)), "combat": false, "board_boost": boost, "default_spawn": false}}
+
+static func plan(board) -> Dictionary:
+	var description := describe(board)
+	return Planner.plan(description.rows, [], description.config) if description.ok else description

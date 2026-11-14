@@ -11,6 +11,7 @@ const CombatMergeGeometry = preload("res://scripts/model/combat_merge_geometry.g
 const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const SourceRestoreLayout = preload("res://scripts/model/source_restore_layout.gd")
+const SourceTravelLayout = preload("res://scripts/ui/source_travel_layout.gd")
 const SourceRestoreAdmission = preload("res://scripts/ui/source_restore_admission.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
@@ -62,6 +63,7 @@ var layout_key: String = ""
 ## Explicit actual cold scene entry only, not Codec staging or travel admission.
 var source_restore_entry: String = ""
 var source_restore_report: Dictionary = {}
+var source_travel_report: Dictionary = {}
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
 var combat_rectangles: Dictionary = {}
@@ -694,7 +696,7 @@ func start_new() -> void:
 	_enter_game()
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
-func _enter_game() -> void:
+func _enter_game(travel_layout: Dictionary = {}) -> void:
 	options_panel.reset_source_lifecycle()
 	world_post_process.configure(catalog.data, session.scene_name, visual_assets.render_pipeline)
 	journal_slide.reset(MenuSlide.initial_state(catalog.data).open)
@@ -758,7 +760,11 @@ func _enter_game() -> void:
 	layout_locks.clear()
 	layout_key = ""
 	source_restore_report = {}
-	if source_restore_entry == "cold_load":
+	source_travel_report = {}
+	if not travel_layout.is_empty():
+		source_travel_report = SourceTravelLayout.apply(self, travel_layout)
+		if source_travel_report.ok: layout_key = _layout_signature()
+	elif source_restore_entry == "cold_load":
 		var planned: Dictionary = SourceRestoreAdmission.plan(self)
 		source_restore_report = SourceRestoreLayout.apply(session, planned) if planned.ok else planned
 		if source_restore_report.ok:
@@ -2689,24 +2695,28 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	if not running or scene_transition.active() or quit_dispatched: return false
 	var candidate = Session.new()
 	candidate.configure(catalog)
+	var provenance: Dictionary = SourceTravelLayout.capture(session, stack_id, recipe_guid)
 	var result: Dictionary = candidate.campaign.restore(session.campaign.capture())
 	if result.ok:
 		# Stage against request-time state, without any live checkpoint callback.
 		result = candidate.campaign.travel(stack_id, recipe_guid)
-	if result.ok: result = _departure_checkpoint()
+	if result.ok:
+		# Retain exact returned IDs before checkpoint replaces this dictionary.
+		provenance = SourceTravelLayout.seal(candidate, result, provenance)
+		result = _departure_checkpoint()
 	if not result.ok:
 		if session.stacks.has(stack_id): session.stacks[stack_id].cancel_craft()
 		_on_session_event("travel_failed", result)
 		return false
-	return _request_scene_change(_commit_travel.bind(session, candidate))
+	return _request_scene_change(_commit_travel.bind(session, candidate, provenance))
 
-func _commit_travel(owner, candidate) -> void:
+func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 	owner.travel_pending = false
 	if owner != session or not running: return
 	# Atomic validated candidate swap; real-time old-scene activity after the
 	# departure capture intentionally cannot rewrite captured travelers.
 	session = candidate
-	_enter_game()
+	_enter_game(provenance)
 	_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
