@@ -105,6 +105,11 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 		loaded = Codec.restore(destination, saved_scenes[target])
 		if not loaded.ok:
 			return loaded
+		# Unity restores saved quest progress during OnSceneDataReady, after
+		# SpawnTravelers; QuestManager subscribes to gameplay only in Start.
+		# Keep all factory/cycle/AI events and RNG intact, but do not process
+		# arrival creation as gameplay for this private saved-scene tracker.
+		destination.event_occurred.disconnect(destination._track_quest_event)
 	else:
 		destination = _new_scene(target, source._next_id, source)
 	destination._next_id = maxi(destination._next_id, source._next_id)
@@ -134,6 +139,8 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 		if record.class_item != -1:
 			destination.equipment.originals[wearer] = record.original
 			destination.equipment.class_items[wearer] = remap[record.class_item]
+	if saved_scenes.has(target):
+		destination.event_occurred.connect(destination._track_quest_event)
 	var snapshot := Codec.capture(destination)
 	var valid := Codec._stage(destination, snapshot)
 	if not valid.ok:

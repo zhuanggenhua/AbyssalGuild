@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_travel_saved_quest_window": "TRAVEL_SAVED_QUEST_WINDOW PASS 36",
+    "test_travel_saved_quest_window_source": "Source saved travel quest window: 13 checks, 0 failures",
     "test_source_restore_layout": "Source restore layout planner: 32 checks, 0 failures; no live board integration",
     "test_source_restore_board": "Source restore board: 93 checks, 0 failures; headless production calls only",
     "test_source_stats_imported": "Source Stats imported layout: PASS (1 checks; no pixel claim)",

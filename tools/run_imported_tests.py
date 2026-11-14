@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_travel_saved_quest_window", r"TRAVEL_SAVED_QUEST_WINDOW PASS 36"),
+    ("test_travel_saved_quest_window_source", r"Source saved travel quest window: 13 checks, 0 failures"),
     ("test_source_stats_imported", r"Source Stats imported layout: PASS \([1-9]\d* checks; no pixel claim\)"),
     ("test_window_mode_observation", r"Window mode observation: 30/30 passed"),
     ("test_source_board_lifetime", r"Source board lifetime: 55 checks, 0 failures; mode=detach; no pixel claim"),

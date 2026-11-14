@@ -74,3 +74,5 @@ scene switch returns immediately from the old tick, so no old stack or elapsed
 time advances in the destination. The board refreshes scene vendors and quests
 and retains campaign saves in `user://session.json` (with legacy one-scene adoption).
 The integrated runtime recipe path adds five real-data checks: total 35.
+
+Saved-destination arrival quest subscription is specified in [travel-saved-quest-window.md](travel-saved-quest-window.md); new-scene ordering remains outside that correction.
