@@ -1,6 +1,8 @@
 extends RefCounted
 ## Bounded URP 17.5 metallic-workflow direct light, not a scene color correction.
 ## Unknown graphs/pipelines retain the previous fallback and are not parity claims.
+# Locked a11a89 SimpleLit graph bytes. Card contract/shader remains unchanged.
+const BOARD_GRAPH_SHA256 := "ecac38c65d483b39fdb2d6032cfbb0bad6d3d856b5183ea657da8c455a1ce0fe"
 const DIRECT_LIGHT_CODE := """
 
 void light() {
@@ -14,7 +16,7 @@ void light() {
 }
 """
 const BOARD_FRAGMENT := """shader_type spatial;
-render_mode cull_disabled;
+render_mode cull_back;
 uniform vec4 source_base_color : source_color = vec4(1.0);
 void fragment() {
     ALBEDO = source_base_color.rgb;
@@ -37,6 +39,8 @@ static func admission(source: Dictionary, manifest: Dictionary, pipeline: Dictio
 	if not contract is Dictionary:
 		return false
 	var required := {"schema_version":2, "geometry":"unmodified_object_vertices_tangent_normal", "target":"universal_lit", "workflow":"metallic", "metallic":0, "smoothness":0, "opaque":true, "double_sided":true, "clearcoat":false, "material_override":false}
+	if path == "Shaders/SimpleLit.shadergraph":
+		required.merge({"schema_version":3,"double_sided":false,"render_face":2,"cull_mode":"back","normal_policy":"inverse_transpose_no_face_flip"}, true)
 	for key in required:
 		if not contract.has(key):
 			return false
@@ -48,6 +52,7 @@ static func admission(source: Dictionary, manifest: Dictionary, pipeline: Dictio
 		if contract[key] != required[key]:
 			return false
 	var digest: String = str(contract.get("graph_sha256", ""))
+	if path == "Shaders/SimpleLit.shadergraph" and digest != BOARD_GRAPH_SHA256: return false
 	if digest.length() != 64 or not manifest.get("inputs") is Dictionary or str(manifest.inputs.get(path, "")) != digest:
 		return false
 	var execution = pipeline.get("execution")
@@ -88,6 +93,7 @@ static func board_material(assets, source: Dictionary) -> ShaderMaterial:
 	# Keep authored color unchanged. Conversion is done by source_color uniforms.
 	material.set_shader_parameter("source_base_color", assets.source_color(source.colors._Color))
 	material.set_meta("source_direct_lit", true)
+	material.set_meta("source_board_cull", "back")
 	return material
 
 static func card_shader(assets, source: Dictionary, fallback: Shader) -> Shader:

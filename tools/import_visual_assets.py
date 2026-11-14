@@ -89,7 +89,7 @@ def build(source, catalog, output):
                     if graph_path.is_file():
                         # Decode without removing BOM: digest must match the input bytes.
                         graph_text = graph_path.read_bytes().decode('utf-8')
-                        material['source_lit'] = source_lit_metadata(graph_text)
+                        material['source_lit'] = source_lit_metadata(graph_text, graph_relative)
                         result['inputs'][graph_relative] = sha256(graph_path)
     def prefab(guid):
         if guid in result['prefabs']:

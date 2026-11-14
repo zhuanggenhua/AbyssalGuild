@@ -21,14 +21,14 @@ func material_for(mode: String) -> Material:
     if mode == "production_factory":
         var assets = preload("res://scripts/ui/visual_assets.gd").new()
         var graph_path := "Shaders/SimpleLit.shadergraph"
-        var digest := "a".repeat(64)
+        var digest := preload("res://scripts/ui/source_lit_material.gd").BOARD_GRAPH_SHA256
         assets.manifest = {"inputs":{graph_path:digest}}
         assets.render_pipeline = {"execution":{"mode":"render_graph","rule":"unity_6000_5_builtin_urp_17_5"},
             "selected_quality":0,"qualities":[{"pipeline_guid":"synthetic"}],
             "pipelines":{"synthetic":{"schema":"urp_renderer_list"}}}
-        var contract := {"schema_version":2,"geometry":"unmodified_object_vertices_tangent_normal",
+        var contract := {"schema_version":3,"geometry":"unmodified_object_vertices_tangent_normal",
             "target":"universal_lit","workflow":"metallic","metallic":0,"smoothness":0,
-            "opaque":true,"double_sided":true,"clearcoat":false,"material_override":false,"graph_sha256":digest}
+            "opaque":true,"double_sided":false,"render_face":2,"cull_mode":"back","normal_policy":"inverse_transpose_no_face_flip","clearcoat":false,"material_override":false,"graph_sha256":digest}
         var source := {"shader_source_path":graph_path,"keywords":[],"source_lit":contract,
             "colors":{"_Color":{"r":COLOR.r,"g":COLOR.g,"b":COLOR.b,"a":COLOR.a}}}
         var actual = preload("res://scripts/ui/source_lit_material.gd").board_material(assets, source)

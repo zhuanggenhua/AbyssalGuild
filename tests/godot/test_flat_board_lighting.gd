@@ -22,6 +22,7 @@ func material(code: String = Lit.BOARD_FRAGMENT + Lit.DIRECT_LIGHT_CODE) -> Shad
 	result.shader = Shader.new()
 	result.shader.code = code
 	result.set_meta("source_direct_lit", true)
+	result.set_meta("source_board_cull", "back")
 	result.set_shader_parameter("source_base_color", Color(.42808828,.4678468,.49056602))
 	return result
 func current(): return mesh.get_surface_override_material(0)
@@ -38,6 +39,12 @@ func run() -> void:
 		print("NOT RUN: requires --rendering-method gl_compatibility")
 		quit(2)
 		return
+	check(Binder.FRAGMENT_CODE.contains("cull_back") and not Binder.FRAGMENT_CODE.contains("cull_disabled"), "flat composition retains source board cull")
+	var old_double_sided := material((Lit.BOARD_FRAGMENT + Lit.DIRECT_LIGHT_CODE).replace("cull_back", "cull_disabled"))
+	check(not Binder._original_supported(old_double_sided), "old double-sided material rejected")
+	var missing_marker := material()
+	missing_marker.remove_meta("source_board_cull")
+	check(not Binder._original_supported(missing_marker), "unproven cull marker rejected")
 	var host := HostWithoutWorld.new()
 	check(host.flat_board_lighting == null, "Board construction does not eagerly allocate binder")
 	# Existing Board Node fields normally become children during full _ready.

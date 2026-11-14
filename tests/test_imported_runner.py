@@ -16,6 +16,9 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_source_board_lifetime": "Source board lifetime: 55 checks, 0 failures; mode=detach; no pixel claim",
+    "test_source_board_lifetime_imported": "Headless source board lifecycle: PASS checks=389 failures=0",
+    "test_board_face_mapping": "Board face mapping: 125 checks, 0 failures; actual FBX structure, no pixel claims",
     "test_root_viewport": "Root viewport: 189/189 passed (headless; pixel captures only on native display)",
     "test_camera_screen_pixels": "Camera screen pixels: 50/50 passed",
     "test_flat_board_lighting": "Flat board lighting lifecycle: 82 checks, 0 failures",

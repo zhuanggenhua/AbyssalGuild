@@ -51,6 +51,7 @@ func run()->void:
 		check(board.source_light.light_color.is_equal_approx(light.color) and is_equal_approx(board.source_light.light_energy,light.intensity),scene+" direct parameters unchanged")
 		check(is_equal_approx(board.source_light.shadow_opacity,light.shadows.m_Strength),scene+" shadow strength unchanged")
 		for record in board.flat_board_lighting.records:
+			check(record.original.get_meta("source_board_cull", "")=="back" and record.replacement.shader.code.contains("cull_back") and not record.replacement.shader.code.contains("cull_disabled"),scene+" source cull retained by composition")
 			check(record.original.shader.code==Lit.BOARD_FRAGMENT+Lit.DIRECT_LIGHT_CODE,scene+" exact original material retained")
 			check(record.replacement.get_shader_parameter("source_base_color")==record.original.get_shader_parameter("source_base_color"),scene+" base color copied unchanged")
 		var card_count:=0

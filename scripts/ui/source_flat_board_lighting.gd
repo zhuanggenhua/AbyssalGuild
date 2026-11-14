@@ -17,7 +17,7 @@ void light() {
 }
 """
 const FRAGMENT_CODE := """shader_type spatial;
-render_mode cull_disabled, ambient_light_disabled;
+render_mode cull_back, ambient_light_disabled;
 uniform vec4 source_base_color : source_color = vec4(1.0);
 uniform vec3 source_flat_ambient_linear = vec3(0.0);
 void fragment() {
@@ -72,7 +72,7 @@ func _collect(node: Node) -> void:
 	for child in node.get_children(): _collect(child)
 
 static func _original_supported(material: Material) -> bool:
-	return material is ShaderMaterial and material.shader != null and bool(material.get_meta("source_direct_lit", false)) and material.shader.code == Lit.BOARD_FRAGMENT + Lit.DIRECT_LIGHT_CODE and material.next_pass == null
+	return material is ShaderMaterial and material.shader != null and bool(material.get_meta("source_direct_lit", false)) and material.get_meta("source_board_cull", "") == "back" and material.shader.code == Lit.BOARD_FRAGMENT + Lit.DIRECT_LIGHT_CODE and material.next_pass == null
 
 func clear() -> void:
 	for record in records: _restore(record)

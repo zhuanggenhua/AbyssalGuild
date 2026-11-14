@@ -34,8 +34,8 @@ def graph_objects(text):
     return objects
 
 
-def source_lit_metadata(text):
-    """Return schema 2 contract, or {} when the supported facts are unproven."""
+def source_lit_metadata(text, source_path=""):
+    """Return legacy Card schema 2 or explicit board schema 3; unknown facts fail closed."""
     try:
         objects = graph_objects(text)
         graphs = [x for x in objects.values() if x.get('m_Type') == SG + 'GraphData']
@@ -117,10 +117,17 @@ def source_lit_metadata(text):
             slot = fixed_slot(fragment['SurfaceDescription.' + name], 'Vector1MaterialSlot', 2)
             if type(slot.get('m_Value')) not in (float, int) or slot['m_Value'] != 0:
                 return {}
-        return {'schema_version': 2, 'geometry': 'unmodified_object_vertices_tangent_normal',
+        contract = {'schema_version': 2, 'geometry': 'unmodified_object_vertices_tangent_normal',
                 'target': 'universal_lit', 'workflow': 'metallic', 'metallic': 0,
                 'smoothness': 0, 'opaque': True, 'double_sided': True,
                 'clearcoat': False, 'material_override': False,
                 'graph_sha256': hashlib.sha256(text.encode('utf-8')).hexdigest()}
+        if source_path == 'Shaders/SimpleLit.shadergraph':
+            # Audited URP UniversalTarget RenderFace.Front=2 emits Cull.Back.
+            # Unconnected normal slots retain inverse-transpose mesh normals;
+            # do not infer zero normals or a determinant-sign normal flip.
+            contract.update(schema_version=3, double_sided=False, render_face=2,
+                            cull_mode='back', normal_policy='inverse_transpose_no_face_flip')
+        return contract
     except (ValueError, KeyError, TypeError, AttributeError):
         return {}

@@ -40,3 +40,12 @@ godot --audio-driver Dummy --path tests/rendering/flat_board_probe -- --output=/
 ```
 
 Headless lifecycle and algebra checks make no pixel claim. The native probe refuses headless execution. It copies current first-party scripts, hashes them, uses synthetic geometry only, and produces 32 PNGs plus numerical readback: stock/binder × ambient off/on × shadow off/on × clear/blocked/edge/backlit. Assertions cover unchanged direct light, unchanged unshadowed composition, no-occlusion shadow-toggle invariance, actual occlusion, and constant ambient across attenuation. No licensed source assets are included by the probe.
+
+## Desktop face contract
+
+The actual original board and its linear-composition replacement both use the
+explicit SimpleLit schema 3 Front/Cull.Back contract and source_board_cull=back
+metadata. Unsupported contexts restore the same Cull.Back original material
+reference. This corrects the real reflected-FBX face path independently of the
+linear-composition formula. See [source-board-faces.md](source-board-faces.md).
+Synthetic QuadMesh results alone do not establish actual FBX front/back behavior.

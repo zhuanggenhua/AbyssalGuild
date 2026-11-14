@@ -13,8 +13,12 @@ not validate these newly reconstructed bytes.
 The source files named `Card.shadergraph` and `SimpleLit.shadergraph` have an active
 Universal Lit target. The filename “SimpleLit” is not a shader-model declaration.
 For the admitted source graphs, metallic and smoothness are both zero, the surface
-is opaque and double-sided, and the graph does not override vertex position,
-vertex normal/tangent or tangent-space normal. Import-time metadata proves this
+is opaque, and the graph does not override vertex position, vertex normal/tangent
+or tangent-space normal. The original metadata incorrectly called RenderFace=2
+double-sided. The scoped desktop correction now gives SimpleLit an explicit
+schema 3 Front/Cull.Back contract. Card keeps its previous schema 2 contract and
+shader path unchanged; that legacy double_sided field is not a newly verified
+claim about Card source face semantics. Import-time metadata proves the remaining
 bounded contract and records the actual graph hash. Material keywords, target,
 geometry, pipeline and render mode must pass runtime admission; unsupported input
 retains the existing fallback rather than being labelled equivalent.
@@ -119,3 +123,11 @@ changes, full card flash/overlay framebuffer equivalence, or complete-scene
 Unity/Godot parity. It is not an assertion that the user's Unity screenshot
 matches any particular runtime scene/state. No different source repository or
 version is assumed from screenshot differences, and no source baseline is changed.
+
+## Actual desktop FBX face correction
+
+See [source-board-faces.md](source-board-faces.md). The earlier QuadMesh probes
+were not evidence for actual FBX face classification. On the real reflected
+Board.fbx, the old cull_disabled path reversed the effective normal and removed
+direct light. Board-only Cull.Back preserves inverse-transpose normals; card
+shaders, indices, coordinate conversion and lighting parameters remain unchanged.

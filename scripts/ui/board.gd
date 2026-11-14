@@ -34,6 +34,7 @@ const SaveCodec = preload("res://scripts/model/save_codec.gd")
 const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
 const QUIT_AUDIO_DRAIN_SECONDS := 0.5
 const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
+const SourceBoardLifetime = preload("res://scripts/ui/source_board_lifetime.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
 var source_hud: Control
 var hud_layout = preload("res://scripts/ui/source_hud_layout.gd").new()
@@ -273,6 +274,7 @@ func _restore_title_world() -> void:
 	# Preserve the same explicit native title backdrop used on first launch.
 	if is_instance_valid(original_board):
 		original_board.hide()
+		SourceBoardLifetime.detach_meshes(original_board)
 		original_board.queue_free()
 	original_board = null
 	_replace_scene_background("Title")
@@ -1758,6 +1760,11 @@ func _prepare_quit() -> bool:
 	return result.ok
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		# Detach only this owned source tabletop before child material Refs die.
+		if is_instance_valid(flat_board_lighting): flat_board_lighting.clear()
+		if is_instance_valid(original_board): SourceBoardLifetime.detach_meshes(original_board)
+		return
 	if what in [NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]:
 		_card_pointer_known = false
 		camera_pointer.known = false
@@ -1974,6 +1981,7 @@ func _update_board_geometry() -> void:
 	if is_instance_valid(flat_board_lighting): flat_board_lighting.clear()
 	if original_board != null:
 		original_board.hide()
+		SourceBoardLifetime.detach_meshes(original_board)
 		original_board.queue_free()
 	original_board = visual_assets.create_board_mesh(session.scene_name, boost)
 	if original_board != null:

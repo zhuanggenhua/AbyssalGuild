@@ -65,9 +65,22 @@ class SourceLitMetadataTest(unittest.TestCase):
                        'graph': {'source_path': 'Shaders/SimpleLit.shadergraph'}}, 'scenes': []}
             result = build(source, catalog, root / 'output')
             material = result['materials']['mat']
-            self.assertEqual(material['source_lit']['schema_version'], 2)
+            self.assertEqual(material['source_lit']['schema_version'], 3)
+            self.assertEqual(material['source_lit']['cull_mode'], 'back')
             self.assertEqual(material['source_lit']['graph_sha256'], result['inputs']['Shaders/SimpleLit.shadergraph'])
             self.assertEqual(material['keywords'], ['SYNTHETIC_A', 'SYNTHETIC_B', 'SYNTHETIC_C'])
+
+    def test_board_contract_and_card_output_preserved(self):
+        text = encode(fixture())
+        legacy = source_lit_metadata(text)
+        self.assertEqual(source_lit_metadata(text, 'Shaders/Card.shadergraph'), legacy)
+        board = source_lit_metadata(text, 'Shaders/SimpleLit.shadergraph')
+        self.assertEqual(board, dict(legacy, schema_version=3, double_sided=False,
+                                    render_face=2, cull_mode='back',
+                                    normal_policy='inverse_transpose_no_face_flip'))
+        for render_face in (0, 1, 3, '2', False):
+            objects = fixture(); indexed(objects)['target']['m_RenderFace'] = render_face
+            self.assertEqual(source_lit_metadata(encode(objects), 'Shaders/SimpleLit.shadergraph'), {})
 
     def test_contract(self):
         text = encode(fixture())
