@@ -1,4 +1,5 @@
 extends Node3D
+const SourceStatsText = preload("res://scripts/ui/source_stats_text.gd")
 const WorldPostProcess = preload("res://scripts/ui/world_post_process.gd")
 const CyclePresentation = preload("res://scripts/ui/cycle_presentation.gd")
 const CameraMotion = preload("res://scripts/ui/camera_motion.gd")
@@ -40,8 +41,8 @@ var source_hud: Control
 var hud_layout = preload("res://scripts/ui/source_hud_layout.gd").new()
 var info_requests = preload("res://scripts/ui/info_request_queue.gd").new()
 var stats_background: Panel
-var stats_box: HBoxContainer
-var stat_labels: Array[Label] = []
+var stats_box: Control
+var stat_labels: Array[SourceStatsText] = []
 var journal_tabs: HBoxContainer
 var watermark: Label
 var ledger_info: Dictionary = {}
@@ -386,7 +387,7 @@ func _build_ui() -> void:
 	stats_background = Panel.new()
 	stats_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	source_hud.add_child(stats_background)
-	stats_box = HBoxContainer.new()
+	stats_box = preload("res://scripts/ui/source_stats_group.gd").new()
 	source_hud.add_child(stats_box)
 	stats_box.add_theme_constant_override("separation", 0)
 	status = _label("", hud)
@@ -925,6 +926,10 @@ func _configure_source_hud() -> void:
 	var stats: Rect2 = hud_layout.rect("CardStatsUI", extent, Rect2(360, 30, 0, 50))
 	stats_box.position = stats.position
 	stats_box.size.y = stats.size.y
+	var stats_fields:Dictionary={}
+	for key in ["m_ChildAlignment","m_ChildControlWidth","m_ChildControlHeight","m_ChildForceExpandWidth","m_ChildForceExpandHeight","m_ChildScaleWidth","m_ChildScaleHeight","m_Spacing","m_Padding","m_ReverseArrangement","m_HorizontalFit","m_VerticalFit"]:
+		stats_fields[key]=hud_layout.field("CardStatsUI",key,null)
+	stats_box.configure_source(stats_fields)
 	if stat_labels.is_empty() and not hud_layout.documents.is_empty():
 		for field in ["Nutrition", "Currency", "Card"]:
 			var icon := TextureRect.new()
@@ -936,10 +941,11 @@ func _configure_source_hud() -> void:
 			var preferred_width: float = float(sprite.get("pixel_size", {}).get("x", 64)) * 100.0 / float(sprite.get("pixels_per_unit", 100))
 			icon.custom_minimum_size = Vector2(preferred_width, 30)
 			icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			stats_box.add_child(icon)
-			var stat_label := _label("", stats_box, int(hud_layout.field(field + "Label", "m_fontSize", 30)))
-			preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(stat_label, hud_layout.text_record("CardStatsUI/" + field + "Label"))
-			stat_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			stats_box.add_element(icon)
+			var stat_label = SourceStatsText.new()
+			stats_box.add_element(stat_label)
+			stat_label.layout_contract_changed.connect(_restore_source_stats_height, CONNECT_DEFERRED)
+			stat_label.configure(hud_layout.text_record("CardStatsUI/" + field + "Label"),SourceStatsText.source_height_from(hud_layout.field(field + "Label","m_SizeDelta",null)))
 			stat_labels.append(stat_label)
 	var stats_style := StyleBoxFlat.new()
 	stats_style.bg_color = hud_layout.color("CardStatsUI", Color(0, 0, 0, 0.8))
@@ -2749,3 +2755,12 @@ func _install_saved_rows() -> void:
 func _close_recovery() -> void:
 	if recovery_window != null: recovery_window.hide()
 	if recovery_button != null and recovery_button.is_visible_in_tree(): recovery_button.grab_focus()
+
+func _restore_source_stats_height() -> void:
+	# Reapply the source fixed parent RectTransform after a temporary native
+	# fallback minimum grows and then shrinks; HBox does not shrink itself.
+	if not is_instance_valid(stats_box) or not is_instance_valid(source_hud) or not is_instance_valid(stats_background): return
+	var original := hud_layout.rect("CardStatsUI",source_hud.size,Rect2())
+	if original.size.y <= 0: return
+	stats_box.size = Vector2(stats_box.get_combined_minimum_size().x,original.size.y)
+	stats_background.size = stats_box.size + Vector2(34,0)

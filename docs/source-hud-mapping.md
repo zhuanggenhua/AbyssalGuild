@@ -35,9 +35,14 @@ with that debug panel, not a replacement source watermark.
 
 ## Known limits, not claimed parity
 
-The locked subtree and full supplied CardLoop checkout do not contain the TMP font
-GUID `8f586378b4e144a9851e7b34d9b748ee`; native font rendering remains a fallback.
-Thus preferred text measurements, baseline and glyph shape cannot be called 1:1.
+The earlier missing-font assessment is superseded by [source-fonts](source-fonts.md):
+the full locked CardLoop tree contains the static TMP font
+GUID `8f586378b4e144a9851e7b34d9b748ee` and its original Liberation Sans TTF.
+With the validated private font supplement, Day, Stats and tab controls bind that
+source font; missing or mismatched bytes retain an explicit fallback status.
+The dynamic journal uses a different TMP Settings default GUID and remains
+unresolved. Binding the original TTF does not establish TMP layout, glyph baseline
+or SDF pixel parity; the bounded 3D title baseline work is not 2D HUD acceptance.
 Godot native text wrapping and rich-text handling are not Unity TMP rendering.
 For exceptionally long descriptions the native panel caps to the available screen
 height and scrolls, rather than allowing the source preferred-height panel to leave
