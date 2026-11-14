@@ -146,7 +146,7 @@ def release_startup(binary, seconds=3):
     print(f"Release startup/liveness: observed {seconds:g}s, then harness SIGTERM; no clean-Quit claim", flush=True)
 
 
-def run(archive, output, root=ROOT):
+def run(archive, output, root=ROOT, alpha_cache=False):
     root = root.resolve()
     output = output.absolute()
     # Refuse symlink parents rather than silently exporting elsewhere.
@@ -175,6 +175,23 @@ def run(archive, output, root=ROOT):
             command = [engine, "--headless", "--path", str(project)]
             run_step(command + ["--editor", "--import"], "Import isolated export resources",
                      timeout=os.environ.get("GODOT_IMPORT_TIMEOUT", "180"))
+            cache_build = {}
+            if alpha_cache:
+                run_step(command + ["--script", str(root / "tools/build_alpha_cache.gd")],
+                         "Build optional private exact alpha cache",
+                         expected=r"PRIVATE ALPHA CACHE BUILD: PASS \([1-9]\d* exact images\)", timeout="180")
+                index_sha = sha256(project / "assets/imported/alpha_cache/index.json")
+                # This trusted build setting is outside the untrusted cache index.
+                # It is an integrity root, not a signature of the whole PCK.
+                settings = project / "project.godot"
+                if "[private_alpha_cache]" in settings.read_text():
+                    raise ValidationError("Reserved generated alpha-cache setting already present")
+                settings.write_text(settings.read_text() + '\n[private_alpha_cache]\nindex_sha256="' + index_sha + '"\n')
+                cache_build = {"index_sha256": index_sha, "project_godot_sha256": sha256(settings)}
+                # Only this verified temporary export tree gains generated data.
+                preset = project / "export_presets.cfg"
+                preset.write_text(preset.read_text().replace('include_filter="',
+                                  'include_filter="assets/imported/alpha_cache/*,'))
             install = base / "install"
             install.mkdir(mode=0o700)
             run_step(command + ["--export-release", "Linux private", str(install / BINARY)],
@@ -193,6 +210,11 @@ def run(archive, output, root=ROOT):
             run_step([engine, "--headless", "--main-pack", str(install / "AbyssalGuild.pck"), "--script", str(probe)],
                      "Run exported PCK probe (editor host)", expected=SMOKE_MARKER,
                      timeout=os.environ.get("GODOT_TEST_TIMEOUT", "90"))
+            if alpha_cache:
+                run_step([engine, "--headless", "--main-pack", str(install / "AbyssalGuild.pck"),
+                          "--script", str(root / "tools/verify_alpha_cache.gd")],
+                         "Verify optional alpha cache in exported PCK",
+                         expected=r"PRIVATE ALPHA CACHE PCK: PASS \([1-9]\d* exact images; 7 fallback cases; 4 packed manifest faults\)", timeout="180")
             native_state = base / "native-state"
             native_state.mkdir(mode=0o700)
             with isolated(native_state):
@@ -201,6 +223,8 @@ def run(archive, output, root=ROOT):
                       "template_archive_sha256": TEMPLATE_SHA256, "owned_inputs_sha256": code_hashes,
                       "export_sha256": {p.name: sha256(p) for p in sorted(install.iterdir())},
                       "exported_pck_probe_editor_host": "passed",
+                      "private_alpha_cache": "verified data-only generated cache" if alpha_cache else "disabled",
+                      "private_alpha_cache_build": cache_build,
                       "release_startup": "observed 3 seconds; harness SIGTERM; not normal Quit",
                       "gpu_manual_audio_acceptance": "not performed"}
             (install / "validation.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -219,12 +243,13 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--templates", required=True, type=Path, help="verified official 4.7.2 export_templates.tpz")
     parser.add_argument("--output", required=True, type=Path, help="new private directory outside Git checkouts")
+    parser.add_argument("--alpha-cache", action="store_true", help="precompute optional private exact data-only alpha cache after verified import")
     args = parser.parse_args(argv)
     def interrupt(*_):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, interrupt)
     try:
-        run(args.templates, args.output)
+        run(args.templates, args.output, alpha_cache=args.alpha_cache)
     except ValidationError as error:
         print(f"LINUX EXPORT FAILED: {error}", file=sys.stderr)
         return error.code

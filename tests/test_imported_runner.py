@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_private_alpha_cache": "Private alpha cache data-only bounds and rejection: PASS",
     "test_source_board_expansion": "Source board expansion: 97 checks, 0 failures",
     "test_source_travel_layout_board": "Source travel expansion coverage: PASS (4 positive, 11 guards)\nSource travel layout board: 1 checks, 0 failures; headless production boundary only",
     "test_travel_saved_quest_window": "TRAVEL_SAVED_QUEST_WINDOW PASS 36",

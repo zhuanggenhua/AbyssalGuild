@@ -31,6 +31,15 @@ class LinuxExportTests(unittest.TestCase):
         self.assertEqual((ROOT / relative).read_bytes(), (project / relative).read_bytes())
         self.assertIn(b"1.175494351e-38", (project / relative).read_bytes())
 
+    def test_optional_cache_never_copies_unverified_checkout_payloads(self):
+        cache = self.root / "assets/imported/alpha_cache"
+        cache.mkdir()
+        (cache / "index.json").write_text('{"evil":"res://script.gd"}')
+        (cache / "x.bin").write_bytes(b"unverified")
+        project = self.base / "cache-free-export"
+        runner.copy_export_project(self.root, project, runner.private_inputs(self.root))
+        self.assertFalse((project / "assets/imported/alpha_cache").exists())
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="abyssal-export-tests-")
         self.addCleanup(self.temporary.cleanup)

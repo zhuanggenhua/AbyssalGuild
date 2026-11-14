@@ -12,6 +12,8 @@ var failures := 0
 var completed := false
 var counts := {"png": 0, "wav": 0, "fbx": 0}
 var packed_files := 0
+var alpha_cache_files: Dictionary = {}
+const AlphaCache = preload("res://scripts/ui/private_alpha_cache.gd")
 
 func audit_directory(path: String, assets) -> void:
 	var directory := DirAccess.open(path)
@@ -40,6 +42,7 @@ func audit_directory(path: String, assets) -> void:
 				for key in ["font_path", "metrics_path", "license_path"]:
 					var font_path: String = fonts.root_path + str(entry[key])
 					if full == font_path or (key == "font_path" and full == font_path + ".import"): allowed = true
+			if alpha_cache_files.has(full): allowed = true
 			check(allowed, "runtime-only packed file: " + full)
 		name = directory.get_next()
 	directory.list_dir_end()
@@ -71,6 +74,18 @@ func run() -> void:
 		check(binding.font != null and binding.status == "source_font_bound_native_layout", "packed exact source-font bytes and metrics: " + str(guid))
 		check(FileAccess.file_exists(fonts.root_path + str(fonts.manifest.fonts[guid].license_path)), "packed font license notice")
 	check(assets.load_render_pipeline(str(catalog.data.provenance.source_commit)) == OK, "packed source rendering graph and content hash")
+	if FileAccess.file_exists(AlphaCache.INDEX):
+		var cache := AlphaCache.new(); cache._read_index()
+		check(not cache._entries.is_empty(), "optional alpha index valid and nonempty")
+		alpha_cache_files[AlphaCache.INDEX] = true
+		for guid in cache._entries:
+			if not check(AlphaCache.hex_id(guid, 32), "optional alpha GUID canonical"): continue
+			var entry = assets.manifest.assets.get(guid)
+			if not check(entry is Dictionary, "optional alpha belongs to licensed manifest"): continue
+			var remap := ConfigFile.new()
+			check(remap.load(assets.root_path + str(entry.path) + ".import") == OK, "optional alpha source import exists")
+			check(cache.image(guid, entry, remap) != null, "optional alpha exact hash/size binding")
+			alpha_cache_files[AlphaCache.ROOT + guid + ".bin"] = true
 	audit_directory("res://", assets)
 	for entry in assets.manifest.assets.values():
 		var path: String = assets.root_path + str(entry.path)

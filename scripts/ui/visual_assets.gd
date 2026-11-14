@@ -1,4 +1,6 @@
 extends RefCounted
+const PrivateAlphaCache = preload("res://scripts/ui/private_alpha_cache.gd")
+var private_alpha_cache = PrivateAlphaCache.new()
 ## Optional private media bindings with generated-geometry fallback.
 var manifest: Dictionary = {}
 var root_path: String = "res://assets/imported/"
@@ -23,6 +25,7 @@ func load_manifest(path: String = "res://assets/imported/manifest.json") -> Erro
 			return ERR_PARSE_ERROR
 	manifest = parsed
 	root_path = path.get_base_dir() + "/"
+	private_alpha_cache = PrivateAlphaCache.new()
 	texture_cache.clear()
 	model_cache.clear()
 	return OK
@@ -57,6 +60,11 @@ func texture(guid: String) -> Texture2D:
 	if has_cache and ResourceLoader.exists(path, "Texture2D"):
 		var resource = ResourceLoader.load(path, "Texture2D")
 		if resource is Texture2D:
+			var precomputed: Image = private_alpha_cache.image(guid, entry, remap)
+			if precomputed != null:
+				var cached := ImageTexture.create_from_image(precomputed)
+				texture_cache[guid] = cached
+				return cached
 			var mapped: Texture2D = _imported_texture(resource, entry.get("texture_importer", {}))
 			if mapped != null:
 				texture_cache[guid] = mapped
