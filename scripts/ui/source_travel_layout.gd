@@ -71,7 +71,11 @@ static func plan(board, context: Dictionary) -> Dictionary:
 	var session = board.session
 	if session.campaign.capture() != context.snapshot: return _fail("Staged traveler/destination state changed")
 	if not _quiet(session): return _fail("Destination lifecycle outside proven travel geometry")
-	var description := Admission.describe(board, false)
+	# sceneLoaded creates travelers then restores saved stacks before Board.Start.
+	# A verified positive initial expansion therefore resolves at authored base
+	# bounds, then exposes final bounds without a shrink/global-clamp pass. Keep
+	# all live-context/quiet guards above and the cold metadata/graph guards below.
+	var description := Admission.describe(board, true)
 	if not description.ok: return description
 	var by_card := {}; var by_stack := {}
 	for row in description.rows:

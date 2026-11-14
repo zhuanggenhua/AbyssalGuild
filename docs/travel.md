@@ -80,8 +80,10 @@ Saved-destination arrival quest subscription is specified in [travel-saved-quest
 ## Saved-destination target geometry
 
 Actual Board entry now has a narrowly admitted traveler-first registration replay
-for the locked single-character portal recipe and an already-saved, unexpanded,
-quiet destination. The staged transaction, quest listener window, RNG samples,
+for the locked single-character portal recipe and an already-saved,
+quiet destination. Positive destination expansion uses verified authored base
+bounds during traveler/saved registration, then the final expanded bounds with
+no extra clamp/solver; unverified or non-initial expansion still falls back. The staged transaction, quest listener window, RNG samples,
 IDs and departure checkpoint remain unchanged. Unsupported cases retain their
 previous entry path. See [source schedule and exclusions](source-travel-layout.md).
 This does not establish Unity random/PhysX or future gameplay identity.

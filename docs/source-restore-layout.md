@@ -49,9 +49,10 @@ board branches outside the positive cold-entry contract below, combat listeners,
 engine-native animations remain separate work.
 
 Saved-destination travel uses the separately guarded schedule in
-[source-travel-layout.md](source-travel-layout.md). Its expansion opt-in is
-explicitly false: this cold-entry change does not extend the travel boundary or
-reorder random draws. New/default destinations remain separate.
+[source-travel-layout.md](source-travel-layout.md). Its separately sealed
+live-entry context now admits the same verified positive initial expansion, with
+travel-specific lifecycle/provenance guards. Neither path reorders random draws.
+New/default destinations remain separate.
 
 ## Positive cold-entry expansion
 

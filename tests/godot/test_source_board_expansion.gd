@@ -32,7 +32,7 @@ func run():
    s.board_top_margin=1.5;s.board_bounds=board.visual_assets.board_local_rect(scene,minf(boost,100)/100.0)
    var before=s.campaign.capture();var desc=Admission.describe(board)
    check(desc.ok,scene+str(boost)+" source expansion admission")
-   check(not Admission.describe(board,false).ok,"travel expansion opt-out remains whole-group fallback")
+   check(not Admission.describe(board,false).ok,"explicit expansion opt-out remains whole-group fallback")
    if not desc.ok:results.append({"scene":scene,"boost":boost,"failure":desc});continue
    check(desc.config.bounds.is_equal_approx(Rect2(-6,-4,12,8)),"initial base bounds")
    var plan=Planner.plan(desc.rows,[],desc.config);check(plan.ok,"expanded phase planner")

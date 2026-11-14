@@ -19,12 +19,15 @@ Reference: `a11a89b04cea8370476f2559b639bb9b4cbc08d8`, paths relative to
   follow, including their per-card initialization and saved-anchor resets.
 - `Core/TimeManager.cs:47–59`: external pause does not suppress an already-reached
   day boundary. Both departure and destination clocks must be below duration.
-- `Core/Board.cs:25–68`, `Combat/CombatManager.cs:85–132`, and
-  `Crafting/CraftingManager.cs:110–131`: expanded board Awake/Start, independent
-  combat restoration, and active crafting restore need separate timing proofs.
+- `Core/Board.cs:24–77`: Awake caches authored base bounds; Start subscribes
+  and reads the complete stats snapshot. Positive first expansion does not call
+  the shrinking-only EnforceBoardLimits. `Combat/CombatManager.cs:85–132` and
+  `Crafting/CraftingManager.cs:110–131` still need separate restoration proofs.
 
 The supported travel recipe is the locked `Recipe_Travel_Island` resource:
-one Grand Portal plus one character, with retained ingredients. The source's
+one Grand Portal plus one Villager base-definition, strict counts and no extra
+ingredients. Consumption and source delayed-destruction uncertainty remain as
+documented in [travel.md](travel.md). The source's
 traveler list therefore has **two card IDs**, not one; equipped items are mapped
 separately. Multiple/unknown characters and different recipes are not admitted.
 
@@ -55,16 +58,33 @@ checkpoint records the resulting targets; the departure checkpoint remains the
 same pre-transition snapshot. No geometry operation is inserted into validation
 copies or the preserved saved-quest subscription window.
 
+## Positive initial destination expansion
+
+Unity documents [sceneLoaded before Start](https://docs.unity.com/zh-cn/engine/6000.5/script-reference/unityengine/scenemanagement/scenemanager/sceneloaded).
+The locked traveler list contributes no capacity booster. Saved boosters become
+registered during synchronous OnSceneDataReady restoration, but Board has not
+subscribed yet. All per-card overlap/anchor work therefore uses authored initial
+bounds. Board.Start then reads the full registered snapshot and expands the mesh;
+it does not run the shrink-only limit enforcement. No relative Start ordering
+between different objects is assumed.
+
+The existing `source_board_expansion.gd` descriptor validates source prefab/scene
+hashes, initial weight zero, transforms and actual FBX base/final bounds, plus
+known positive Warehouse/Yard contributions. Its base bounds drive the shadow
+plan while final presentation bounds are retained. Raw capacity may exceed100;
+mesh weight alone caps100. Isolated anchors and attachment-forbidden packs are
+not blanket-clamped. A later refresh cannot replay the entry schedule.
+
 ## Explicit exclusions
 
 Only already-saved Main↔Island destinations, with the locked source metadata and
-zero destination board boost, are admitted. Departure and destination must be
+zero or verified positive initial destination boost, are admitted. Departure and destination must be
 playing/idle, below day duration, unheld and without combat. Other departure
 crafting and any destination active crafting are excluded; the travel recipe's
-own completing stack is allowed. New/default destinations, expanded destinations,
-all day-end/selling states, nested/replacement equipment, custom pack attachment,
+own completing stack is allowed. New/default destinations, negative/shrinking or unverified expansion,
+nonzero authored weight, all day-end/selling states, nested/replacement equipment, custom pack attachment,
 missing metadata and incomplete or stale provenance all fall back as a group.
-Expanded departure alone does not invalidate an unexpanded destination.
+Expanded departure alone does not invalidate an otherwise admitted destination.
 
 The registration order and geometry intentionally change. Future feeding queues,
 equal-distance AI targeting and distance queries may therefore change. Equal
@@ -78,7 +98,8 @@ new random algorithm or full Unity engine execution.
 
 `test_source_travel_layout_board.gd` runs actual Board request/checkpoint/fade
 commit/arrival save/readback calls headlessly in isolated user data. It covers
-both directions, with/without three-slot gear, strict provenance rejection,
+both directions, with/without three-slot gear, positive boosts4/14/100/110,
+base-before-final phase counterexamples, saved packs, strict provenance rejection,
 one-shot entry and no subsequent solver, failed departure save, duplicate/cancel
 and stale-owner routes. It checks nongeometry state, exact IDs, RNG state,
 equipment, quests and inactive scenes; JSON readback is normalized only for

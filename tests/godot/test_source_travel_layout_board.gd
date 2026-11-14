@@ -4,6 +4,7 @@ extends SceneTree
 const Session = preload("res://scripts/model/game_session.gd")
 const Codec = preload("res://scripts/model/save_codec.gd")
 const Travel = preload("res://scripts/ui/source_travel_layout.gd")
+const Admission = preload("res://scripts/ui/source_restore_admission.gd")
 const Planner = preload("res://scripts/model/source_restore_layout.gd")
 class SilentFeedback extends "res://scripts/ui/audio_feedback.gd":
 	func play_event(_kind: String) -> bool: return false
@@ -44,12 +45,23 @@ func targets(s) -> Array:
 	var result: Array = []
 	for stack in s.stacks.values(): result.append({"id": stack.id, "cards": stack.card_ids.duplicate(), "position": stack.position})
 	return result
-func fixture(board, source_scene: String, geared: bool):
+func fixture(board, source_scene: String, geared: bool, boost: int = 0):
 	var target := "Island" if source_scene == "Main" else "Main"
 	var source = Session.new(); source.configure(board.catalog, 123, source_scene); source.paused = true
 	var destination = Session.new(); destination.configure(board.catalog, 123, target); destination._next_id = 1000; destination.paused = true
 	for pair in [["Wood", Vector2(-5.55, 0)], ["Wood", Vector2(-5.0, 0.05)], ["Stone", Vector2(-4.5, -0.2)]]:
 		destination.spawn_card(board.catalog.find_by_name(pair[0]), pair[1], -1, {"refuse_attach": true})
+	if boost > 0:
+		# Only explicit synthetic fixtures, not modifications to optional real saves.
+		destination.stacks.values()[0].position = Vector2(7, 0)
+		destination.stacks.values()[1].position = Vector2(7.2, 0.1)
+		var remaining := boost
+		while remaining >= 10:
+			destination.spawn_card(board.catalog.find_by_name("Warehouse"), Vector2(-3, -1), -1, {"refuse_attach": true}); remaining -= 10
+		while remaining >= 4:
+			destination.spawn_card(board.catalog.find_by_name("Yard"), Vector2(-3, -1), -1, {"refuse_attach": true}); remaining -= 4
+		check(remaining == 0, "source-defined booster sum")
+		destination.spawn_card(str(board.catalog.data.packs[0].guid), Vector2(-7, 2), -1, {"refuse_attach": true})
 	source.campaign.saved_scenes[target] = Codec.capture(destination)
 	var portal: int = source.spawn_card(board.catalog.find_by_name("Grand Portal"))
 	var hero: int = source.spawn_card(board.catalog.find_by_name("Villager"), Vector2.ZERO, source.cards[portal].stack_id)
@@ -86,6 +98,20 @@ func probe_board(board, session):
 	return probe
 func free_probe(probe):
 	probe.feedback.free(); probe.vendor_unlock.free(); probe.free()
+func phase_reference(probe, context: Dictionary, premature_expansion: bool) -> Dictionary:
+	var desc := Admission.describe(probe, true)
+	if not desc.ok: return desc
+	var by_stack := {}; var by_card := {}
+	for row in desc.rows:
+		by_stack[row.id] = row
+		for card in row.cards: by_card[card.id] = row
+	var saved: Array = []; var incoming: Array = []
+	for old_id in context.source_ids: incoming.append(by_card[context.remap[old_id]])
+	for row in context.saved.session.stacks: saved.append(by_stack[int(row.id)])
+	if premature_expansion:
+		desc.config.bounds = desc.config.expansion.final_bounds
+		desc.config.board_boost = 0; desc.config.expansion = {}
+	return Planner.plan(saved, incoming, desc.config)
 func trip(board, source, label: String, admitted: bool):
 	var sid := prepare(board, source)
 	check(sid > 0, label + " travel stack present")
@@ -95,8 +121,18 @@ func trip(board, source, label: String, admitted: bool):
 	var planned := Travel.plan(probe, expected.context)
 	check(planned.ok == admitted, label + " independent admission: " + str(planned.get("reason", "")))
 	if planned.ok:
+		var boost: int = int(probe.session.stats().card_limit) - int(board.catalog.settings("CardSettings").baseCardLimit)
+		if boost > 0:
+			var desc := Admission.describe(probe, true)
+			check(desc.ok and desc.config.bounds == Rect2(-6, -4, 12, 8) and desc.config.expansion.final_bounds == probe.session.board_bounds, label + " verified initial base then final expanded bounds")
+			var phase_plan := phase_reference(probe, expected.context, false)
+			var premature := phase_reference(probe, expected.context, true)
+			check(phase_plan.ok and phase_plan.states == planned.states, label + " saved registration source phase preserves exact target plan")
+			check(premature.ok and premature.states != planned.states, label + " rejects premature use of expanded bounds")
+			for id in expected.context.remap.values():
+				check(board.catalog.get_definition(probe.session.cards[id].definition_guid).get("script_class") != "LimitBoosterDefinition", label + " locked travel list/gear cannot cause incoming capacity expansion")
 		check(planned.trace[0].event == "traveler_initialize", label + " source traveler initializes before saved destination")
-		check(Planner.apply(expected.session, planned).ok, label + " independent geometry oracle apply")
+		check(Planner.apply(expected.session, planned).ok, label + " independent candidate geometry apply")
 		probe.layout_key = probe._layout_signature()
 	else:
 		probe._ensure_layout() # Unchanged old whole-board fallback, not source replay.
@@ -133,7 +169,7 @@ func trip(board, source, label: String, admitted: bool):
 	var before := Codec.capture(board.session)
 	check(not Travel.apply(board, board.commits[0].context_ref).ok and Codec.capture(board.session) == before, label + " consumed context cannot be reapplied")
 	if not admitted: rejections.append({"case": label, "reason": board.source_travel_report.get("reason", "")})
-	cases.append({"case": label, "admitted": admitted, "targets": at_entry, "report": board.source_travel_report, "remap": expected.result.traveler_ids, "rng": str(board.session.rng.state)})
+	cases.append({"case": label, "admitted": admitted, "targets": at_entry.map(func(row): return {"id": row.id, "cards": row.cards, "position": [row.position.x, row.position.y]}), "report": board.source_travel_report, "remap": expected.result.traveler_ids, "rng": str(board.session.rng.state)})
 	board.scene_transition.advance(1.0)
 func rejected(board, label: String, context: Dictionary):
 	var before := Codec.capture(board.session)
@@ -172,7 +208,7 @@ func guard_matrix(board):
 			"combat": probe.session.combat.membership[probe.session.cards.keys()[0]] = 1
 			"boost": probe.session.spawn_card(board.catalog.find_by_name("Warehouse"), Vector2.ZERO, -1, {"refuse_attach": true})
 		var context: Dictionary = entry.context.duplicate(true); context.snapshot = probe.session.campaign.capture()
-		if mode == "boost": check(Travel.plan(probe, context).get("reason") == "Expanded travel entry remains outside the verified contract", "travel explicitly refuses expansion before cold-only metadata branch")
+		if mode == "boost": check(not Travel.plan(probe, context).ok, "post-seal unproven booster/bounds still refuses entire geometry entry")
 		rejected(probe, "destination_" + mode, context)
 		check(Codec.restore(probe.session, original).ok, "guard fixture restored")
 	source.campaign.saved_scenes.clear()
@@ -198,8 +234,50 @@ func guard_matrix(board):
 	var campaign_changed: Dictionary = probe.session.campaign.capture()
 	check(not Travel.apply(probe, entry.context.duplicate(true)).ok and probe.session.campaign.capture() == campaign_changed, "stale inactive scene rejects plan without any campaign mutation")
 	free_probe(probe)
-func atomicity(board):
-	var source = fixture(board, "Main", false); var sid := prepare(board, source)
+func expansion_guards(board):
+	# These are intentionally invalid private fixtures, never repaired into entry.
+	for mode in ["deadline", "feeding", "cycle", "combat", "craft", "nonzero_initial_weight", "missing_board_metadata", "negative_boost", "unverified_booster", "missing_mesh", "incomplete_saved_provenance"]:
+		var source = fixture(board, "Island", true, 14)
+		var sid: int = source.stacks.values()[0].id
+		var entry := independent_candidate(board, source, sid)
+		var probe = probe_board(board, entry.session)
+		check(Travel.plan(probe, entry.context).ok, mode + " expanded guard starts from admitted candidate")
+		var clean: Dictionary = board.catalog.data.duplicate(true)
+		var asset_root: String = probe.visual_assets.root_path
+		match mode:
+			"deadline": probe.session.elapsed = probe.session.day_duration
+			"feeding": probe.session.phase = "feeding"
+			"cycle": probe.session.cycle._state.stage = "character_focus"
+			"combat": probe.session.combat.membership[probe.session.cards.keys()[0]] = 1
+			"craft": probe.session.stacks.values()[0].recipe_guid = Travel.RECIPE_GUID
+			"nonzero_initial_weight":
+				for prefab in board.catalog.data.referenced_prefabs:
+					if prefab.guid == "520b1b5bfc70f3046b560ac3246705d7":
+						for doc in prefab.documents:
+							if int(doc.class_id) == 137: doc.fields.m_BlendShapeWeights = [14]
+			"missing_board_metadata":
+				for row in board.catalog.data.scenes:
+					if row.name == "Main": row.erase("source_sha256")
+			"negative_boost":
+				for definition in board.catalog.data.cards:
+					if definition.script_class == "LimitBoosterDefinition": definition.fields.boostAmount = -4
+			"unverified_booster": board.catalog.get_definition(board.catalog.find_by_name("Yard")).source_sha256 = "unverified"
+			"missing_mesh": probe.visual_assets.root_path = "res://missing-travel-expansion-mesh/"
+			"incomplete_saved_provenance": entry.context.saved.session.stacks.pop_back()
+		entry.context.snapshot = probe.session.campaign.capture()
+		rejected(probe, "expanded_" + mode, entry.context)
+		board.catalog.configure(clean); probe.visual_assets.root_path = asset_root
+		free_probe(probe)
+	for name in ["Yard", "pack", "Villager"]:
+		var source = fixture(board, "Main", true, 4)
+		var sid: int = source.stacks.values()[0].id
+		var guid: String = str(board.catalog.data.packs[0].guid) if name == "pack" else board.catalog.find_by_name(name)
+		source.spawn_card(guid, Vector2.ZERO, sid)
+		var before: Dictionary = source.campaign.capture()
+		check(not Travel.capture(source, sid, Travel.RECIPE_GUID).ok, "extra incoming " + name + " is not an admitted source recipe")
+		check(not source.campaign.travel(sid, Travel.RECIPE_GUID).ok and source.campaign.capture() == before, "actual recipe atomically rejects incoming " + name)
+func atomicity(board, boost: int = 0):
+	var source = fixture(board, "Main", false, boost); var sid := prepare(board, source)
 	var path: String = board.slots.slot_path(board.active_slot); var bytes := FileAccess.get_file_as_bytes(path)
 	var prior := Codec.capture(source); var old_root: String = board.slot_root
 	board.slot_root = "/proc/source-travel-invalid"
@@ -241,10 +319,19 @@ func run():
 	for scene in ["Main", "Island"]:
 		for geared in [false, true]: trip(board, fixture(board, scene, geared), scene + ("_gear" if geared else "_plain"), true)
 	guard_matrix(board)
+	var expanded_available: bool = board.visual_assets.board_local_rect("Main").has_area() and board.visual_assets.board_local_rect("Island").has_area()
+	if expanded_available:
+		expansion_guards(board)
+		for pair in [["Main", 4], ["Island", 14], ["Main", 100], ["Island", 110]]:
+			trip(board, fixture(board, pair[0], true, pair[1]), "expanded_" + pair[0] + "_" + str(pair[1]), true)
+		print("Source travel expansion coverage: PASS (4 positive, 11 guards)")
+	else:
+		print("Source travel expansion coverage: SKIP (licensed FBX cache missing)")
 	atomicity(board)
+	if expanded_available: atomicity(board, 14)
 	real_case(board, "SOURCE_TRAVEL_REAL_MAIN", true)
-	real_case(board, "SOURCE_TRAVEL_REAL_ISLAND", false)
-	check(rejections.size() == 25 + int(not OS.get_environment("SOURCE_TRAVEL_REAL_ISLAND").is_empty()), "complete synthetic and optional real fallback matrix")
+	real_case(board, "SOURCE_TRAVEL_REAL_ISLAND", expanded_available)
+	check(rejections.size() == 25 + (11 if expanded_available else int(not OS.get_environment("SOURCE_TRAVEL_REAL_ISLAND").is_empty())), "existing and cache-backed expanded-destination whole-group fallbacks")
 	var output := OS.get_environment("SOURCE_TRAVEL_REPORT")
 	if not output.is_empty():
 		var file := FileAccess.open(output, FileAccess.WRITE); file.store_string(JSON.stringify({"checks": checks, "failures": failures, "cases": cases, "rejections": rejections}, "  ", true, true)); file.close()

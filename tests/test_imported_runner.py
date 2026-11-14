@@ -17,7 +17,7 @@ import run_imported_tests as runner
 
 MARKERS = {
     "test_source_board_expansion": "Source board expansion: 97 checks, 0 failures",
-    "test_source_travel_layout_board": "Source travel layout board: 1 checks, 0 failures; headless production boundary only",
+    "test_source_travel_layout_board": "Source travel expansion coverage: PASS (4 positive, 11 guards)\nSource travel layout board: 1 checks, 0 failures; headless production boundary only",
     "test_travel_saved_quest_window": "TRAVEL_SAVED_QUEST_WINDOW PASS 36",
     "test_travel_saved_quest_window_source": "Source saved travel quest window: 13 checks, 0 failures",
     "test_source_restore_layout": "Source restore layout planner: 32 checks, 0 failures; no live board integration",
@@ -247,6 +247,13 @@ class ImportedRunnerTests(unittest.TestCase):
         self.assertEqual(set(MARKERS), {name for name, _ in runner.SUITES})
         for name, pattern in runner.SUITES:
             self.assertRegex(MARKERS[name], pattern)
+
+    def test_travel_expansion_cannot_pass_with_only_uncached_marker(self):
+        pattern = dict(runner.SUITES)["test_source_travel_layout_board"]
+        ordinary = "Source travel layout board: 161 checks, 0 failures; headless production boundary only"
+        self.assertNotRegex(ordinary, pattern)
+        self.assertNotRegex("Source travel expansion coverage: SKIP (licensed FBX cache missing)\n" + ordinary, pattern)
+        self.assertRegex(MARKERS["test_source_travel_layout_board"], pattern)
 
     def test_import_then_all_suites_share_disposable_cache(self):
         result, calls = self.run_fixture()
