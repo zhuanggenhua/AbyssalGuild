@@ -73,6 +73,14 @@ saved again, the explicit order preserves continuation. A present but malformed
 field is rejected rather than silently replaced with fallback order. Campaign
 active and inactive scenes independently carry this field through `SaveCodec`.
 
+## Source cold-entry distinction
+
+Unity does not serialize prior activation history: it appends restored tasks in
+saved stack order. Native history preservation above still applies to generic
+codec/cloning and travel, but admitted actual cold Continue now re-registers
+ordinary incomplete tasks in source row order. Unsupported cases retain native
+history. See [admission, compatibility and precise limits](cold-crafting-order.md).
+
 ## Verification
 
 ```sh

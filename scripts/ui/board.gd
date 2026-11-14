@@ -13,6 +13,7 @@ const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const SourceRestoreLayout = preload("res://scripts/model/source_restore_layout.gd")
 const SourceTravelLayout = preload("res://scripts/ui/source_travel_layout.gd")
 const SourceRestoreAdmission = preload("res://scripts/ui/source_restore_admission.gd")
+const SourceColdCrafting = preload("res://scripts/ui/source_cold_crafting.gd")
 const Catalog = preload("res://scripts/model/catalog.gd")
 const Session = preload("res://scripts/model/game_session.gd")
 const CardMotion = preload("res://scripts/ui/card_motion.gd")
@@ -63,6 +64,7 @@ var layout_key: String = ""
 ## Explicit actual cold scene entry only, not Codec staging or travel admission.
 var source_restore_entry: String = ""
 var source_restore_report: Dictionary = {}
+var source_crafting_report: Dictionary = {}
 var source_travel_report: Dictionary = {}
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
@@ -696,7 +698,8 @@ func start_new() -> void:
 	_enter_game()
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
-func _enter_game(travel_layout: Dictionary = {}) -> void:
+func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {}) -> void:
+	source_crafting_report = cold_crafting
 	options_panel.reset_source_lifecycle()
 	world_post_process.configure(catalog.data, session.scene_name, visual_assets.render_pipeline)
 	journal_slide.reset(MenuSlide.initial_state(catalog.data).open)
@@ -1693,7 +1696,7 @@ func _continue_game() -> void:
 	slots = candidate_slots
 	active_slot = int(result.slot)
 	source_restore_entry = "cold_load"
-	_enter_game()
+	_enter_game({}, SourceColdCrafting.apply(session))
 	notice.text = "Slot %d restored." % active_slot + (" Recovered from backup." if result.get("recovered", false) else "")
 
 func _adopt_selected_legacy() -> void:
