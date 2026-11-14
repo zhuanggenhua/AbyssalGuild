@@ -90,6 +90,7 @@ SUITES = (
     ("test_camera_board", r"Camera board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_primary_touch_camera_board", r"Primary touch camera board: 25/25 passed"),
     ("test_board_integration", r"Board integration checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_trade_drop_height", r"Trade drop height: 139/139 passed"),
     ("test_trade_collection_ui", r"Trade/collection UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_vendor_unlock_board", r"Vendor unlock board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_menu_focus", r"Menu focus: [1-9]\d* checks, 0 failures"),

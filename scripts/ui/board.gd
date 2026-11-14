@@ -2283,7 +2283,10 @@ func _try_trade_drop(card_id: int, destination: Vector2, carried_press: bool = f
 	var outcome := {"terminal": false, "accepted": false, "card_id": card_id}
 	if (not _allows_card_actions() and not carried_press) or not session.cards.has(card_id): return outcome
 	_sync_trade_zones()
-	var zone: Dictionary = TradeLayout.nearest_zone(trade_zones, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
+	# Source trades before grounding the held root. _finish_drag has already
+	# cleared dragging, so use the same scene-bound height as its instant view.
+	var height := float(CardDragInput.source_settings(catalog, session.scene_name).get("dragHeight", 0.1))
+	var zone: Dictionary = TradeLayout.nearest_zone(trade_zones, Vector3(destination.x, height, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
 	if zone.is_empty(): return outcome
 	# Select nearest physical zone BEFORE checking whether it can trade. Never
 	# retry a farther accepting zone when this one rejects the dropped tail.
