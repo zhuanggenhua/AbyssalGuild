@@ -115,6 +115,7 @@ var camera: Camera3D
 var source_light: DirectionalLight3D
 var panning: bool = false
 var camera_drag_origin := Vector2.ZERO
+var camera_pointer = preload("res://scripts/ui/source_camera_pointer.gd").new()
 var views: Dictionary = {}
 var running: bool = false
 var selected: int = -1
@@ -1040,6 +1041,7 @@ func _capture_drag_highlights(id: int) -> void:
 
 func _clear_card_feedback() -> void:
 	_card_pointer_known = false
+	camera_pointer.known = false
 	_feedback_session_instance = 0
 	_feedback_scene = ""
 	_clear_card_hover()
@@ -1205,16 +1207,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				var hit: Dictionary = _pick_target(event.position)
-				if _camera_input_enabled() and int(hit.card_id) < 0:
+				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event) and int(hit.card_id) < 0:
 					panning = true
 					camera_drag_origin = event.position
 				_begin_card_press(hit, event.position)
 			else:
-				if _camera_input_enabled(): panning = false
+				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event): panning = false
 				_finish_drag(event.position)
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
+	# Device state advances even while source InputManager skips camera handling.
+	var camera_event: Dictionary = camera_pointer.observe(event)
 	if OS.is_debug_build() and running and event is InputEventKey and event.keycode == KEY_F3 and event.pressed and not event.echo and not _ui_pause_active():
 		market_panel.visible = not market_panel.visible
 		get_viewport().set_input_as_handled()
@@ -1242,11 +1246,11 @@ func _input(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
 			panning = true
 			camera_drag_origin = event.position
-		if event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_MIDDLE] and not event.pressed:
+		if camera_event.released or (event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_MIDDLE] and not event.pressed and not camera_pointer.suppress_emulated_camera_event(event)):
 			panning = false
-		if event is InputEventMouseMotion and panning:
-			camera_motion.pan(event.position - camera_drag_origin,camera.position.y)
-			camera_drag_origin = event.position
+		if camera_event.sample and panning:
+			camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
+			camera_drag_origin = camera_pointer.position
 	if event is InputEventMouseButton and not event.pressed and get_viewport().gui_get_hovered_control() != null:
 		pressed_panel = -1
 		right_pressed_panel = -1
@@ -1747,6 +1751,7 @@ func _prepare_quit() -> bool:
 func _notification(what: int) -> void:
 	if what in [NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]:
 		_card_pointer_known = false
+		camera_pointer.known = false
 		_clear_card_hover()
 		return
 	if what != NOTIFICATION_WM_CLOSE_REQUEST or scene_transition.active() or quit_dispatched or _navigation_modal_active(): return
@@ -2014,9 +2019,9 @@ func _update_camera_motion(delta: float) -> void:
 	var enabled: bool = _camera_input_enabled()
 	# Source early-return under input locks preserves dragOrigin/isDragging.
 	# On unlock, sample the accumulated pointer delta even without a new motion.
-	if enabled and panning and _card_pointer_known:
-		camera_motion.pan(_card_pointer - camera_drag_origin,camera.position.y)
-		camera_drag_origin = _card_pointer
+	if enabled and panning and camera_pointer.known:
+		camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
+		camera_drag_origin = camera_pointer.position
 	camera.position = camera_motion.step(camera.position, delta, enabled)
 
 func _layout_states() -> Array:

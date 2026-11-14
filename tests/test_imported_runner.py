@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_primary_touch_camera_board": "Primary touch camera board: 25/25 passed",
     "test_source_lit_material": "Private source direct lit: PASS (2 materials)",
     "test_render_pipeline_imported": "Private source render pipeline: PASS",
     "test_pause_ending_actions": "Pause ending actions: 27/27 passed",

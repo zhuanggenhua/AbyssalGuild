@@ -69,11 +69,14 @@ Reconstruction validation completed for this document:
   Godot `4.6.3.stable.official.7d41c59c4`.
 - Both refuse headless rendering with exit code 2 and `NOT RUN`, so a logic-only
   execution cannot produce a false GPU success.
-- **New native GPU readback has not run:** this environment has no `DISPLAY` or
-  X11 socket, DRM device, running Xorg/Wayland session, or installed Xvfb/Weston path.
-  Xorg and GL libraries exist, but the installed Godot headless mode uses the
-  dummy renderer rather than a standalone EGL readback path. No display server
-  was started, installed or configured for this check.
+- **Native framebuffer readback passed on November 14, 2026**, using the exact
+  published `eb079e4` rendering code on the existing cloud X11 desktop, Godot
+  `4.6.3.stable.official.7d41c59c4`, and Compatibility/OpenGL 4.5 with Mesa
+  llvmpipe (software rendering). The source probe passed its four assertions
+  and logged four unasserted stock-material diagnostics. The factory probe
+  passed its eight assertions, four of which exercise the actual production
+  factory. Both recorded a maximum asserted linear-channel error of
+  `0.0016782582`, below `0.006`. This is not physical GPU or full-scene coverage.
 - The previous snapshot reportedly passed eight native source/factory readbacks,
   with maximum linear error about `0.00136811`. Its artifacts are unavailable;
   that historical result is not a pass for this reconstruction.
@@ -103,9 +106,9 @@ asserts eight source-formula/actual-production-factory cases. Its prepare step
 copies only owned runtime scripts into an ignored directory and records hashes;
 it does not import private assets or substitute a mock material factory.
 
-No complete new-candidate regression suite, private-resource suite, PCK/export,
-standalone build or native framebuffer result is claimed by these focused checks.
-The coordinating validation report must record those separately.
+These focused checks do not claim a full regression suite, private-resource
+validation, PCK/export validation or standalone release acceptance. They use
+synthetic meshes and isolate direct lighting from the rest of the scene.
 
 ## Explicit limits
 
