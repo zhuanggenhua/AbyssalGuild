@@ -1215,7 +1215,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				var hit: Dictionary = _pick_target(event.position)
 				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event) and int(hit.card_id) < 0:
 					panning = true
-					camera_drag_origin = event.position
+					camera_drag_origin = get_viewport().get_final_transform() * event.position
 				_begin_card_press(hit, event.position)
 			else:
 				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event): panning = false
@@ -1224,7 +1224,10 @@ func _unhandled_input(event: InputEvent) -> void:
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 func _input(event: InputEvent) -> void:
 	# Device state advances even while source InputManager skips camera handling.
-	var camera_event: Dictionary = camera_pointer.observe(event)
+	# Only CameraController pan uses source window pixels. Card picking and
+	# GUI events retain viewport coordinates. Store physical samples/origins so
+	# a resize during a held pan cannot reinterpret an old logical pointer.
+	var camera_event: Dictionary = camera_pointer.observe(event.xformed_by(get_viewport().get_final_transform()))
 	if OS.is_debug_build() and running and event is InputEventKey and event.keycode == KEY_F3 and event.pressed and not event.echo and not _ui_pause_active():
 		market_panel.visible = not market_panel.visible
 		get_viewport().set_input_as_handled()
@@ -1251,7 +1254,7 @@ func _input(event: InputEvent) -> void:
 	if _camera_input_enabled():
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
 			panning = true
-			camera_drag_origin = event.position
+			camera_drag_origin = get_viewport().get_final_transform() * event.position
 		if camera_event.released or (event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_MIDDLE] and not event.pressed and not camera_pointer.suppress_emulated_camera_event(event)):
 			panning = false
 		if camera_event.sample and panning:

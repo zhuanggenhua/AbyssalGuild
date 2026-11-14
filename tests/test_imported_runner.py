@@ -16,6 +16,8 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_root_viewport": "Root viewport: 189/189 passed (headless; pixel captures only on native display)",
+    "test_camera_screen_pixels": "Camera screen pixels: 50/50 passed",
     "test_flat_board_lighting": "Flat board lighting lifecycle: 82 checks, 0 failures",
     "test_flat_board_lighting_imported": "Private flat board lighting: PASS (1 checks; actual Main/Island FBX, no pixel claim)",
     "test_trade_drop_height": "Trade drop height: 139/139 passed",

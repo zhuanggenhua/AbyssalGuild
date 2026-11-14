@@ -20,7 +20,7 @@ mode = os.environ.get("FAKE_GODOT_MODE", "success")
 project = Path(sys.argv[sys.argv.index("--path") + 1])
 assert sys.argv[1] == "--headless"
 assert sys.argv[sys.argv.index("--script") + 1] == "res://tests/godot/synthetic.gd"
-assert project.joinpath("project.godot").read_text() == "config_version=5\n"
+assert project.joinpath("project.godot").read_text() == os.environ.get("FAKE_PRODUCTION_SETTINGS", "config_version=5\n")
 assert all(project.joinpath(item).is_symlink() for item in ("scripts", "data", "tests", "assets", "scenes"))
 assert not project.joinpath(".godot").exists()
 assert all(Path(os.environ[key]).is_dir() for key in ("HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME"))
@@ -53,7 +53,7 @@ class GodotRunnerTests(unittest.TestCase):
 
     def run_engine(self, mode="success", **extra):
         environment = dict(os.environ, GODOT=str(self.engine), TMPDIR=str(self.root),
-                           GODOT_TEST_TIMEOUT="5", FAKE_GODOT_MODE=mode)
+                           GODOT_TEST_TIMEOUT="5", FAKE_GODOT_MODE=mode, GODOT_PROJECT_SETTINGS="isolated")
         environment.update(extra)
         result = subprocess.run(
             ["bash", str(ROOT / "tools/test_godot.sh"), "res://tests/godot/synthetic.gd"],
@@ -67,6 +67,16 @@ class GodotRunnerTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("synthetic stdout", result.stdout)
         self.assertIn("synthetic stderr", result.stdout)
+
+    def test_production_settings_preserved_without_reusing_user_state(self):
+        result = self.run_engine(GODOT_PROJECT_SETTINGS="production",
+                                 FAKE_PRODUCTION_SETTINGS=(ROOT / "project.godot").read_text())
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_invalid_settings_mode_rejected_before_engine(self):
+        result = self.run_engine(GODOT_PROJECT_SETTINGS="unknown")
+        self.assertEqual(2, result.returncode)
+        self.assertNotIn("synthetic stdout", result.stdout)
 
     def test_nonzero_exit_is_preserved(self):
         self.assertEqual(17, self.run_engine("nonzero").returncode)
