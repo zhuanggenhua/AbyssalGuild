@@ -92,6 +92,7 @@ MARKERS = {
     "test_journal_groups": "Journal groups: 1/1 checks passed",
     "test_card_motion_board": "Card motion board: 1/1 passed",
     "test_world_post_process_board": "World post-process board: 1 checks, 0 failures",
+    "test_source_options_pointer": "Source Options pointer: PASS",
     "test_text_button_feedback": "Text button feedback: 1 checks, 0 failures",
     "test_menu_slide": "Menu slide: 1/1 checks passed",
     "test_scene_transition_board": "Scene transition board: 1 / 1",

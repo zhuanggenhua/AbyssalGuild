@@ -42,3 +42,21 @@ checks explicitly skipped. Imported project: all 26 checks pass without SKIP.
 Missing-audio silence is checked on both paths. Separate regressions passed:
 navigation UI 56, slot management UI 24, options UI 42, title navigation 23,
 and title gameplay preferences 11 checks.
+
+## Source graphics option mouse buttons
+
+Only the five successfully source-mounted graphics option TextButtons opt in
+to left, right and middle mouse input, with the locked catalog revision and an
+enabled original TextButton component required. The exact Title and gameplay
+UIRoot input modules bind all three mouse buttons to the UI action asset, and
+the locked Input System 1.19.0 forwards each to pointer click. TextButton does
+not filter that event by mouse button. The previous default Godot Button mask
+excluded the two alternative buttons.
+
+This only changes which sequential mouse clicks can activate an otherwise
+admitted option. Disabled controls, the reset confirmation flow, Close,
+native fallback controls, settings application, and all other menus retain
+their existing rules. The headless viewport test exercises down/up, outside
+release and guards; the private layout test verifies the actual imported
+bindings. It does not establish Unity same-frame batching, simultaneous
+button ownership, hardware option capabilities or cross-engine pixels.

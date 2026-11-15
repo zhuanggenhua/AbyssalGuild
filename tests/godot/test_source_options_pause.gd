@@ -13,6 +13,10 @@ func run() -> void:
 		print("Source Options/Pause layout: SKIP (licensed source unavailable)")
 	else:
 		var options = board.options_panel
+		for key in options.buttons:
+			assert(options.buttons[key].button_mask == 7,"source graphics TextButton accepts three mouse buttons: "+key)
+		assert(options.reset_button.button_mask == MOUSE_BUTTON_MASK_LEFT)
+		assert(options.close_button.button_mask == MOUSE_BUTTON_MASK_LEFT)
 		var view = options.source_view
 		var panel: Control = view.nodes[view.layout.resolve("MainPanel")]
 		assert(panel.size.is_equal_approx(Vector2(400,670)))

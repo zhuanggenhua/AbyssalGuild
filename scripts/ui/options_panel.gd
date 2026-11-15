@@ -269,7 +269,8 @@ func configure_source(data: Dictionary, assets) -> bool:
 		if child is Control and child != candidate: child.hide()
 	for key in buttons:
 		var leaf: String = {"resolution":"ResolutionButton","fullscreen":"FullscreenButton","vsync":"vSyncButton","fps_cap":"FpsButton","shadow_preset":"ShadowButton"}[key]
-		candidate.mount_path("MainPanel/"+leaf,buttons[key])
+		if candidate.mount_path("MainPanel/"+leaf,buttons[key]):
+			_admit_source_text_pointer_buttons(data, candidate, "MainPanel/"+leaf, buttons[key])
 	candidate.mount_path("MainPanel/Footer/ResetButton",reset_button)
 	candidate.mount_path("MainPanel/Footer/CloseButton",close_button)
 	reset_button.text = "[Reset]"
@@ -326,3 +327,14 @@ func _cancel_window_observation() -> void:
 
 func _exit_tree() -> void:
 	_cancel_window_observation()
+
+# Original TextButton.OnPointerClick does not filter eventData.button; the
+# locked UIRoot UI input module binds left, right and middle mouse clicks.
+# Admit only source-backed graphics controls, never fallback or safety buttons.
+func _admit_source_text_pointer_buttons(data: Dictionary, view, path: String, button: Button) -> void:
+	if data.get("provenance", {}).get("source_commit", "") != "a11a89b04cea8370476f2559b639bb9b4cbc08d8": return
+	var id: String = view.layout.resolve(path)
+	for component in view.layout.records.get(id, {}).get("components", []):
+		if int(component.get("m_Enabled", 0)) == 1 and str(component.get("m_Script", {}).get("guid", "")) == "ef98d84a856977b44bbf49a1bab2060a":
+			button.button_mask = MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
+			return
