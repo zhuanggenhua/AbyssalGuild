@@ -9,6 +9,18 @@ var spawn_edge_padding: float = 2.0
 var completed_encounters: Dictionary = {} # Encounter.Id, not asset GUID.
 var processed_days: Dictionary = {} # End-cycle reentry guard, including empty days.
 var production_timers: Dictionary = {}
+## Current Unity-world Vector3 pose, injected by the live board; not serialized.
+## Retained through configure/travel like the other scene geometry adapters.
+var actor_pose_sampler: Callable = Callable()
+
+func actor_pose(card_id: int) -> Vector3:
+	var session = _session.get_ref()
+	if not session.cards.has(card_id): return Vector3.ZERO
+	if actor_pose_sampler.is_valid():
+		var sampled: Variant = actor_pose_sampler.call(card_id)
+		if sampled is Vector3 and sampled.is_finite(): return sampled
+	# Explicit model-only/missing-view fallback, not a claim of animated parity.
+	return session.card_target_position_3d(card_id)
 
 func configure(session, selected_scene: String = "Main") -> void:
 	_session = weakref(session)
@@ -269,7 +281,7 @@ func aggressive_intent(card_id: int, combats: Array = []) -> Dictionary:
 	if not session.cards.has(card_id):
 		return {}
 	var card = session.cards[card_id]
-	var position: Vector3 = session.card_target_position_3d(card_id)
+	var position: Vector3 = actor_pose(card_id)
 	var fields: Dictionary = session.catalog.fields(card.definition_guid)
 	var radius: float = float(fields.get("aggroRadius", 5.0))
 	var attack: float = float(fields.get("attackRadius", 1.5))
@@ -283,17 +295,18 @@ func aggressive_intent(card_id: int, combats: Array = []) -> Dictionary:
 			distance = candidate
 			nearest = task
 	if not nearest.is_empty():
-		return {"action": "join_combat" if sqrt(distance) <= attack * 1.5 else "approach_combat", "combat_id": nearest.id, "position": nearest.position}
+		return {"action": "join_combat" if sqrt(distance) <= attack * 1.5 else "approach_combat", "combat_id": nearest.id, "position": nearest.position, "position_3d": Vector3(nearest.position.x, 0, nearest.position.y)}
 	var target: int = -1
 	distance = INF # Source FindClosestPlayerCard does NOT enforce its radius parameter.
 	for candidate_id in session.source_card_ids():
 		var candidate = session.cards[candidate_id]
 		if int(session.catalog.fields(candidate.definition_guid).get("faction", 0)) != 1 or session.combat.membership.has(candidate.id):
 			continue
-		var value: float = position.distance_squared_to(session.card_target_position_3d(candidate.id))
+		var value: float = position.distance_squared_to(actor_pose(candidate.id))
 		if value < distance:
 			distance = value
 			target = candidate.id
 	if target != -1:
-		return {"action": "attack_player" if sqrt(distance) <= attack else "approach_player", "card_id": target, "position": session.card_target_position(target)}
+		var target_pose: Vector3 = actor_pose(target)
+		return {"action": "attack_player" if sqrt(distance) <= attack else "approach_player", "card_id": target, "position": Vector2(target_pose.x, target_pose.z), "position_3d": target_pose}
 	return {"action": "patrol"}

@@ -164,8 +164,19 @@ func _act_aggressively(card_id: int) -> void:
 			var ids: Array = session.stacks[session.cards[card_id].stack_id].card_ids.duplicate()
 			session.combat.add_combatants(int(intent.combat_id), ids)
 		"approach_combat", "approach_player":
-			var start: Vector2 = session.card_target_position(card_id)
-			_move_if_valid(card_id, start + start.direction_to(intent.position) * move_radius)
+			var live_start: Vector3 = world.actor_pose(card_id)
+			var live_target: Vector3 = intent.position_3d
+			if live_start.y == 0.0 and live_target.y == 0.0:
+				# Ground-to-ground source movement is exactly representable in XZ.
+				var candidate: Vector3 = live_start + live_start.direction_to(live_target) * move_radius
+				_move_if_valid(card_id, Vector2(candidate.x, candidate.z))
+			else:
+				# Explicit pre-existing flat-placement fallback, NOT vertical parity.
+				# CardStack retains target Y in Unity; do not silently flatten a newly
+				# computed 3D step and claim that path has been migrated.
+				var start: Vector2 = session.card_target_position(card_id)
+				var target: Vector2 = session.card_target_position(int(intent.card_id)) if intent.has("card_id") else intent.position
+				_move_if_valid(card_id, start + start.direction_to(target) * move_radius)
 		"attack_player":
 			var attacker_stack = session.stacks.get(session.cards[card_id].stack_id)
 			var defender_stack = session.stacks.get(session.cards[int(intent.card_id)].stack_id)

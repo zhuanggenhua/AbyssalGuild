@@ -797,6 +797,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	# Original mesh is optional; validated source vertex bounds remain the fallback.
 	geometry_key = ""
 	_update_board_geometry()
+	session.world.actor_pose_sampler = _sample_ai_actor_pose
 	session.ai.point_validator = _ai_point_valid
 	session.ai.combat_geometry = _combat_geometry
 	session.ai.placement_resolver = _resolve_layout
@@ -2163,6 +2164,24 @@ func _clamp_stack_position(card_id: int, point: Vector2, placement_rules: bool =
 	var state: Dictionary = BoardLayout.stack_state(-1, point, _card_footprint(card_id), count, false, _stack_step())
 	# Held cards can enter the source trade header; ordinary placement cannot.
 	return BoardLayout.enforce_placement(point, state, session.board_bounds, session.board_top_margin) if placement_rules else BoardLayout.clamp_to_bounds(point, state, session.board_bounds)
+
+# Correct live XZ only where the ordinary source/display height mapping is known.
+# Ordinary roots add +0.06; drag/damped/combat owners do not share that contract.
+# Vertical transitions return no sample and retain explicit settled-model fallback.
+# Do not advance CardMotion here; the owner synchronizes it later in this frame.
+func _sample_ai_actor_pose(id: int) -> Variant:
+	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return null
+	if not card_motion.states.has(id): return null
+	var state: Dictionary = card_motion.states[id]
+	if state.get("mode", "") not in ["animated", "instant"]: return null
+	if session.combat.membership.has(id) or session.equipment.owners.has(id) or session.combat.dragged.has(id): return null
+	var source_height: float = session.card_target_position_3d(id).y
+	var display_height: float = (Vector3(0, 0.06, 0) + Vector3(0, source_height, 0)).y
+	var point: Vector3 = views[id].global_position
+	# Exact same stable target height: horizontal tween progress is permitted,
+	# but no inference about moving Y or a higher-priority owner is made.
+	if state.target.y != display_height or state.position.y != display_height or point.y != display_height: return null
+	return Vector3(point.x, source_height, -point.z)
 
 func _ai_point_valid(point: Vector2, stack_id: int) -> bool:
 	if not session.board_bounds is Rect2 or not session.stacks.has(stack_id): return false
