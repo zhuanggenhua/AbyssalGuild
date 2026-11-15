@@ -25,6 +25,9 @@ func run() -> void:
 	for scene in ["Main", "Island"]:
 		var config := Clock.resolve(board.catalog.data, scene)
 		check(config.source_backed, scene + " actual scene UIRoot binding")
+		board.day_clock.configure(board.catalog.data,scene,board.visual_assets)
+		for key in ["font_color","font_hover_color","font_pressed_color","font_hover_pressed_color","font_disabled_color","font_focus_color"]:
+			check(board.day_clock.get_theme_color(key)==Color.WHITE,scene+" source DayText tint "+key)
 		if not has_media: continue
 		check(config.pace_icons.size() == 3, scene + " complete source icon references")
 		for guid in config.pace_icons:
@@ -46,6 +49,7 @@ func run() -> void:
 		check(board.session.time_pace() == pace, "live clock click pace %d" % pace)
 	board._toggle_pause_menu()
 	check(board.day_clock.disabled, "menu external pause disables clock")
+	check(board.day_clock.get_theme_color("font_disabled_color")==Color.WHITE,"external input lock does not fabricate source Selectable dimming")
 	board._cycle_clock_pace()
 	check(board.session.time_pace() == 1, "menu blocks clock without replacing saved pace")
 	board._toggle_pause_menu()

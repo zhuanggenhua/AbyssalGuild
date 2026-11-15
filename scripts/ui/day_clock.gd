@@ -4,6 +4,37 @@ const Prefs = preload("res://scripts/ui/title_gameplay_prefs.gd")
 var progress: ProgressBar
 var source_config: Dictionary = {}
 var assets
+const TEXT_SOURCE_COMMIT = "a11a89b04cea8370476f2559b639bb9b4cbc08d8"
+const TEXT_COLORS = ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_disabled_color", "font_focus_color"]
+var source_text_tint_active := false
+var source_text_tint := Color.TRANSPARENT
+var prior_text_colors: Dictionary = {}
+
+func _configure_text_tint(source: Dictionary) -> void:
+	var provenance = source.get("provenance", {})
+	var record: Dictionary = source_config.get("text_record", {})
+	var value = record.get("m_fontColor")
+	var admitted: bool = provenance is Dictionary and provenance.get("source_commit", "") == TEXT_SOURCE_COMMIT and source_config.get("source_backed", false) and value is Dictionary and record.get("m_fontStyle", -1) == 0 and record.get("m_enableVertexGradient", -1) == 0
+	if admitted:
+		for channel in ["r", "g", "b", "a"]:
+			if not value.get(channel) is int and not value.get(channel) is float: admitted = false; break
+			if not is_finite(float(value[channel])): admitted = false; break
+	if not admitted:
+		if source_text_tint_active:
+			for key in TEXT_COLORS:
+				if prior_text_colors[key] == null: remove_theme_color_override(key)
+				else: add_theme_color_override(key, prior_text_colors[key])
+			prior_text_colors.clear()
+			source_text_tint_active = false
+		return
+	var tint := Color(float(value.r), float(value.g), float(value.b), float(value.a))
+	var first := not source_text_tint_active
+	if first:
+		for key in TEXT_COLORS: prior_text_colors[key] = get_theme_color(key) if has_theme_color_override(key) else null
+		source_text_tint_active = true
+	if first or tint != source_text_tint:
+		for key in TEXT_COLORS: add_theme_color_override(key, tint)
+		source_text_tint = tint
 
 static func resolve(source: Dictionary, scene_name: String) -> Dictionary:
 	var fallback := {"source_backed": false, "pace_icons": [], "color": Color(0.22, 0.65, 0.88, 0.8)}
@@ -57,6 +88,7 @@ func _init() -> void:
 func configure(source: Dictionary, scene_name: String, visual_assets) -> void:
 	source_config = resolve(source, scene_name)
 	assets = visual_assets
+	_configure_text_tint(source)
 	preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(self, source_config.get("text_record", {}))
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = source_config.color

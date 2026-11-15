@@ -1,0 +1,11 @@
+# DayText state tint
+
+The locked UIRoot DayTimeUI is an IPointerClickHandler with CanvasGroup visibility, not a Selectable. Its dayText reference resolves to the DayText TMP component with white declared font color, normal style and no vertex gradient. DayTimeUI updates the day label, pace icon and progress fill, and sets the parent CanvasGroup alpha/raycast availability on day transitions; it never changes the label's color on hover, press or input blocking. Main and Island have no overriding DayText color/style/gradient properties.
+
+The native DayClock is a Button for existing dispatch. Previously it inherited theme-dependent font normal/hover/pressed/focus/disabled colors despite the original having no such transition. With verified source provenance, a resolved source-backed clock and supported finite normal/non-gradient DayText record, all six native font-state colors now use the source declared text color. This modifies text only. Clock fill, icons, tooltip, input, focus decoration, text shadow, font and geometry remain unchanged.
+
+Application occurs at configuration, not each sync. Equal configured tint does not write theme colors again. Missing/unverified source, missing scene reference or malformed/unsupported replacement records restore prior local color overrides, or remove the adapter overrides to inherit the current theme. Source text tint remains authoritative when the inherited theme changes; fallback uses the new theme after restoration.
+
+Tests cover source guards, state colors, changed tint, theme replacement, fallback, no unchanged theme notifications, and actual Main/Island Board bindings plus existing pace, pause, fill, day-end and visibility behaviors. These are parameter/behavior checks, not TMP glyph, SDF or Unity framebuffer parity. Parent CanvasGroup hiding and native safety input locks are retained independently.
+
+Adjacent icon audit, outside this patch: the pace Image is source white and has no Selectable color transition. Native icon normal/hover/pressed/focused parameters are white, but the disabled icon still inherits alpha0.4 when the native input lock disables the Button. That icon-dimming residual is deliberately not represented as solved by this text-only change.

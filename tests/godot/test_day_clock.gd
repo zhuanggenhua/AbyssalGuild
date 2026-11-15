@@ -42,6 +42,45 @@ func run() -> void:
 	session.phase = "playing"
 	view.sync(session, false, false)
 	check(not view.visible and view.disabled, "title hides and blocks")
+	# Isolated source text state contract; no changes to fill or source click behavior.
+	docs[0].fields.timeProgress.fileID = "fill"
+	docs[0].fields.dayText = {"fileID":"day_text"}
+	docs.append({"file_id":"day_text","fields":{"m_fontColor":{"r":1,"g":1,"b":1,"a":1},"m_fontStyle":0,"m_enableVertexGradient":0}})
+	source.provenance = {"source_commit":Clock.TEXT_SOURCE_COMMIT}
+	view.add_theme_color_override("font_hover_color",Color.RED)
+	var focus_style = view.get_theme_stylebox("focus")
+	var shadow = view.get_theme_color("font_shadow_color")
+	view.configure(source,"Main",null)
+	for key in Clock.TEXT_COLORS: check(view.get_theme_color(key)==Color.WHITE,"source DayText state "+key)
+	check(view.get_theme_stylebox("focus")==focus_style and view.get_theme_color("font_shadow_color")==shadow,"focus style and text shadow untouched")
+	var notifications = [0]
+	view.theme_changed.connect(func(): notifications[0]+=1)
+	view._configure_text_tint(source)
+	check(notifications[0]==0,"same tint has no theme churn")
+	view.sync(session,true,false)
+	check(notifications[0]==0,"clock sync does not write theme")
+	view.configure(source,"Island",null)
+	check(view.get_theme_color("font_hover_color")==Color.RED and not view.has_theme_color_override("font_color"),"unreferenced scene restores original fallback")
+	for bad in [{}, {"m_fontColor":false}, {"m_fontColor":{"r":1,"g":NAN,"b":1,"a":1},"m_fontStyle":0,"m_enableVertexGradient":0}, {"m_fontColor":{"r":1,"g":1,"b":1,"a":1},"m_fontStyle":1,"m_enableVertexGradient":0}, {"m_fontColor":{"r":1,"g":1,"b":1,"a":1},"m_fontStyle":0,"m_enableVertexGradient":1}]:
+		view.configure(source,"Main",null)
+		view.source_config.text_record = bad
+		view._configure_text_tint(source)
+		check(not view.source_text_tint_active and view.get_theme_color("font_hover_color")==Color.RED,"bad replacement record restores tint")
+	view.configure(source,"Main",null)
+	view._configure_text_tint({})
+	check(not view.source_text_tint_active,"unverified source rejected")
+	view.configure(source,"Main",null)
+	var replacement_theme := Theme.new()
+	replacement_theme.set_color("font_color","Button",Color.GREEN)
+	view.theme = replacement_theme
+	view._configure_text_tint(source)
+	check(view.get_theme_color("font_color")==Color.WHITE,"source tint survives inherited theme replacement")
+	view._configure_text_tint({"provenance":false})
+	check(view.get_theme_color("font_color")==Color.GREEN,"fallback uses replacement inherited theme")
+	view.configure(source,"Main",null)
+	view.source_config.text_record.m_fontColor.g = 0.5
+	view._configure_text_tint(source)
+	check(view.get_theme_color("font_color").g==0.5,"valid replacement tint updates")
 	view.queue_free()
 	await process_frame
 	print("Day clock: %d checks, %d failures" % [checks, failures])
