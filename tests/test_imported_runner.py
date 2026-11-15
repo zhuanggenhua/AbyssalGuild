@@ -83,6 +83,7 @@ MARKERS = {
     "test_card_feedback_board": "Card feedback board checks: 1 passed / 1 total",
     "test_vendor_unlock_board": "Vendor unlock board checks: 1 passed / 1 total",
     "test_menu_focus": "Menu focus: 1 checks, 0 failures",
+    "test_title_options_cancel": "Title Options cancel: 20 checks, 0 failures",
     "test_options_pause_owner": "Options pause owner: 51 checks, 0 failures",
     "test_pause_input": "Pause input: 1 checks, 0 failures",
     "test_navigation_ui": "Navigation UI checks: 1 passed / 1 total",

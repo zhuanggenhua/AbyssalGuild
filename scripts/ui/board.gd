@@ -703,6 +703,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {}) -> void:
+	_title_options_open_owner.clear()
 	source_crafting_report = cold_crafting
 	options_panel.reset_source_lifecycle()
 	world_post_process.configure(catalog.data, session.scene_name, visual_assets.render_pipeline)
@@ -1305,7 +1306,7 @@ func _source_fade_wheel_allowed() -> bool:
 	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and dragging < 0 and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
 
 func _input(event: InputEvent) -> void:
-	if NavigationInput.is_cancel_press(event) and _source_options_cancel():
+	if NavigationInput.is_cancel_press(event) and (_source_title_options_cancel() or _source_options_cancel()):
 		get_viewport().set_input_as_handled()
 		return
 	# Device state advances even while source InputManager skips camera handling.
@@ -1813,6 +1814,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_title_options_open_owner.clear()
 	_source_options_open_owner.clear()
 	_source_options_owner_cache.clear()
 	_source_inbound_close_receipt = {}
@@ -2486,7 +2488,9 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	layer.add_child(options_panel)
 	options_panel.visibility_changed.connect(func():
 		_source_options_owner_cache.clear()
-		if not options_panel.visible: _source_options_open_owner.clear())
+		if not options_panel.visible:
+			_source_options_open_owner.clear()
+			_title_options_open_owner.clear())
 
 func _ordinary_source_pause_icon() -> bool:
 	return source_pause_configured and running and session.phase == "playing" and pause_overlay.visible and not options_panel.visible and not scene_transition.active() and not _navigation_modal_active() and not quit_dispatched and (recovery_window == null or not recovery_window.visible)
@@ -2576,6 +2580,29 @@ func _toggle_pause_menu() -> void:
 		MenuFocus.restore(pause_restore_focus, day_clock)
 		pause_restore_focus = null
 
+var _title_options_open_owner: Dictionary = {}
+func _source_title_options_cancel() -> bool:
+	if _title_options_open_owner.is_empty(): return false
+	if running or scene_transition.active() or options_panel == null or not options_panel.visible or title_navigation.destination != TitleNavigation.HOME:
+		_title_options_open_owner.clear()
+		return false
+	if not is_same(_title_options_open_owner.data, catalog.data) or _title_options_open_owner.title != source_title or _title_options_open_owner.view != options_panel.source_view:
+		_title_options_open_owner.clear()
+		return false
+	if quit_dispatched or _navigation_modal_active() or (recovery_window != null and recovery_window.visible): return false
+	return is_instance_valid(source_title) and source_title.source_backed and source_title.is_visible_in_tree() and is_instance_valid(options_panel.source_view) and options_panel.source_view.source_backed and options_panel.source_view.is_visible_in_tree()
+
+func _admit_title_options_open() -> void:
+	_title_options_open_owner.clear()
+	if running or options_panel.visible or title_navigation.destination != TitleNavigation.HOME or scene_transition.active() or quit_dispatched or _navigation_modal_active(): return
+	if recovery_window != null and recovery_window.visible: return
+	if not is_instance_valid(source_title) or not source_title.source_backed or not source_title.is_visible_in_tree(): return
+	if not is_instance_valid(options_panel.source_view) or not options_panel.source_view.source_backed or options_panel.source_view.layout.root_id != "637356262954503982": return
+	var button_host = source_title.nodes.get(source_title.layout.resolve("MenuPanel/GameOptions"))
+	if button_host == null or title_options_button.get_parent() != button_host: return
+	if not preload("res://scripts/ui/source_title_options_contract.gd").admits(catalog.data): return
+	_title_options_open_owner = {"data": catalog.data, "title": source_title, "view": options_panel.source_view}
+
 func _open_options() -> void:
 	if scene_transition.blocks_input(): return
 	if quit_dispatched or _navigation_modal_active(): return
@@ -2586,10 +2613,12 @@ func _open_options() -> void:
 	_source_options_open_owner.clear()
 	if running and session.phase == "playing" and pause_overlay.visible and not scene_transition.active() and not options_panel.visible:
 		_source_options_open_owner = {"session": session, "scene": session.scene_name, "view": options_panel.source_view, "data": catalog.data}
+	_admit_title_options_open()
 	options_panel.open()
 	if running: _refresh()
 
 func _handle_escape() -> void:
+	if _source_title_options_cancel(): return
 	if _source_options_cancel(): return
 	if scene_transition.blocks_input(): return
 	if _navigation_modal_active(): return
@@ -2927,6 +2956,7 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 		_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	_title_options_open_owner.clear()
 	_source_options_open_owner.clear()
 	_source_options_owner_cache.clear()
 	_source_inbound_close_receipt = {}

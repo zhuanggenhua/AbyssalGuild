@@ -22,7 +22,14 @@ func run():
  var licensed=b.options_panel.source_view!=null
  b._open_options();await process_frame
  root.push_input(key());root.push_input(key(false));await process_frame
- check(not b.options_panel.visible,"Title Options retains native explicit cancel/save fallback")
+ if b._source_title_options_cancel():
+  var source_stayed=b.options_panel.visible
+  b.options_panel.close_button.pressed.emit()
+  b.options_panel.open();await process_frame
+  root.push_input(key());root.push_input(key(false));await process_frame
+  check(source_stayed and not b.options_panel.visible,"source Title raw Cancel inert; actual unadmitted Title opening retains fallback Cancel")
+ else:
+  check(not b.options_panel.visible,"Title Options retains native explicit cancel/save fallback")
  if not licensed:
   b.catalog.configure({});b.session.configure(b.catalog);b.running=true;b.session.phase="playing";b.hud.show();b.title_panel.hide()
   b._toggle_pause_menu();b._open_options();await process_frame
