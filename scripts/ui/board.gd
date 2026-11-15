@@ -622,6 +622,8 @@ func _configure_source_title() -> void:
 	title_home = candidate.home
 	title_preferences = candidate.preferences_overlay
 	title_saves = candidate.saves_overlay
+	for overlay in [title_preferences, title_saves]:
+		overlay.visibility_changed.connect(_source_title_overlay_visibility_changed.bind(overlay))
 	old_panel.hide()
 	old_panel.queue_free()
 	_install_saved_rows()
@@ -640,8 +642,39 @@ func _sync_title_destination() -> void:
 		for button in [title_new_button, title_load_button, title_options_button, title_quit_button]:
 			button.focus_mode = Control.FOCUS_ALL if title_navigation.destination == TitleNavigation.HOME else Control.FOCUS_NONE
 
+var _title_overlay_open_owner: Dictionary = {}
+func _source_title_overlay_visibility_changed(overlay: Control) -> void:
+	if not overlay.visible and _title_overlay_open_owner.get("overlay") == overlay: _title_overlay_open_owner.clear()
+func _admit_title_overlay_open(destination: String) -> void:
+	_title_overlay_open_owner.clear()
+	if not _title_navigation_allowed() or title_navigation.destination != TitleNavigation.HOME: return
+	if recovery_window != null and recovery_window.visible: return
+	if not is_instance_valid(source_title) or not source_title.source_backed or not source_title.is_visible_in_tree(): return
+	var prefs: bool = destination == TitleNavigation.PREFS
+	var path: String = "MenuPanel/NewGame" if prefs else "MenuPanel/LoadGame"
+	var button: Button = title_new_button if prefs else title_load_button
+	var overlay = title_preferences if prefs else title_saves
+	var source_id: String = "519257446" if prefs else "2090943496"
+	if button.get_parent() != source_title.nodes.get(source_title.layout.resolve(path)) or overlay != source_title.nodes.get(source_id): return
+	if not preload("res://scripts/ui/source_title_overlay_contract.gd").admits(catalog.data, destination): return
+	_title_overlay_open_owner = {"data": catalog.data, "title": source_title, "overlay": overlay, "destination": destination}
+
+func _source_title_overlay_cancel() -> bool:
+	if _title_overlay_open_owner.is_empty(): return false
+	if running or scene_transition.active() or title_navigation.destination != _title_overlay_open_owner.destination or not is_same(_title_overlay_open_owner.data,catalog.data) or _title_overlay_open_owner.title != source_title:
+		_title_overlay_open_owner.clear()
+		return false
+	var overlay = _title_overlay_open_owner.overlay
+	if not is_instance_valid(source_title) or not source_title.source_backed or not source_title.is_visible_in_tree() or not is_instance_valid(overlay) or not overlay.is_visible_in_tree():
+		_title_overlay_open_owner.clear()
+		return false
+	if quit_dispatched or options_panel.visible or _navigation_modal_active() or (recovery_window != null and recovery_window.visible): return false
+	if title_preferences.visible and title_saves.visible: return false
+	return overlay == (title_preferences if title_navigation.destination == TitleNavigation.PREFS else title_saves)
+
 func _open_title_preferences() -> void:
 	if not _title_navigation_allowed(): return
+	_admit_title_overlay_open(TitleNavigation.PREFS)
 	title_navigation.open(TitleNavigation.PREFS)
 	_sync_title_destination()
 	(duration_adapter if duration_adapter != null else duration).grab_focus()
@@ -649,6 +682,7 @@ func _open_title_preferences() -> void:
 
 func _open_title_saves() -> void:
 	if not _title_navigation_allowed(): return
+	_admit_title_overlay_open(TitleNavigation.SAVES)
 	title_navigation.open(TitleNavigation.SAVES)
 	_refresh_slots()
 	_sync_title_destination()
@@ -657,6 +691,7 @@ func _open_title_saves() -> void:
 
 func _title_back() -> void:
 	if not _title_navigation_allowed(): return
+	_title_overlay_open_owner.clear()
 	if recovery_window != null: recovery_window.hide()
 	var previous: String = title_navigation.destination
 	title_navigation.open(TitleNavigation.HOME)
@@ -703,6 +738,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {}) -> void:
+	_title_overlay_open_owner.clear()
 	_title_options_open_owner.clear()
 	source_crafting_report = cold_crafting
 	options_panel.reset_source_lifecycle()
@@ -1306,7 +1342,7 @@ func _source_fade_wheel_allowed() -> bool:
 	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and dragging < 0 and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
 
 func _input(event: InputEvent) -> void:
-	if NavigationInput.is_cancel_press(event) and (_source_title_options_cancel() or _source_options_cancel()):
+	if NavigationInput.is_cancel_press(event) and (_source_title_overlay_cancel() or _source_title_options_cancel() or _source_options_cancel()):
 		get_viewport().set_input_as_handled()
 		return
 	# Device state advances even while source InputManager skips camera handling.
@@ -1814,6 +1850,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_title_overlay_open_owner.clear()
 	_title_options_open_owner.clear()
 	_source_options_open_owner.clear()
 	_source_options_owner_cache.clear()
@@ -2618,6 +2655,7 @@ func _open_options() -> void:
 	if running: _refresh()
 
 func _handle_escape() -> void:
+	if _source_title_overlay_cancel(): return
 	if _source_title_options_cancel(): return
 	if _source_options_cancel(): return
 	if scene_transition.blocks_input(): return
@@ -2956,6 +2994,7 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 		_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	_title_overlay_open_owner.clear()
 	_title_options_open_owner.clear()
 	_source_options_open_owner.clear()
 	_source_options_owner_cache.clear()

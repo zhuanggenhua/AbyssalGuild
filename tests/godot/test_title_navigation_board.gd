@@ -37,9 +37,13 @@ func run() -> void:
 		board.title_new_button.pressed.emit()
 		board.title_new_button.pressed.emit()
 		check(board.title_preferences.visible and board.title_home.visible == (board.source_title != null) and board.active_slot == 0 and not board.running and not FileAccess.file_exists(board.slots.slot_path(1)), "repeated New Game allocates nothing")
+		var source_overlay: bool = board._source_title_overlay_cancel()
 		board._unhandled_input(cancel(east))
+		if source_overlay:
+			check(board.title_preferences.visible and board.title_navigation.new_game_pending, "source raw Cancel retains preference transaction")
+			board.title_cancel_button.pressed.emit()
 		board.title_confirm_button.pressed.emit()
-		check(board.title_home.visible and not board.running and board.active_slot == 0, "cancel invalidates stale Confirm")
+		check(board.title_home.visible and not board.running and board.active_slot == 0, "explicit source Cancel or fallback shortcut invalidates stale Confirm")
 	board.title_new_button.pressed.emit()
 	board.title_cancel_button.pressed.emit()
 	board._confirm_title_new_game()
@@ -62,8 +66,12 @@ func run() -> void:
 	root.push_input(cancel(true))
 	await process_frame
 	check(not board.archive_dialog.visible and board.title_saves.visible, "modal cancel does not also navigate")
+	var source_saves: bool = board._source_title_overlay_cancel()
 	board._unhandled_input(cancel(true))
-	check(board.title_home.visible, "next cancel returns home")
+	if source_saves:
+		check(board.title_saves.visible, "source Saves raw Cancel remains inert after modal dismissal")
+		board.title_back_button.pressed.emit()
+	check(board.title_home.visible and not board.title_saves.visible, "explicit source Close or fallback Cancel returns home")
 	board.title_new_button.pressed.emit()
 	board._open_options()
 	DirAccess.make_dir_absolute(board.options_path + ".tmp")
