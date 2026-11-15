@@ -2,6 +2,7 @@ extends Button
 ## Source-backed day clock. Native controls/font; private textures are optional.
 const Prefs = preload("res://scripts/ui/title_gameplay_prefs.gd")
 var progress: ProgressBar
+var native_progress_step := 0.01
 var source_config: Dictionary = {}
 var assets
 const TEXT_SOURCE_COMMIT = "a11a89b04cea8370476f2559b639bb9b4cbc08d8"
@@ -58,7 +59,7 @@ static func resolve(source: Dictionary, scene_name: String) -> Dictionary:
 				if not reference is Dictionary or str(reference.get("guid", "")).is_empty(): return fallback
 				guids.append(str(reference.guid))
 			var color: Dictionary = fill.get("m_Color", {})
-			return {"source_backed": true, "text_record": Prefs._fields(documents, fields.get("dayText", {})), "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
+			return {"source_backed": true, "text_record": Prefs._fields(documents, fields.get("dayText", {})), "fill_record": fill, "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
 	return fallback
 
 func _init() -> void:
@@ -67,6 +68,7 @@ func _init() -> void:
 	expand_icon = true
 	add_theme_constant_override("icon_max_width", 30)
 	progress = ProgressBar.new()
+	native_progress_step = progress.step
 	progress.name = "DayProgress"
 	progress.show_percentage = false
 	progress.max_value = 1.0
@@ -89,10 +91,19 @@ func configure(source: Dictionary, scene_name: String, visual_assets) -> void:
 	source_config = resolve(source, scene_name)
 	assets = visual_assets
 	_configure_text_tint(source)
+	_configure_progress_precision(source)
 	preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(self, source_config.get("text_record", {}))
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = source_config.color
 	progress.add_theme_stylebox_override("fill", fill)
+
+func _configure_progress_precision(source: Dictionary) -> void:
+	var provenance = source.get("provenance", {})
+	var fill: Dictionary = source_config.get("fill_record", {})
+	# Locked sprite-backed left-to-right Image.fillAmount has no percentage step.
+	# Keep native integer-pixel draw rounding separate; this fixes value transport.
+	var admitted: bool = provenance is Dictionary and provenance.get("source_commit", "") == TEXT_SOURCE_COMMIT and source_config.get("source_backed", false) and fill.get("m_Type", -1) == 3 and fill.get("m_FillMethod", -1) == 0 and fill.get("m_FillOrigin", -1) == 0 and fill.get("m_Sprite", {}) is Dictionary and str(fill.get("m_Sprite", {}).get("guid", "")) == "57fe652483042fb4ba6612b888e7a928" and str(fill.get("m_Sprite", {}).get("fileID", "")) == "21300000"
+	progress.step = 0.0 if admitted else native_progress_step
 
 func sync(session, is_running: bool, blocked: bool) -> void:
 	visible = is_running and session.phase == "playing"

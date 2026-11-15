@@ -28,6 +28,9 @@ func run() -> void:
 		board.day_clock.configure(board.catalog.data,scene,board.visual_assets)
 		for key in ["font_color","font_hover_color","font_pressed_color","font_hover_pressed_color","font_disabled_color","font_focus_color"]:
 			check(board.day_clock.get_theme_color(key)==Color.WHITE,scene+" source DayText tint "+key)
+		board.session.elapsed=board.session.day_duration*.12345
+		board.day_clock.sync(board.session,true,false)
+		check(absf(board.day_clock.progress.value-.12345)<1e-12,scene+" actual imported noncent fraction transport")
 		if not has_media: continue
 		check(config.pace_icons.size() == 3, scene + " complete source icon references")
 		for guid in config.pace_icons:

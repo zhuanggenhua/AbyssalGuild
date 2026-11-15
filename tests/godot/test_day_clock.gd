@@ -81,6 +81,38 @@ func run() -> void:
 	view.source_config.text_record.m_fontColor.g = 0.5
 	view._configure_text_tint(source)
 	check(view.get_theme_color("font_color").g==0.5,"valid replacement tint updates")
+	docs[1].fields.merge({"m_Type":3,"m_FillMethod":0,"m_FillOrigin":0,"m_Sprite":{"guid":"57fe652483042fb4ba6612b888e7a928","fileID":21300000}})
+	view.configure(source,"Main",null)
+	check(view.progress.step==0,"source filled image disables native percentage snapping")
+	var old_step_view := ProgressBar.new()
+	old_step_view.max_value=1
+	old_step_view.value=.12345
+	check(old_step_view.value==.12,"real default ProgressBar negative control")
+	old_step_view.free()
+	for fraction in [.0009,.00125,.12345,.9951,1.2,-.1]:
+		session.day_duration=100;session.elapsed=fraction*100;session.phase="playing"
+		view.sync(session,true,false)
+		check(absf(view.progress.value-clampf(fraction,0,1))<1e-12,"unquantized transport "+str(fraction))
+	var changes=[0]
+	view.progress.changed.connect(func():changes[0]+=1)
+	view._configure_progress_precision(source)
+	check(changes[0]==0,"same precision setting emits no changed signal")
+	view.configure(source,"Island",null)
+	check(view.progress.step==view.native_progress_step,"unreferenced scene restores native step")
+	for key in ["m_Type","m_FillMethod","m_FillOrigin"]:
+		view.configure(source,"Main",null)
+		view.source_config.fill_record=docs[1].fields.duplicate(true)
+		view.source_config.fill_record[key]=-1
+		view._configure_progress_precision(source)
+		check(view.progress.step==view.native_progress_step,"unsupported fill shape fallback "+key)
+	for sprite in [{},{"guid":"wrong","fileID":21300000},{"guid":"57fe652483042fb4ba6612b888e7a928","fileID":0}]:
+		view.configure(source,"Main",null)
+		view.source_config.fill_record=docs[1].fields.duplicate(true)
+		view.source_config.fill_record.m_Sprite=sprite
+		view._configure_progress_precision(source)
+		check(view.progress.step==view.native_progress_step,"missing/unproved source sprite step fallback")
+	view.configure(source,"Main",null);view._configure_progress_precision({})
+	check(view.progress.step==view.native_progress_step,"unverified source step fallback")
 	view.queue_free()
 	await process_frame
 	print("Day clock: %d checks, %d failures" % [checks, failures])
