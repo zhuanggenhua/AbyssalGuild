@@ -995,7 +995,9 @@ func _configure_source_hud() -> void:
 	# Source MenuView adds TMP dynamically; its font is the locked TMP Settings default.
 	source_fonts.bind_control(ledger, {"font_guid": str(source_fonts.manifest.get("tmp_default_font_guid", ""))})
 	source_fonts.bind_control(detail_toggle, hud_layout.text_record("MenuPanel/MenuToggle/Label"))
-	source_fonts.bind_control(watermark, hud_layout.text_record("Watermark"))
+	var watermark_record: Dictionary = hud_layout.text_record("Watermark")
+	source_fonts.bind_control(watermark, watermark_record)
+	hud_layout.apply_text_color(watermark, watermark_record)
 	var info_text_record: Dictionary = hud_layout.text_record("InfoPanel/InfoText")
 	source_fonts.bind_control(card_hover.header, info_text_record)
 	source_fonts.bind_control(card_hover.body, info_text_record)

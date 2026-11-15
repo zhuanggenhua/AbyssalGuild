@@ -68,3 +68,15 @@ func text_record(path: String) -> Dictionary:
 			names.append(object_name)
 			current = str(transform.get("m_Father", {}).get("fileID", ""))
 	return {}
+
+static func apply_text_color(label: Label, record: Dictionary) -> bool:
+	# TMP vertex tint belongs to its text, not its parent CanvasGroup/background.
+	# A missing replacement must not keep a tint from an earlier source record.
+	label.remove_theme_color_override("font_color")
+	var value = record.get("m_fontColor")
+	if not value is Dictionary: return false
+	for channel in ["r", "g", "b", "a"]:
+		if not value.get(channel) is int and not value.get(channel) is float: return false
+		if not is_finite(float(value[channel])): return false
+	label.add_theme_color_override("font_color", Color(float(value.r), float(value.g), float(value.b), float(value.a)))
+	return true

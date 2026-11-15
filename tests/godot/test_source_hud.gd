@@ -49,6 +49,30 @@ func run() -> void:
 	check(board.card_hover.header.get_theme_color("font_color").is_equal_approx(expected) and board.card_hover.body.get_theme_color("default_color").is_equal_approx(expected), "source HUD relayout retains InfoText color")
 	check(board.card_hover.position.x == 30, "native info left anchor")
 	check(is_equal_approx(board.card_hover.position.y+board.card_hover.size.y, 1050), "native info bottom anchor")
+	var watermark_record: Dictionary = layout.text_record("Watermark")
+	var watermark_color: Dictionary = watermark_record.m_fontColor
+	var watermark_expected := Color(float(watermark_color.r), float(watermark_color.g), float(watermark_color.b), float(watermark_color.a))
+	check(watermark_expected.is_equal_approx(Color(1,1,1,178.0/255.0)), "locked Watermark TMP alpha")
+	check(board.watermark.get_theme_color("font_color").is_equal_approx(watermark_expected), "Watermark inherits source text tint")
+	check(board.watermark.modulate == Color.WHITE and board.source_hud.modulate == Color.WHITE, "Watermark does not modulate HUD siblings")
+	var position_before: Vector2 = board.watermark.position
+	var size_before: Vector2 = board.watermark.size
+	for sample in [Color(0.2,0.4,0.6,0.3), Color(1,1,1,0)]:
+		check(Layout.apply_text_color(board.watermark, {"m_fontColor": {"r":sample.r,"g":sample.g,"b":sample.b,"a":sample.a}}), "finite source text RGBA admitted")
+		check(board.watermark.get_theme_color("font_color").is_equal_approx(sample), "all channels including zero alpha preserved")
+	for malformed in [{}, {"m_fontColor":null}, {"m_fontColor":{"r":1,"g":1,"b":1}}, {"m_fontColor":{"r":1,"g":1,"b":1,"a":"0.7"}}, {"m_fontColor":{"r":1,"g":1,"b":1,"a":NAN}}]:
+		Layout.apply_text_color(board.watermark, watermark_record)
+		check(not Layout.apply_text_color(board.watermark,malformed), "missing or malformed source rejected")
+		check(not board.watermark.has_theme_color_override("font_color"), "rejected source clears stale tint")
+	var themed_fallback := Color(0.15,0.25,0.35,0.45)
+	var watermark_theme := Theme.new()
+	watermark_theme.set_color("font_color","Label",themed_fallback)
+	board.watermark.theme = watermark_theme
+	check(board.watermark.get_theme_color("font_color").is_equal_approx(themed_fallback), "missing source follows replacement theme")
+	board._configure_source_hud()
+	check(board.watermark.get_theme_color("font_color").is_equal_approx(watermark_expected), "HUD reconfigure restores exact source tint")
+	check(board.watermark.position == position_before and board.watermark.size == size_before, "tint does not alter source rect")
+	print("Watermark source RGBA: ", board.watermark.get_theme_color("font_color"))
 	board.queue_free()
 	await process_frame
 	await create_timer(0.5).timeout
