@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_source_precommit_close_board": "Precommit close: 73 checks 0 failures",
     "test_source_info_action_board": "Action geometry: 45 checks, 0 failures",
     "test_source_arrival_persistence_board": "Arrival persistence audit: 95 failures 0",
     "test_source_departure_checkpoint_board": "Source departure checkpoint: 133 failures 0",

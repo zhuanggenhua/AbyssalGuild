@@ -1712,6 +1712,7 @@ func _select_slot(index: int) -> void:
 		title_status.text = "Slot %d is unavailable. Existing files were kept. %s" % [selected_slot, str(entry.errors)]
 
 var _first_departure_save_owner = null
+var _source_close_receipt: Dictionary = {}
 
 func _save_active_slot() -> Dictionary:
 	if active_slot <= 0: return {"ok": false, "error": "No active save slot"}
@@ -1853,7 +1854,21 @@ func _notification(what: int) -> void:
 		camera_pointer.known = false
 		_clear_card_hover()
 		return
-	if what != NOTIFICATION_WM_CLOSE_REQUEST or scene_transition.active() or quit_dispatched or _navigation_modal_active(): return
+	if what != NOTIFICATION_WM_CLOSE_REQUEST or quit_dispatched or _navigation_modal_active(): return
+	if scene_transition.active():
+		var snapshot: Dictionary = preload("res://scripts/ui/source_precommit_close.gd").capture(self, _source_close_receipt)
+		if snapshot.is_empty(): return
+		var save_owner = Session.new()
+		save_owner.configure(catalog)
+		var restored: Dictionary = save_owner.campaign.restore(snapshot)
+		if not restored.ok:
+			notice.text = "Quit checkpoint · SAVE FAILED: " + str(restored.get("error", "Invalid source quit snapshot")) + ". Live game kept open; retry close."
+			return
+		_first_departure_save_owner = save_owner.campaign
+		var saved: Dictionary = _checkpoint("Quit checkpoint")
+		_first_departure_save_owner = null
+		if saved.ok: _execute_quit()
+		return
 	if options_panel != null and options_panel.visible and options_panel.dirty:
 		options_panel.request_close()
 		if options_panel.visible: return
@@ -1892,6 +1907,7 @@ func _confirm_quit() -> void:
 		_execute_quit()
 
 func _execute_quit() -> void:
+	_source_close_receipt = {}
 	scene_transition.cancel()
 	session.travel_pending = false
 	if quit_dispatched: return
@@ -2756,6 +2772,7 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	var candidate = Session.new()
 	candidate.configure(catalog)
 	var provenance: Dictionary = SourceTravelLayout.capture(session, stack_id, recipe_guid)
+	var close_accepted: Dictionary = {}
 	var result: Dictionary = candidate.campaign.restore(session.campaign.capture())
 	if result.ok:
 		# Stage against request-time state, without any live checkpoint callback.
@@ -2767,6 +2784,7 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		# Only the accepted, source-locked ordinary traveler receipt grants this.
 		# Carry it beside layout provenance without changing bound argument shape.
 		provenance["source_arrival_no_save"] = not snapshot.is_empty()
+		if not snapshot.is_empty(): close_accepted = result.duplicate(true)
 		if snapshot.is_empty():
 			result = _departure_checkpoint()
 		else:
@@ -2778,7 +2796,17 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		if session.stacks.has(stack_id): session.stacks[stack_id].cancel_craft()
 		_on_session_event("travel_failed", result)
 		return false
+	var close_receipt: Dictionary = {}
+	if provenance.get("source_arrival_no_save", false):
+		# Retain original accepted remap separately from later checkpoint result.
+		close_receipt = {"owner": session, "candidate": candidate, "stack": session.stacks.get(stack_id), "recipe": recipe_guid}
+		close_receipt["members"] = close_receipt.stack.card_ids.map(func(id): return session.cards[id])
+		close_receipt["craft_generation"] = close_receipt.stack.craft_generation
+		close_receipt["accepted"] = close_accepted
 	var accepted: bool = _request_scene_change(_commit_travel.bind(session, candidate, provenance))
+	if accepted and not close_receipt.is_empty():
+		close_receipt["generation"] = scene_transition.generation
+		_source_close_receipt = close_receipt
 	if accepted:
 		_tail_receipt = {"owner":session.get_instance_id(),"generation":scene_transition.generation,"serial":session.crafting._active_serial}
 	return accepted
@@ -2790,6 +2818,7 @@ func _complete_travel_tail(task: Dictionary, members: Array, step: float, serial
 	preload("res://scripts/ui/source_craft_tail_permit.gd").execute(self,task,members,step,serial,receipt)
 
 func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
+	_source_close_receipt = {}
 	_tail_receipt = {}
 	owner.travel_pending = false
 	if owner != session or not running: return
@@ -2804,6 +2833,7 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 		_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	_source_close_receipt = {}
 	_tail_receipt = {}
 	quest_journal.clear()
 	world_post_process.cancel()
