@@ -68,6 +68,7 @@ MARKERS = {
     "test_texture_alpha_imported": "Imported texture alpha cached pixels: PASS (115 textures)",
     "test_trade_hover_board": "Trade hover board: PASS",
     "test_source_world_board": "Source world scene lifecycle: PASS",
+    "test_source_background_uv": "Source background UV contract: 51 checks, 0 failures; no GPU/source screenshot claim",
     "test_source_hud": "Source HUD failures: 0",
     "test_source_title_view": "Source Title view: PASS",
     "test_trade_source_imported": "Private trade source: PASS (11 cached original zones)",

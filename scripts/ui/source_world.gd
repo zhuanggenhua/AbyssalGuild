@@ -38,8 +38,13 @@ static func background(assets: RefCounted, scene: Dictionary) -> Node3D:
 		material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS if bool(importer.get("mipmaps", false)) else BaseMaterial3D.TEXTURE_FILTER_LINEAR
 		var uv_scale: Dictionary = tex_env.get("m_Scale", {})
 		var uv_offset: Dictionary = tex_env.get("m_Offset", {})
-		material.uv1_scale = Vector3(float(uv_scale.get("x", 1)), float(uv_scale.get("y", 1)), 1)
-		material.uv1_offset = Vector3(float(uv_offset.get("x", 0)), float(uv_offset.get("y", 0)), 0)
+		# Built-in plane10209, after the world-Z geometry bridge: source UV=(1-U,V).
+		# Source Unlit/Texture applies ST before sampling bottom-left static textures;
+		# copied PNG/ImageTexture rows are top-first. Convert that final sample once.
+		var sx := float(uv_scale.get("x", 1))
+		var sy := float(uv_scale.get("y", 1))
+		material.uv1_scale = Vector3(-sx, -sy, 1)
+		material.uv1_offset = Vector3(sx + float(uv_offset.get("x", 0)), 1.0 - float(uv_offset.get("y", 0)), 0)
 		var mesh := PlaneMesh.new()
 		mesh.size = Vector2(10, 10) # Unity's built-in plane, before Transform scale.
 		var instance := MeshInstance3D.new()

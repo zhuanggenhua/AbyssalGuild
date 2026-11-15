@@ -51,14 +51,16 @@ would contradict the source: grass belongs to the separate background plane.
 
 - StandardMaterial3D is a material-input mapping, not an exact port of Unity's
   Lit BRDF, color-management pipeline, reflection probes or shadow filtering.
-- Built-in primitive UV orientation and source-engine mip selection still need
-  asymmetric reference-image verification; scale/offset tests alone cannot
-  establish texel-for-texel parity.
+- The locked built-in plane UV orientation is now derived from the matching
+  official editor resource and static texture origin; see [background UV bridge](source-background-uv.md).
+  Source-engine mip selection and texel-for-texel framebuffer parity still need
+  separate verification; a source coordinate proof is not a rendered-image oracle.
 - RenderSettings sky/gradient ambient, fog, skybox/custom reflection textures,
   and unsupported scene meshes are not implemented by this narrow adapter.
-- The source snapshot does not contain Unity's built-in shader implementation.
-  The background uses the identified Unlit/Texture semantics, not a copied
-  proprietary shader; rendered color-space equality remains unverified.
+- The matching official editor resource now privately identifies the built-in
+  Unlit/Texture shader and its UV scale/offset/sample path. No proprietary shader
+  implementation is copied into this repository; rendered color-space equality
+  remains unverified.
 - Screenshot localization/UI layout and original renderer version may differ;
   no global one-to-one completion claim follows from restoring these omissions.
 

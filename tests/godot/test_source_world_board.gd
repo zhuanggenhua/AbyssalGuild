@@ -27,6 +27,7 @@ func run() -> void:
 		if is_instance_valid(old): check(old.is_queued_for_deletion() and not old.visible, "old background hidden and released")
 		var instance: MeshInstance3D = board.source_background.get_child(0)
 		var material: StandardMaterial3D = instance.material_override
+		check(material.uv1_scale == Vector3(-20,-20,1) and material.uv1_offset == Vector3(20,1,0), scene_name + " source plane/ST/PNG orientation")
 		var mapped := material.albedo_texture.get_image()
 		check(mapped.get_size() == Vector2i(512,512) and mapped.has_mipmaps() and mapped.get_mipmap_count() == 9, scene_name + " complete 512-to-1 chain")
 		var guid := "6f0ddc12af2166d4baa827c45ecf9594" if scene_name == "Main" else "0e37da4fd3cb8b7498704194af3d03b3"
