@@ -815,7 +815,7 @@ func _advance_source_audio_frame(real_delta: float) -> void:
 	# One sample at root-frame entry, before gameplay/transition callbacks can
 	# admit new waits. Title retains the last global scale after TimeManager dies.
 	var pace: int = session.time_pace() if running and session.phase == "playing" else 0
-	var blocked: bool = running and (scene_transition.blocks_input() or _ui_pause_active() or vendor_unlock.is_active())
+	var blocked: bool = running and (scene_transition.blocks_input() or _temporal_ui_pause_active() or vendor_unlock.is_active())
 	feedback.advance_scaled_time(source_audio_clock.sample(real_delta, running, pace, blocked))
 
 func _advance_running_frame(delta: float) -> void:
@@ -824,7 +824,7 @@ func _advance_running_frame(delta: float) -> void:
 	world_post_process.advance(delta)
 	# Sample ownership before advancing real-time reveals. An expiring reveal
 	# cannot retroactively release the scaled time of this frame.
-	var external_pause: bool = _transition_pause_frame or _ui_pause_active() or vendor_unlock.is_active()
+	var external_pause: bool = _transition_pause_frame or _temporal_ui_pause_active() or vendor_unlock.is_active()
 	var scaled_delta: float = delta * session.speed if session.phase == "playing" and not session.paused and not external_pause else 0.0
 	_advance_puffs(delta, scaled_delta)
 	_update_camera_motion(delta)
@@ -1305,6 +1305,9 @@ func _source_fade_wheel_allowed() -> bool:
 	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and dragging < 0 and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
 
 func _input(event: InputEvent) -> void:
+	if NavigationInput.is_cancel_press(event) and _source_options_cancel():
+		get_viewport().set_input_as_handled()
+		return
 	# Device state advances even while source InputManager skips camera handling.
 	# Only CameraController pan uses source window pixels. Card picking and
 	# GUI events retain viewport coordinates. Store physical samples/origins so
@@ -1810,6 +1813,8 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_source_options_open_owner.clear()
+	_source_options_owner_cache.clear()
 	_source_inbound_close_receipt = {}
 	if running: options_panel.reset_source_lifecycle()
 	quest_journal.clear()
@@ -2479,12 +2484,71 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	options_panel = OptionsPanel.new()
 	options_panel.play_click = _play_ui_click
 	layer.add_child(options_panel)
+	options_panel.visibility_changed.connect(func():
+		_source_options_owner_cache.clear()
+		if not options_panel.visible: _source_options_open_owner.clear())
 
 func _ordinary_source_pause_icon() -> bool:
 	return source_pause_configured and running and session.phase == "playing" and pause_overlay.visible and not options_panel.visible and not scene_transition.active() and not _navigation_modal_active() and not quit_dispatched and (recovery_window == null or not recovery_window.visible)
 
 func _ui_pause_active() -> bool:
 	return scene_transition.blocks_input() or (running and ((pause_overlay != null and pause_overlay.visible) or (options_panel != null and options_panel.visible)))
+
+## The source Options sibling owns input, not a TimeManager pause lock.
+## Only admit the exact linked records and mounted ordinary gameplay panels.
+var _source_options_owner_cache: Dictionary = {}
+var _source_options_open_owner: Dictionary = {}
+func _source_options_pause_owner() -> bool:
+	if scene_transition.active() or not running or options_panel == null or not options_panel.visible:
+		_source_options_open_owner.clear()
+	if _source_options_open_owner.is_empty(): return false
+	if _source_options_open_owner.session != session or _source_options_open_owner.scene != session.scene_name or _source_options_open_owner.view != options_panel.source_view or not is_same(_source_options_open_owner.data, catalog.data):
+		_source_options_open_owner.clear()
+		_source_options_owner_cache.clear()
+		return false
+	var eligible: bool = running and session != null and session.catalog == catalog and session.scene_name in ["Main", "Island"] and source_pause_configured and options_panel != null and options_panel.visible
+	eligible = eligible and not scene_transition.active() and not quit_dispatched and not _navigation_modal_active() and (recovery_window == null or not recovery_window.visible)
+	if not eligible:
+		_source_options_owner_cache.clear()
+		return false
+	if catalog.data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT or not is_instance_valid(options_panel.source_view) or not options_panel.source_view.source_backed or options_panel.source_view.layout.root_id != "637356262954503982" or not options_panel.source_view.is_visible_in_tree():
+		_source_options_owner_cache.clear()
+		return false
+	# Imported catalog records are immutable until configure/replacement. Cache
+	# only this opening's actual session/scene/catalog/overlay identities.
+	if not _source_options_owner_cache.is_empty() and _source_options_owner_cache.session == session and _source_options_owner_cache.scene == session.scene_name and _source_options_owner_cache.catalog == catalog and is_same(_source_options_owner_cache.data, catalog.data) and _source_options_owner_cache.view == options_panel.source_view:
+		return _source_options_owner_cache.admitted
+	var mounted_pause := false
+	for child in pause_overlay.get_children():
+		if child.get_script() == preload("res://scripts/ui/source_panel_view.gd") and child.source_backed and child.layout.root_id == "8532370488951995501": mounted_pause = true
+	if not mounted_pause or not preload("res://scripts/ui/day_clock.gd").resolve(catalog.data, session.scene_name).source_backed: return false
+	var pause_record: Dictionary = {}
+	var options_link: Dictionary = {}
+	var options_record: Dictionary = {}
+	for prefab in catalog.data.get("referenced_prefabs", []):
+		if prefab.get("guid", "") == "5e2985d7789c5254b831d166e6931134":
+			for doc in prefab.get("documents", []):
+				if str(doc.get("file_id", "")) == "8547574447435325085" and doc.get("script_class", "") == "PauseMenu": pause_record = doc.get("fields", {})
+				if str(doc.get("file_id", "")) == "9020853386068679053" and doc.get("script_class", "") == "GameOptionsUI": options_link = doc.get("fields", {})
+		if prefab.get("guid", "") == "386f59785c880f546bf078b8023091a8":
+			for doc in prefab.get("documents", []):
+				if str(doc.get("file_id", "")) == "98810512149128886" and doc.get("script_class", "") == "GameOptionsUI": options_record = doc.get("fields", {})
+	var admitted: bool = pause_record.get("m_Script", {}).get("guid", "") == "c9da4713f45d2a3408a718a9d946f117" and options_record.get("m_Script", {}).get("guid", "") == "14a040b8aaafd8342878bfa503b99721" and pause_record.get("m_Enabled", 0) == 1 and str(pause_record.get("gameOptionsUI", {}).get("fileID", "")) == "9020853386068679053" and options_link.get("m_Enabled", 0) == 1 and options_link.get("m_CorrespondingSourceObject", {}).get("guid", "") == "386f59785c880f546bf078b8023091a8" and str(options_link.get("m_CorrespondingSourceObject", {}).get("fileID", "")) == "98810512149128886" and options_record.get("m_Enabled", 0) == 1 and str(options_record.get("closeButton", {}).get("fileID", "")) == "3374842419896805458"
+
+	_source_options_owner_cache = {"session": session, "scene": session.scene_name, "catalog": catalog, "data": catalog.data, "view": options_panel.source_view, "admitted": admitted}
+	return admitted
+
+func _temporal_ui_pause_active() -> bool:
+	if _source_options_pause_owner(): return pause_overlay.visible
+	return _ui_pause_active()
+
+func _source_options_cancel() -> bool:
+	if not _source_options_pause_owner(): return false
+	# PauseMenu.Update ignores raw Cancel during IsEndingCycle. Options stays.
+	if session.phase == "playing":
+		pause_overlay.visible = not pause_overlay.visible
+		_refresh()
+	return true
 
 ## Source ContinueButton invokes ToggleActiveState directly, independently of
 ## PauseMenu.Update's IsEndingCycle Cancel gate. Close only this existing owner.
@@ -2518,10 +2582,15 @@ func _open_options() -> void:
 	if running:
 		if session.phase != "playing" and not pause_overlay.visible: return
 		if not pause_overlay.visible: _toggle_pause_menu()
+	_source_options_owner_cache.clear()
+	_source_options_open_owner.clear()
+	if running and session.phase == "playing" and pause_overlay.visible and not scene_transition.active() and not options_panel.visible:
+		_source_options_open_owner = {"session": session, "scene": session.scene_name, "view": options_panel.source_view, "data": catalog.data}
 	options_panel.open()
 	if running: _refresh()
 
 func _handle_escape() -> void:
+	if _source_options_cancel(): return
 	if scene_transition.blocks_input(): return
 	if _navigation_modal_active(): return
 	# Source PauseMenu never changes external pause during IsEndingCycle.
@@ -2858,6 +2927,8 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 		_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	_source_options_open_owner.clear()
+	_source_options_owner_cache.clear()
 	_source_inbound_close_receipt = {}
 	_source_close_receipt = {}
 	_tail_receipt = {}
@@ -2867,6 +2938,8 @@ func _exit_tree() -> void:
 	session.travel_pending = false
 
 func _configure_source_pause() -> void:
+	_source_options_open_owner.clear()
+	_source_options_owner_cache.clear()
 	source_pause_configured = false
 	var candidate = preload("res://scripts/ui/source_panel_view.gd").new()
 	pause_overlay.add_child(candidate)

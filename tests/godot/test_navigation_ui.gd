@@ -161,16 +161,31 @@ func test_gameplay() -> void:
 	check(board.session.paused and not board.pause_overlay.visible, "distinct repeated presses preserve manual pause across a menu roundtrip")
 	board.session.set_paused(false)
 	board._open_options()
+	var source_options_owner: bool = board._source_options_pause_owner()
+	var options_before: String = FileAccess.get_file_as_string(board.options_path) if FileAccess.file_exists(board.options_path) else ""
+	if source_options_owner: board.options_panel.dirty = true
 	board._unhandled_input(east())
-	check(not board.options_panel.visible and board.pause_overlay.visible, "gamepad closes gameplay options back to the pause menu")
+	if source_options_owner:
+		var options_after: String = FileAccess.get_file_as_string(board.options_path) if FileAccess.file_exists(board.options_path) else ""
+		check(board.options_panel.visible and board.options_panel.dirty and not board.pause_overlay.visible and not board._temporal_ui_pause_active() and options_after == options_before, "source gamepad Cancel keeps dirty Options unsaved and releases only Pause time owner")
+	else:
+		check(not board.options_panel.visible and board.pause_overlay.visible, "fallback gamepad closes gameplay options back to the pause menu")
 	board._unhandled_input(key())
-	check(not board._ui_pause_active() and board.session.speed == 2.0, "second cancel resumes the preserved pace")
+	if source_options_owner:
+		check(board.options_panel.visible and board.pause_overlay.visible and board._temporal_ui_pause_active() and board.session.speed == 2.0, "second source Cancel reacquires Pause without closing Options or changing pace")
+		board.options_panel.request_close()
+		board._continue_pause_menu()
+	else:
+		check(not board._ui_pause_active() and board.session.speed == 2.0, "second fallback cancel resumes the preserved pace")
 	board._open_options()
 	board.options_panel._request_reset()
 	await cancel_modal(key())
 	check(board.options_panel.visible and board.pause_overlay.visible and not board.options_panel.reset_dialog.visible, "native modal cancel does not also close gameplay options or resume the menu")
 	board._unhandled_input(east())
 	board._unhandled_input(key())
+	if source_options_owner:
+		board.options_panel.request_close()
+		board._continue_pause_menu()
 	var checkpoint: String = FileAccess.get_file_as_string(board._active_slot_path())
 	for phase in ["feeding", "selling", "encounter", "ready", "game_over"]:
 		board.session.phase = phase

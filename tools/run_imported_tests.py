@@ -121,6 +121,7 @@ SUITES = (
     ("test_trade_collection_ui", r"Trade/collection UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_vendor_unlock_board", r"Vendor unlock board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_menu_focus", r"Menu focus: [1-9]\d* checks, 0 failures"),
+    ("test_options_pause_owner", r"Options pause owner: 51 checks, 0 failures"),
     ("test_pause_input", r"Pause input: [1-9]\d* checks, 0 failures"),
     ("test_navigation_ui", r"Navigation UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_options_ui", r"Options UI checks: [1-9]\d* passed / [1-9]\d* total"),
