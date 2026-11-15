@@ -1702,10 +1702,16 @@ func _select_slot(index: int) -> void:
 	if not entry.valid:
 		title_status.text = "Slot %d is unavailable. Existing files were kept. %s" % [selected_slot, str(entry.errors)]
 
+var _first_departure_save_owner = null
+
 func _save_active_slot() -> Dictionary:
 	if active_slot <= 0: return {"ok": false, "error": "No active save slot"}
-	slots.configure(session.campaign, slot_root)
-	return slots.save_slot(active_slot)
+	slots.configure(session.campaign if _first_departure_save_owner == null else _first_departure_save_owner, slot_root)
+	var result: Dictionary = slots.save_slot(active_slot)
+	if _first_departure_save_owner != null:
+		if result.ok: session.campaign.last_saved = _first_departure_save_owner.last_saved.duplicate(true)
+		slots.configure(session.campaign, slot_root)
+	return result
 
 func _checkpoint(reason: String) -> Dictionary:
 	var result: Dictionary = _save_active_slot()
@@ -2337,8 +2343,11 @@ func _try_equip_drop(id: int, destination: Vector2) -> bool:
 		return true
 	return false
 
-func _departure_checkpoint() -> Dictionary:
-	return _checkpoint("Travel departure")
+func _departure_checkpoint(checkpoint_campaign = null) -> Dictionary:
+	_first_departure_save_owner = checkpoint_campaign
+	var result: Dictionary = _checkpoint("Travel departure")
+	_first_departure_save_owner = null
+	return result
 
 func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 	_sync_combat_layouts()
@@ -2745,7 +2754,14 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	if result.ok:
 		# Retain exact returned IDs before checkpoint replaces this dictionary.
 		provenance = SourceTravelLayout.seal(candidate, result, provenance)
-		result = _departure_checkpoint()
+		var snapshot: Dictionary = preload("res://scripts/ui/source_departure_checkpoint.gd").capture(session, stack_id, recipe_guid, result)
+		if snapshot.is_empty():
+			result = _departure_checkpoint()
+		else:
+			var checkpoint_owner = Session.new()
+			checkpoint_owner.configure(catalog)
+			result = checkpoint_owner.campaign.restore(snapshot)
+			if result.ok: result = _departure_checkpoint(checkpoint_owner.campaign)
 	if not result.ok:
 		if session.stacks.has(stack_id): session.stacks[stack_id].cancel_craft()
 		_on_session_event("travel_failed", result)

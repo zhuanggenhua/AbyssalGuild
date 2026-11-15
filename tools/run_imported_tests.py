@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_source_departure_checkpoint_board", r"Source departure checkpoint: [1-9]\d* failures 0"),
     ("test_source_cold_crafting_board", r"Source cold crafting board: [1-9]\d* checks, 0 failures; actual headless Continue"),
     ("test_private_alpha_cache", r"Private alpha cache data-only bounds and rejection: PASS"),
     ("test_source_board_expansion", r"Source board expansion: [1-9]\d* checks, 0 failures"),
