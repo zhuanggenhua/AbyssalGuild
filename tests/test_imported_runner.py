@@ -83,7 +83,7 @@ MARKERS = {
     "test_card_feedback_board": "Card feedback board checks: 1 passed / 1 total",
     "test_vendor_unlock_board": "Vendor unlock board checks: 1 passed / 1 total",
     "test_menu_focus": "Menu focus: 1 checks, 0 failures",
-    "test_title_overlay_cancel": "Title overlay cancel: 36 checks, 0 failures",
+    "test_title_overlay_cancel": "Title source pointer and overlay: PASS (locked scene; 82 checks)",
     "test_title_options_cancel": "Title Options cancel: 20 checks, 0 failures",
     "test_options_pause_owner": "Options pause owner: 51 checks, 0 failures",
     "test_pause_input": "Pause input: 1 checks, 0 failures",
@@ -270,6 +270,12 @@ class ImportedRunnerTests(unittest.TestCase):
         self.assertNotRegex(ordinary, pattern)
         self.assertNotRegex("Source travel expansion coverage: SKIP (licensed FBX cache missing)\n" + ordinary, pattern)
         self.assertRegex(MARKERS["test_source_travel_layout_board"], pattern)
+
+    def test_title_overlay_marker_requires_locked_scene_evidence(self):
+        pattern = dict(runner.SUITES)["test_title_overlay_cancel"]
+        for count in (11, 36, 82):
+            self.assertNotRegex(f"Title overlay cancel: {count} checks, 0 failures", pattern)
+        self.assertRegex(MARKERS["test_title_overlay_cancel"], pattern)
 
     def test_import_then_all_suites_share_disposable_cache(self):
         result, calls = self.run_fixture()

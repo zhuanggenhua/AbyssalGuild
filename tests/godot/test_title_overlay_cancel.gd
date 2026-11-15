@@ -110,4 +110,5 @@ func run():
   b._handle_escape();check(not overlay.visible,dest+" replacement retains fallback close")
   b.catalog.data=data
  print("Title overlay cancel: %d checks, %d failures"%[checks,failures])
+ if sourced and failures == 0: print("Title source pointer and overlay: PASS (locked scene; %d checks)"%checks)
  b.queue_free();await process_frame;await create_timer(.5).timeout;quit(1 if failures else 0)

@@ -272,7 +272,8 @@ func configure_source(data: Dictionary, assets) -> bool:
 		if candidate.mount_path("MainPanel/"+leaf,buttons[key]):
 			_admit_source_text_pointer_buttons(data, candidate, "MainPanel/"+leaf, buttons[key])
 	candidate.mount_path("MainPanel/Footer/ResetButton",reset_button)
-	candidate.mount_path("MainPanel/Footer/CloseButton",close_button)
+	if candidate.mount_path("MainPanel/Footer/CloseButton",close_button):
+		_admit_source_close_pointer(data, candidate)
 	reset_button.text = "[Reset]"
 	close_button.text = "[Close]"
 	var documents: Array = []
@@ -338,3 +339,24 @@ func _admit_source_text_pointer_buttons(data: Dictionary, view, path: String, bu
 		if int(component.get("m_Enabled", 0)) == 1 and str(component.get("m_Script", {}).get("guid", "")) == "ef98d84a856977b44bbf49a1bab2060a":
 			button.button_mask = MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
 			return
+
+# GameOptionsUI.Start binds its own serialized closeButton to Close. This
+# admission does not include Reset, modal confirmation, or fallback controls.
+func _admit_source_close_pointer(data: Dictionary, view) -> bool:
+	if data.get("provenance", {}).get("source_commit", "") != "a11a89b04cea8370476f2559b639bb9b4cbc08d8": return false
+	if view != source_view or not is_instance_valid(view) or not view.source_backed: return false
+	var id: String = view.layout.resolve("MainPanel/Footer/CloseButton")
+	if not view.nodes.has(id) or close_button.get_parent() != view.nodes[id]: return false
+	var controller: Dictionary = {}
+	var text_button: Dictionary = {}
+	for prefab in data.get("referenced_prefabs", []):
+		if prefab.get("name", "") != "GameOptionsUI" or prefab.get("guid", "") != "386f59785c880f546bf078b8023091a8": continue
+		for document in preload("res://scripts/ui/source_prefab_documents.gd").resolve(data, "GameOptionsUI"):
+			if str(document.get("file_id", "")) == "98810512149128886" and document.get("script_class", "") == "GameOptionsUI": controller = document.get("fields", {})
+			if str(document.get("file_id", "")) == "3374842419896805458" and document.get("script_class", "") == "TextButton": text_button = document.get("fields", {})
+	if controller.get("m_Enabled", 0) != 1 or controller.get("m_Script", {}).get("guid", "") != "14a040b8aaafd8342878bfa503b99721": return false
+	if str(controller.get("closeButton", {}).get("fileID", "")) != "3374842419896805458": return false
+	if text_button.get("m_Enabled", 0) != 1 or text_button.get("m_Script", {}).get("guid", "") != "ef98d84a856977b44bbf49a1bab2060a": return false
+	if text_button.get("m_GameObject", {}) != view.layout.records[id].rect.get("m_GameObject", {}): return false
+	close_button.button_mask = MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
+	return true

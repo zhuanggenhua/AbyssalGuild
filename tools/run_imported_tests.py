@@ -122,7 +122,7 @@ SUITES = (
     ("test_trade_collection_ui", r"Trade/collection UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_vendor_unlock_board", r"Vendor unlock board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_menu_focus", r"Menu focus: [1-9]\d* checks, 0 failures"),
-    ("test_title_overlay_cancel", r"Title overlay cancel: 36 checks, 0 failures"),
+    ("test_title_overlay_cancel", r"(?m)^Title source pointer and overlay: PASS \(locked scene; [1-9]\d* checks\)$"),
     ("test_title_options_cancel", r"Title Options cancel: 20 checks, 0 failures"),
     ("test_options_pause_owner", r"Options pause owner: 51 checks, 0 failures"),
     ("test_pause_input", r"Pause input: [1-9]\d* checks, 0 failures"),

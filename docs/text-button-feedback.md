@@ -60,3 +60,15 @@ their existing rules. The headless viewport test exercises down/up, outside
 release and guards; the private layout test verifies the actual imported
 bindings. It does not establish Unity same-frame batching, simultaneous
 button ownership, hardware option capabilities or cross-engine pixels.
+
+
+### Options 自身 Close 的来源绑定
+
+仅锁定 a11 的 `GameOptionsUI.Start` → `closeButton.SetOnClick(Close)`
+这条路径扩展为顺序左/右/中键抬起触发。准入核对 prefab GUID、启用的
+GameOptionsUI、精确 closeButton fileID、启用的 TextButton 脚本及 GameObject、
+实际挂载的 Close 宿主。未匹配时保留普通左键，不扩大 Reset、确认框或 fallback。
+原 `Close` 的保存后隐藏语义沿用现有 `request_close`，包括保存失败保持打开的
+迁移安全保护；不改持久化实现。回归通过 viewport 实际投递验证按下无动作、
+区域外释放、关闭后隐藏、重复打开、生命周期中断、禁用及模态遮挡。
+这不是 Unity 原生截图或同时多键序列的等价验收。
