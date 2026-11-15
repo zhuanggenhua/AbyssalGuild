@@ -14,7 +14,7 @@ static func hover_info(session, card_id: int, enabled: bool = true) -> Dictionar
 	var result := {"card_id": card_id, "stack_id": stack.id, "header": "", "body": "", "kind": "card"}
 	if not craft.is_empty():
 		result.header = _name(session.catalog, stack.recipe_guid)
-		result.body = "Time left: %.1fs" % craft.remaining
+		result.body = "Time left: %ss" % _remaining_text(session.catalog, craft.duration, stack.progress, craft.remaining)
 		result.kind = "craft"
 		return result
 	if stack.card_ids.size() > 1:
@@ -115,3 +115,34 @@ static func _craft(session, stack) -> Dictionary:
 static func _name(catalog, guid: String) -> String:
 	var fields: Dictionary = catalog.fields(guid)
 	return str(fields.get("displayName", fields.get("id", guid)))
+
+## Bounded legacy Single F1 bridge for the locked source craft hover.
+## Display-only: never writes time, progress, ratio, save state or RNG. Unknown
+## source/duration or transient out-of-range values retain the old formatter.
+static func _remaining_text(catalog, duration: float, progress: float, fallback: float) -> String:
+	var provenance = catalog.data.get("provenance", {})
+	if not provenance is Dictionary or provenance.get("source_commit", "") != "a11a89b04cea8370476f2559b639bb9b4cbc08d8": return "%.1f" % fallback
+	if not duration in [5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 60.0, 90.0, 120.0, 180.0]: return "%.1f" % fallback
+	if not is_finite(progress) or progress < 0 or progress > duration: return "%.1f" % fallback
+	# Original expression subtracts two Single values and returns Single.
+	# It does not cast an already-computed native double difference instead.
+	var inputs := PackedFloat32Array([duration, progress])
+	var remaining: float = PackedFloat32Array([inputs[0] - inputs[1]])[0]
+	return _single_f1(remaining)
+
+## Internal finite nonnegative binary32 formatter; caller enforces the domain.
+static func _single_f1(remaining: float) -> String:
+	var q: int = floori(remaining * 10.0)
+	if q < 1800:
+		# Decimal midpoint minus half a seven-significant-digit unit. Five
+		# integer denominators cover [0,180], avoiding log/pow boundary drift.
+		var denominator: int
+		if q == 0: denominator = 200000000
+		elif q < 10: denominator = 20000000
+		elif q < 100: denominator = 2000000
+		elif q < 1000: denominator = 200000
+		else: denominator = 20000
+		var numerator: int = (2 * q + 1) * (denominator / 20) - 1
+		if remaining >= float(numerator) / denominator: q += 1
+	# Preserve the established HUD decimal point; do not mutate process locale.
+	return "%d.%d" % [q / 10, q % 10]

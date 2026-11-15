@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_source_craft_f1", r"Source craft F1: [1-9]\d* checks, 0 failures"),
     ("test_source_background_uv", r"Source background UV contract: [1-9]\d* checks, 0 failures; no GPU/source screenshot claim"),
     ("test_source_departure_checkpoint_board", r"Source departure checkpoint: [1-9]\d* failures 0"),
     ("test_source_arrival_persistence_board", r"Arrival persistence audit: [1-9]\d* failures 0"),
