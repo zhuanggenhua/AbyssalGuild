@@ -51,6 +51,8 @@ var journal_tabs: HBoxContainer
 var watermark: Label
 var ledger_info: Dictionary = {}
 var info_action: Button
+var info_action_source_record: Dictionary = {}
+var info_action_appearance = preload("res://scripts/ui/source_info_action_appearance.gd").new()
 var catalog = Catalog.new()
 var visual_assets = VisualAssets.new()
 var board_mesh: MeshInstance3D
@@ -1004,7 +1006,10 @@ func _configure_source_hud() -> void:
 	source_fonts.bind_control(card_hover.header, info_text_record)
 	source_fonts.bind_control(card_hover.body, info_text_record)
 	card_hover.configure_source_text_color(info_text_record)
-	source_fonts.bind_control(info_action, hud_layout.text_record("InfoPanel/ActionButton"))
+	# Rebind restores prior overrides before recapturing a replacement theme.
+	info_action_appearance.reset(info_action)
+	info_action_source_record = hud_layout.text_record("InfoPanel/ActionButton")
+	source_fonts.bind_control(info_action, info_action_source_record)
 	var backdrop := StyleBoxFlat.new()
 	backdrop.bg_color = hud_layout.color("MenuToggle", Color(0, 0, 0, 0.9019608))
 	detail_panel.add_theme_stylebox_override("panel", backdrop)
@@ -1053,6 +1058,7 @@ func _sync_source_info() -> void:
 	card_hover.set_descriptor(info_requests.current())
 	notice.visible = market_panel.visible
 	var action: String = str(info_requests.current().get("action", ""))
+	info_action_appearance.apply(info_action, catalog.data, action, info_action_source_record)
 	info_action.text = action
 	info_action.visible = not action.is_empty()
 	info_action.add_theme_font_size_override("font_size", 30)

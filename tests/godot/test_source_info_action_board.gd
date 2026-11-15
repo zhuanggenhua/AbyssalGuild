@@ -19,6 +19,14 @@ func capture(b,label,expected):
   var widths={"Feed People":210.58999633789062,"Start Day":164.5399932861328,"Return to Title":227.07000732421875}
   check(b.info_action.size.is_equal_approx(Vector2(widths[expected],73.5199966430664)),label+" exact outer extent")
   check(b.info_action.position.is_equal_approx(b.card_hover.bottom_anchor-Vector2(0,73.5199966430664)),label+" fixed bottom and left")
+  for key in ["normal","hover","pressed","hover_pressed","disabled"]:
+   check(b.info_action.get_theme_stylebox(key) is StyleBoxEmpty,label+" no source background "+key)
+  for key in ["font_color","font_hover_color","font_pressed_color","font_hover_pressed_color","font_disabled_color","font_focus_color"]:
+   check(b.info_action.get_theme_color(key).is_equal_approx(Color(1,.9,.3,1)),label+" source tint "+key)
+  var before_rect=b.info_action.get_rect();var before_focus=b.info_action.focus_mode
+  b.info_action._enter();check(b.info_action.underline,label+" existing hover underline retained")
+  b.info_action._leave();check(not b.info_action.underline,label+" existing hover exit retained")
+  check(b.info_action.get_rect()==before_rect and b.info_action.focus_mode==before_focus,label+" hover does not alter hit or focus")
   var hit=b.info_action.get_global_rect()
   check(hit.has_point(hit.position+Vector2(.1,.1)) and hit.has_point(hit.end-Vector2(.1,.1)),label+" first/last interior hit bounds")
   check(not hit.has_point(hit.position-Vector2(.1,0)) and not hit.has_point(hit.end+Vector2(.1,0)),label+" exterior not in hit rect")
