@@ -1281,6 +1281,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_finish_drag(event.position)
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
+var _fade_wheel_owner: int = 0
+var _fade_wheel_generation: int = -1
+func _source_fade_wheel_allowed() -> bool:
+	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and dragging < 0 and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
+
 func _input(event: InputEvent) -> void:
 	# Device state advances even while source InputManager skips camera handling.
 	# Only CameraController pan uses source window pixels. Card picking and
@@ -1292,6 +1297,10 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if scene_transition.blocks_input():
+		if _source_fade_wheel_allowed() and event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and is_finite(event.factor):
+			if camera_motion.zoom(event.factor * (1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0), -camera.global_basis.z):
+				_fade_wheel_owner = session.get_instance_id()
+				_fade_wheel_generation = scene_transition.generation
 		get_viewport().set_input_as_handled()
 		return
 	if running and pause_overlay.visible and not options_panel.visible and not _navigation_modal_active():
@@ -2101,7 +2110,9 @@ func _update_camera_motion(delta: float) -> void:
 	if enabled and panning and camera_pointer.known:
 		camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
 		camera_drag_origin = camera_pointer.position
-	camera.position = camera_motion.step(camera.position, delta, enabled)
+	var fade_wheel: bool = _fade_wheel_owner == session.get_instance_id() and _fade_wheel_generation == scene_transition.generation and _source_fade_wheel_allowed()
+	if not fade_wheel: _fade_wheel_owner = 0
+	camera.position = camera_motion.step(camera.position, delta, enabled or fade_wheel)
 
 func _layout_states() -> Array:
 	var result: Array = []
