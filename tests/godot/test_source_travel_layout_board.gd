@@ -159,12 +159,17 @@ func trip(board, source, label: String, admitted: bool):
 	check(targets(board.session) == expected_targets, label + " exact registered source-order targets or unchanged fallback")
 	check(normalized(board.session.campaign.capture()) == normalized(model_snapshot), label + " all nongeometry IDs/equipment/RNG/events/quests/inactive state preserved")
 	check(board.arrival_events.is_empty() and board.arrival_changes == 0 and old_events.is_empty(), label + " entry emits no duplicate gameplay signals")
-	check(board.checkpoints == ["Travel departure", "Arrived at " + board.session.scene_name], label + " original two checkpoints only")
+	var source_no_save: bool = context.get("source_arrival_no_save", false)
+	var expected_checkpoints: Array = ["Travel departure"] if source_no_save else ["Travel departure", "Arrived at " + board.session.scene_name]
+	check(board.checkpoints == expected_checkpoints, label + " admitted source or fallback checkpoint policy")
+	if source_no_save:
+		check(FileAccess.get_file_as_bytes(departure_path) == departure_bytes, label + " source arrival leaves departure bytes intact")
 	var at_entry := targets(board.session)
 	for i in 3: board._sync_views(0.0)
 	check(targets(board.session) == at_entry, label + " no accidental second placement pass")
+	board._save_game() # Live geometry was verified before this real explicit save.
 	var arrived = Session.new(); arrived.configure(board.catalog)
-	check(arrived.campaign.load_file(board.slots.slot_path(board.active_slot)).ok and targets(arrived) == at_entry, label + " real arrival save records final target geometry")
+	check(arrived.campaign.load_file(board.slots.slot_path(board.active_slot)).ok and targets(arrived) == at_entry, label + " explicit save records final target geometry")
 	check(JSON.parse_string(JSON.stringify(normalized(arrived.campaign.capture()), "", true, true)) == JSON.parse_string(JSON.stringify(normalized(model_snapshot), "", true, true)), label + " arrival reread preserves all nongeometry")
 	var before := Codec.capture(board.session)
 	check(not Travel.apply(board, board.commits[0].context_ref).ok and Codec.capture(board.session) == before, label + " consumed context cannot be reapplied")

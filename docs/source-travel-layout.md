@@ -112,3 +112,11 @@ Input hashes are checked unchanged. Only normal save APIs write isolated copies.
 and production-Board sequence tests, not GUI/natural travel or rendered acceptance.
 The private independent source-equation/fixed-coordinate oracle remains separate
 from the public test to avoid distributing source resources or private saves.
+
+## Source-locked ordinary arrival persistence
+
+The accepted ordinary original travel receipt now leaves the departure file and
+backup unchanged at arrival, matching the locked source save callsites. Live
+arrival layout is checked before explicit Save; disk geometry is checked after
+that Save. Unsupported or unverified requests retain native arrival autosave.
+See [arrival persistence](source-arrival-persistence.md).

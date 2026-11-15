@@ -16,6 +16,7 @@ if [[ -f data/stackcraft.json ]]; then
   bash tools/test_godot.sh res://tests/godot/test_source_restore_board.gd
   bash tools/test_godot.sh res://tests/godot/test_source_travel_layout_board.gd
   bash tools/test_godot.sh res://tests/godot/test_source_departure_checkpoint_board.gd
+  bash tools/test_godot.sh res://tests/godot/test_source_arrival_persistence_board.gd
   bash tools/test_godot.sh res://tests/godot/test_source_craft_tail_permit.gd
   bash tools/test_godot.sh res://tests/godot/test_source_travel_fade_progress_board.gd
   bash tools/test_godot.sh res://tests/godot/test_source_travel_fade_wheel_board.gd

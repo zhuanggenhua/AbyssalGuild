@@ -2759,6 +2759,9 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		# Retain exact returned IDs before checkpoint replaces this dictionary.
 		provenance = SourceTravelLayout.seal(candidate, result, provenance)
 		var snapshot: Dictionary = preload("res://scripts/ui/source_departure_checkpoint.gd").capture(session, stack_id, recipe_guid, result)
+		# Only the accepted, source-locked ordinary traveler receipt grants this.
+		# Carry it beside layout provenance without changing bound argument shape.
+		provenance["source_arrival_no_save"] = not snapshot.is_empty()
 		if snapshot.is_empty():
 			result = _departure_checkpoint()
 		else:
@@ -2788,8 +2791,12 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 	# Atomic validated candidate swap; real-time old-scene activity after the
 	# departure capture intentionally cannot rewrite captured travelers.
 	session = candidate
+	var source_arrival_no_save: bool = provenance.get("source_arrival_no_save", false)
 	_enter_game(provenance)
-	_checkpoint("Arrived at " + session.scene_name)
+	if source_arrival_no_save:
+		notice.text = "Arrived at " + session.scene_name
+	else:
+		_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
 	_tail_receipt = {}
