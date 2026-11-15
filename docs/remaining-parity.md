@@ -1,8 +1,19 @@
 # Remaining verified migration gaps
 
 This is a source-audit checklist, not a claim that the game is complete. Reference:
-StackCraft `a11a89b04cea8370476f2559b639bb9b4cbc08d8`. No Unity execution was used.
+StackCraft `a11a89b04cea8370476f2559b639bb9b4cbc08d8`. The initial static audit did not execute Unity; later diagnostic launch attempts are described below.
 The private StackCraft subtree passes the 1327-file source lock; supplemental external font inputs have their own same-commit hash lock.
+
+## Current acceptance boundary (reviewed at 4c9e241, 2026-11-15)
+
+This status reconciliation is pinned to `4c9e2413351cd25e46b123b3500a51a91a8b7e5b`; it introduces no new runtime or visual evidence. Dated sections below preserve historical findings. Later linked source adapters supersede their implementation status only within each documented admission branch, never all cross-engine acceptance.
+
+Recent bounded behavior includes [Options/Pause ownership](source-options-pause-owner.md), [Title Options Cancel](source-title-options-cancel.md), and [Title overlay Cancel](source-title-overlay-cancel.md). [DayText tint](source-daytext-tint.md), [day progress precision](source-day-progress-precision.md) and [ordinary Pause icon tint](source-pace-pause-tint.md) likewise do not establish whole-HUD or glyph rendering parity. Day progress removes value quantization only; the original imported sprite rectangle, padding and outer UV measurements needed for exact fractional drawing have not been obtained. Native recovery/confirmation policies, including recoverable archives instead of permanent deletion and staying open after a failed save, remain deliberate safety differences.
+
+Current original-Unity diagnostics stopped before the diagnostic method ran: Licensing IPC and Package Manager local-service communication failed. This is a pre-login startup boundary, not verified lack of an account/license, and no user login action is established as a remedy. No original native frame or text mesh was obtained. Do not reuse the historical no-Unity instruction as the current reason for missing evidence.
+
+Still required are a proven matching original runtime/state and synchronized native images for actual comparison. Godot native fixtures, source-shaped algebra and public/private regression suites remain bounded evidence. In particular, original scene GI/SH bindings and render variants, TMP/SDF glyph output, unresolved dynamic default-font binding, natural full-game progression/waits, listening, Windows execution and other hardware/input paths are not certified by this reconciliation. See [flat board composition](source-flat-board-composition.md), [font boundaries](source-fonts.md), [reference state](source-screenshot-state-audit.md) and [migration history](migration-progress.md).
+
 
 ## Source-backed presentation audit (2026-11-12)
 
@@ -25,13 +36,12 @@ Selectable transitions and Options/Pause component trees now have explicit adapt
 and synthetic/private tests. See [controls](source-control-adapters.md). Locked
 DOTween 1.2.790 OutQuad/jump/punch behavior and actual attack/return Transform captures
 are implemented; [tween evidence](source-tween-parity.md) distinguishes these from
-unresolved shake/RNG behavior. Source saved-slot templates and callback routing are now connected; source vertical Scrollbar geometry/input and static ASCII card-title autosizing now have bounded adapters. Dynamic TMP defaults/complex text and particle/built-in-shader/lighting differences remain.
+unresolved shake/RNG behavior. Source saved-slot templates and callback routing are now connected; source vertical Scrollbar geometry/input and static ASCII card-title autosizing now have bounded adapters. The dynamic TMP default runtime binding, complex text and particle/built-in-shader/lighting differences remain.
 
 Correction: the source TMP font is present in the full locked Git tree, outside
 the sparse StackCraft working copy. GUID 8f586378b4e144a9851e7b34d9b748ee resolves to
 LiberationSans SDF; the original TTF, SDF metrics/atlas and OFL license have been
-retrieved and hash-checked privately. Static 2D/3D components now resolve their actual font references through the private registry; the separate dynamic TMP default reference remains unresolved. Its
-250 static characters include no CJK. The user confirms the supplied Chinese
+retrieved and hash-checked privately. Static 2D/3D components resolve their actual font references through the private registry. This does not resolve the separate dynamic TMP default: a later complete locked-tree metadata/code audit found no tracked asset defining that default GUID, but does not establish runtime null in the presence of external packages, untracked assets or binary behavior. Do not substitute LiberationSans merely because it is available. The recovered static font's 250 characters include no CJK. The user confirms the supplied Chinese
 screenshot uses the same Unity repository. The exact text/font configuration
 that produced it still needs tracing; language alone is not evidence of a
 different source version, and no invented localization is supplied.
