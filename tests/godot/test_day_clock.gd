@@ -1,6 +1,9 @@
 extends SceneTree
 const Clock = preload("res://scripts/ui/day_clock.gd")
 const Session = preload("res://scripts/model/game_session.gd")
+class FakeAssets extends RefCounted:
+	var image: Texture2D = GradientTexture2D.new()
+	func texture(_guid: String) -> Texture2D: return image
 var checks := 0
 var failures := 0
 func check(ok: bool, label: String) -> void:
@@ -113,6 +116,38 @@ func run() -> void:
 		check(view.progress.step==view.native_progress_step,"missing/unproved source sprite step fallback")
 	view.configure(source,"Main",null);view._configure_progress_precision({})
 	check(view.progress.step==view.native_progress_step,"unverified source step fallback")
+	docs[0].fields.paceImage={"fileID":"8580080717683932055"}
+	docs.append({"file_id":"8580080717683932055","fields":{"m_Color":{"r":1,"g":1,"b":1,"a":1}}})
+	var media=FakeAssets.new()
+	view.add_theme_color_override("icon_disabled_color",Color(1,0,0,.25))
+	view.configure(source,"Main",media);session.phase="playing"
+	view.sync(session,true,true,true)
+	check(view.get_theme_color("icon_disabled_color")==Color.WHITE,"ordinary source pause preserves original icon white")
+	var prior_events=notifications[0]
+	view.sync(session,true,true,true)
+	check(notifications[0]==prior_events,"stable ordinary pause tint has no theme churn")
+	view.sync(session,true,true,false)
+	check(view.get_theme_color("icon_disabled_color")==Color(1,0,0,.25),"other blocked owner restores prior icon override")
+	view.sync(session,true,true,true);view.configure({},"Main",media)
+	check(view.get_theme_color("icon_disabled_color")==Color(1,0,0,.25),"unverified reconfigure restores immediately")
+	view.configure(source,"Main",media);view.sync(session,true,true,true)
+	media.image=null;view.sync(session,true,true,true)
+	check(not view.pause_icon_tint_active and view.get_theme_color("icon_disabled_color")==Color(1,0,0,.25),"missing actual texture restores fallback")
+	media.image=GradientTexture2D.new()
+	for record in [{},{"m_Color":false},{"m_Color":{"r":1,"g":1,"b":1,"a":.5}}]:
+		view.configure(source,"Main",media);view.source_config.pace_record=record;view._configure_pace_tint(source);view.sync(session,true,true,true)
+		check(not view.pause_icon_tint_active,"unsupported original image record fallback")
+	view.configure(source,"Main",media);view.sync(session,true,true,true);session.phase="feeding";view.sync(session,true,true,true)
+	check(not view.pause_icon_tint_active and not view.visible,"hidden phase does not keep icon override")
+	session.phase="playing";view.configure(source,"Main",media);view.source_config.pace_image_id="wrong";view._configure_pace_tint(source);view.sync(session,true,true,true)
+	check(not view.pause_icon_tint_active,"wrong source image reference rejected")
+	view.configure(source,"Main",media);view.sync(session,true,true,true);view.hide()
+	check(not view.pause_icon_tint_active,"direct hide invalidates pause tint without sync")
+	view.remove_theme_color_override("icon_disabled_color")
+	view.configure(source,"Main",media);view.sync(session,true,true,true)
+	var icon_theme=Theme.new();icon_theme.set_color("icon_disabled_color","Button",Color.BLUE);view.theme=icon_theme
+	view.sync(session,true,true,false)
+	check(view.get_theme_color("icon_disabled_color")==Color.BLUE and not view.has_theme_color_override("icon_disabled_color"),"inherited replacement theme fallback restored")
 	view.queue_free()
 	await process_frame
 	print("Day clock: %d checks, %d failures" % [checks, failures])

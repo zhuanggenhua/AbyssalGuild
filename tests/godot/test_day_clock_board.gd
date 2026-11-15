@@ -50,15 +50,39 @@ func run() -> void:
 	for pace in [2, 0, 1]:
 		board.day_clock.pressed.emit()
 		check(board.session.time_pace() == pace, "live clock click pace %d" % pace)
+	var old_icon_disabled: Color = board.day_clock.get_theme_color("icon_disabled_color")
+	var normal_icon: Texture2D = board.day_clock.icon
+	var normal_fill: float = board.day_clock.progress.value
+	var normal_rect: Rect2 = board.day_clock.get_rect()
 	board._toggle_pause_menu()
+	var source_pause = null
+	for child in board.pause_overlay.get_children():
+		if child.get_script()==preload("res://scripts/ui/source_panel_view.gd"): source_pause=child
+	check(source_pause!=null and source_pause.source_backed and source_pause.is_visible_in_tree(),"actual embedded source PauseMenu is live")
+	if source_pause!=null:
+		var shade_color: Color = source_pause.Layout.color(source_pause.layout.field(source_pause.layout.root_id,"m_Color",{}))
+		check(shade_color.is_equal_approx(Color(0,0,0,.8)),"locked source PauseMenu shade is black alpha .8")
+		var has_live_shade=false
+		for child in source_pause.get_children():
+			if child is ColorRect and child.is_visible_in_tree() and child.color.is_equal_approx(shade_color): has_live_shade=true
+		check(has_live_shade,"actual source shade renders declared color")
+		for child in board.pause_overlay.get_children():
+			if child is Control and child!=source_pause:check(not child.is_visible_in_tree(),"native fallback pause decoration hidden")
+	if has_media:
+		check(board.day_clock.get_theme_color("icon_disabled_color")==Color.WHITE,"ordinary real source PauseMenu keeps pace icon white")
+		check(board.day_clock.icon==normal_icon and board.day_clock.progress.value==normal_fill and board.day_clock.get_rect()==normal_rect,"pause tint does not alter asset fill or rect")
+	print("PACE_PAUSE_LIFECYCLE pause visible=",board.day_clock.visible," disabled=",board.day_clock.disabled," tint=",board.day_clock.get_theme_color("icon_disabled_color"))
 	check(board.day_clock.disabled, "menu external pause disables clock")
 	check(board.day_clock.get_theme_color("font_disabled_color")==Color.WHITE,"external input lock does not fabricate source Selectable dimming")
 	board._cycle_clock_pace()
 	check(board.session.time_pace() == 1, "menu blocks clock without replacing saved pace")
 	board._toggle_pause_menu()
 	check(not board.day_clock.disabled, "closing menu restores clock input")
+	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"closing ordinary pause restores original icon theme")
 	board._open_options()
 	check(board.day_clock.disabled, "options external pause disables clock")
+	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"Options keeps old disabled icon behavior")
+	print("PACE_PAUSE_LIFECYCLE options visible=",board.day_clock.visible," disabled=",board.day_clock.disabled," tint=",board.day_clock.get_theme_color("icon_disabled_color"))
 	board._cycle_clock_pace()
 	check(board.session.time_pace() == 1, "options preserve selected pace")
 	board.options_panel.hide()
@@ -71,6 +95,7 @@ func run() -> void:
 	check(not board.detail_panel.visible, "journal closes after source half-second slide")
 	board._refresh()
 	check(board.day_button.visible, "persistent day action survives source status hiding")
+	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"hidden day end restores icon fallback")
 	board._cycle_clock_pace()
 	check(board.session.phase == "feeding", "clock cannot advance day-end phase")
 	# Opening the journal during day-end must not be undone on every refresh.
@@ -84,6 +109,20 @@ func run() -> void:
 	board.session.scene_name = "Island"
 	board._refresh()
 	check(board.market_heading.text == "STACKCRAFT / ISLAND", "live scene identity replaces literal Main")
+	# Re-enter the actual pause path then invalidate only its presentation owner.
+	board._toggle_pause_menu()
+	board.scene_transition.begin(func():pass)
+	board._process(0.0)
+	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"transition owner restores prior icon even while normal clock sync is paused")
+	board.scene_transition.advance(1.0);board._process(0.0)
+	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"incoming fade remains outside ordinary pause scope")
+	board.scene_transition.cancel();board._process(0.0)
+	if has_media: check(board.day_clock.get_theme_color("icon_disabled_color")==Color.WHITE,"ordinary pause reacquires after transition owner ends")
+	board.source_hud.hide()
+	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"hidden HUD parent immediately restores fallback")
+	board.source_hud.show();board._refresh()
+	board.day_clock.hide()
+	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"direct hidden clock immediately restores fallback")
 	board._show_title()
 	var pace_before: int = board.session.time_pace()
 	board._cycle_clock_pace()

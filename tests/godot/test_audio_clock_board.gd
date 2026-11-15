@@ -25,7 +25,7 @@ func run() -> void:
 	board.feedback.requests.set_mixer(0)
 	board.feedback.requests.request_interrupt(10)
 	board._process(1)
-	check(board.feedback.requests.waits[0].remaining == 9, "cold Title retains initial global scale one")
+	check(board.day_clock == null and board.feedback.requests.waits[0].remaining == 9, "no-clock audio-only Title host still advances root audio frame once")
 	board.running = true
 	board.session.phase = "playing"
 	board.session.speed = 2

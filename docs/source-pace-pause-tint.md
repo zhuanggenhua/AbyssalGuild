@@ -1,0 +1,11 @@
+# Pace icon tint under the ordinary source PauseMenu
+
+Locked DayTimeUI implements pointer click, not Selectable tint. Its paceImage reference8580080717683932055 has white Image color; runtime only changes the sprite. The ordinary source PauseMenu supplies black alpha0.8 shade and does not dim that Image separately. The native DayClock uses a disabled Button for input safety and previously inherited icon_disabled_color alpha0.4, adding extra icon dimming beneath the already-correct shade.
+
+The adapter changes only icon_disabled_color to white while all of these hold: locked source provenance, exact referenced white PaceImage, real nonnull icon asset, visible disabled clock, running playing scene, successfully mounted source PauseMenu, ordinary pause visible and no Options, scene transition (including incoming fade), navigation modal, recovery window or quit owner. It never enables input or changes selected pace. Missing/unsupported records, missing texture and replacement configuration preserve or restore prior native overrides/inherited theme. All other icon colors remain untouched.
+
+The existing configure and sync paths admit/release ownership; a cached presentation-only check at Board root-frame entry handles owner changes while external pause skips normal clock sync. It neither advances clocks nor changes session/focus/input. Direct or ancestor hiding restores the prior icon override immediately. Stable state emits no repeated theme override writes. Options/transition/hidden fallback still retains the original native alpha0.4 behavior outside this deliberately narrow scope.
+
+No shade changes: regression tests identify the actual sourced panel by script type, resolve its source root color, observe its live black alpha0.8 ColorRect and confirm native fallback siblings are hidden. The previous shade-replacement idea is not part of this patch.
+
+Tests retain existing fill, DayText, pace cycling, pause/options input suppression and end-day/new-day/title lifecycle checks, plus transition-out/in release, ordinary-pause reacquisition and hidden-parent cleanup. The unchanged prior Board is the negative control. This is an authoritative tint/state correction only, not acceptance of icon texture sampling, TMP glyphs or original Unity framebuffer parity.

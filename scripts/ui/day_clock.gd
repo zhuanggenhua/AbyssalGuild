@@ -10,6 +10,36 @@ const TEXT_COLORS = ["font_color", "font_hover_color", "font_pressed_color", "fo
 var source_text_tint_active := false
 var source_text_tint := Color.TRANSPARENT
 var prior_text_colors: Dictionary = {}
+var source_pace_white := false
+var pause_icon_tint_active := false
+var prior_disabled_icon_color: Variant = null
+
+func _sync_pause_icon_tint(ordinary_source_pause: bool) -> void:
+	var admitted := ordinary_source_pause and source_pace_white and is_visible_in_tree() and disabled and icon != null
+	if admitted == pause_icon_tint_active: return
+	if admitted:
+		prior_disabled_icon_color = get_theme_color("icon_disabled_color") if has_theme_color_override("icon_disabled_color") else null
+		add_theme_color_override("icon_disabled_color", Color.WHITE)
+	else:
+		if prior_disabled_icon_color == null: remove_theme_color_override("icon_disabled_color")
+		else: add_theme_color_override("icon_disabled_color", prior_disabled_icon_color)
+		prior_disabled_icon_color = null
+	pause_icon_tint_active = admitted
+
+func _pace_visibility_changed() -> void:
+	if not is_visible_in_tree(): _sync_pause_icon_tint(false)
+
+func _configure_pace_tint(source: Dictionary) -> void:
+	# Configuration changes end ownership; only the next ordinary-pause sync re-admits.
+	_sync_pause_icon_tint(false)
+	var provenance = source.get("provenance", {})
+	var record: Dictionary = source_config.get("pace_record", {})
+	var color = record.get("m_Color")
+	source_pace_white = provenance is Dictionary and provenance.get("source_commit", "") == TEXT_SOURCE_COMMIT and source_config.get("source_backed", false) and source_config.get("pace_image_id", "") == "8580080717683932055" and color is Dictionary
+	if source_pace_white:
+		for key in ["r","g","b","a"]:
+			if (not color.get(key) is float and not color.get(key) is int) or color.get(key) != 1: source_pace_white = false; break
+
 
 func _configure_text_tint(source: Dictionary) -> void:
 	var provenance = source.get("provenance", {})
@@ -59,11 +89,12 @@ static func resolve(source: Dictionary, scene_name: String) -> Dictionary:
 				if not reference is Dictionary or str(reference.get("guid", "")).is_empty(): return fallback
 				guids.append(str(reference.guid))
 			var color: Dictionary = fill.get("m_Color", {})
-			return {"source_backed": true, "text_record": Prefs._fields(documents, fields.get("dayText", {})), "fill_record": fill, "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
+			return {"source_backed": true, "text_record": Prefs._fields(documents, fields.get("dayText", {})), "fill_record": fill, "pace_record": Prefs._fields(documents, fields.get("paceImage", {})), "pace_image_id": str(fields.get("paceImage", {}).get("fileID", "")), "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
 	return fallback
 
 func _init() -> void:
 	name = "DayClock"
+	visibility_changed.connect(_pace_visibility_changed)
 	custom_minimum_size = Vector2(300, 50)
 	expand_icon = true
 	add_theme_constant_override("icon_max_width", 30)
@@ -92,6 +123,7 @@ func configure(source: Dictionary, scene_name: String, visual_assets) -> void:
 	assets = visual_assets
 	_configure_text_tint(source)
 	_configure_progress_precision(source)
+	_configure_pace_tint(source)
 	preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(self, source_config.get("text_record", {}))
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = source_config.color
@@ -105,7 +137,7 @@ func _configure_progress_precision(source: Dictionary) -> void:
 	var admitted: bool = provenance is Dictionary and provenance.get("source_commit", "") == TEXT_SOURCE_COMMIT and source_config.get("source_backed", false) and fill.get("m_Type", -1) == 3 and fill.get("m_FillMethod", -1) == 0 and fill.get("m_FillOrigin", -1) == 0 and fill.get("m_Sprite", {}) is Dictionary and str(fill.get("m_Sprite", {}).get("guid", "")) == "57fe652483042fb4ba6612b888e7a928" and str(fill.get("m_Sprite", {}).get("fileID", "")) == "21300000"
 	progress.step = 0.0 if admitted else native_progress_step
 
-func sync(session, is_running: bool, blocked: bool) -> void:
+func sync(session, is_running: bool, blocked: bool, ordinary_source_pause: bool = false) -> void:
 	visible = is_running and session.phase == "playing"
 	disabled = not visible or blocked
 	var pace: int = session.time_pace()
@@ -116,3 +148,4 @@ func sync(session, is_running: bool, blocked: bool) -> void:
 		icon = assets.texture(str(source_config.pace_icons[pace]))
 	tooltip_text = "Click: Normal → Fast → Paused → Normal"
 	if icon == null: tooltip_text += "\nNative text fallback; original pace artwork unavailable."
+	_sync_pause_icon_tint(ordinary_source_pause)

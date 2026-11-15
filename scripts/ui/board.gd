@@ -167,6 +167,7 @@ var friendly_adapter: Control
 var title_options_button: Button
 var title_status: Label
 var day_clock
+var source_pause_configured := false
 var market_heading: Label
 var status: Label
 var inspection: Label
@@ -791,6 +792,8 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	if not focus.is_empty(): _focus_camera_position(focus.target_position, float(focus.duration))
 
 func _process(delta: float) -> void:
+	# Presentation ownership still changes while external pause skips clock sync.
+	if day_clock != null: day_clock._sync_pause_icon_tint(_ordinary_source_pause_icon())
 	_advance_source_audio_frame(delta)
 	_sync_source_info()
 	_transition_pause_frame = scene_transition.blocks_input()
@@ -836,7 +839,7 @@ func _advance_running_frame(delta: float) -> void:
 		_sync_views(delta)
 		return
 	session.tick(delta)
-	day_clock.sync(session, running, _ui_pause_active())
+	day_clock.sync(session, running, _ui_pause_active(), _ordinary_source_pause_icon())
 	equipment_display.advance(scaled_delta)
 	_sync_views(delta)
 	refresh_clock += delta
@@ -1457,7 +1460,7 @@ func _refresh() -> void:
 	_sync_trade_zones()
 	_sync_views()
 	var stats: Dictionary = session.stats()
-	day_clock.sync(session, running, _ui_pause_active())
+	day_clock.sync(session, running, _ui_pause_active(), _ordinary_source_pause_icon())
 	market_heading.text = "STACKCRAFT / " + session.scene_name.to_upper()
 	status.text = "Coins %d  ·  Food %d / %d  ·  Cards %d / %d\n%s" % [stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit, "PAUSED" if session.paused else "%.0fx" % session.speed]
 	status.hide()
@@ -2477,6 +2480,9 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	options_panel.play_click = _play_ui_click
 	layer.add_child(options_panel)
 
+func _ordinary_source_pause_icon() -> bool:
+	return source_pause_configured and running and session.phase == "playing" and pause_overlay.visible and not options_panel.visible and not scene_transition.active() and not _navigation_modal_active() and not quit_dispatched and (recovery_window == null or not recovery_window.visible)
+
 func _ui_pause_active() -> bool:
 	return scene_transition.blocks_input() or (running and ((pause_overlay != null and pause_overlay.visible) or (options_panel != null and options_panel.visible)))
 
@@ -2861,12 +2867,14 @@ func _exit_tree() -> void:
 	session.travel_pending = false
 
 func _configure_source_pause() -> void:
+	source_pause_configured = false
 	var candidate = preload("res://scripts/ui/source_panel_view.gd").new()
 	pause_overlay.add_child(candidate)
 	candidate.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if not candidate.configure_panel(catalog.data,"UIRoot","UICanvas","PauseMenu",visual_assets):
 		candidate.queue_free()
 		return
+	source_pause_configured = true
 	for child in pause_overlay.get_children():
 		if child is Control and child != candidate: child.hide()
 	for i in pause_controls.size():
