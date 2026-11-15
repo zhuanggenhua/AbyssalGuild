@@ -9,6 +9,9 @@ func _init() -> void:
 	var background = assets.create_scene_background("Test")
 	assert(background != null and background.get_child_count() == 1)
 	var mesh: MeshInstance3D = background.get_child(0)
+	assert(mesh.material_override.albedo_texture.get_image().has_mipmaps())
+	assert(not assets.texture_cache["synthetic"].get_image().has_mipmaps())
+	assert(mesh.material_override.albedo_texture.get_image().get_data().slice(0, image.get_data().size()) == image.get_data())
 	assert(mesh.mesh.size == Vector2(10, 10))
 	assert(mesh.position == Vector3(0, -3, 0) and mesh.scale == Vector3(2, 1, 2))
 	assert(mesh.material_override.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED)
@@ -21,8 +24,35 @@ func _init() -> void:
 	assert(is_equal_approx(environment.ambient_light_energy, 0.7))
 	assert(assets.create_scene_background("Absent") == null)
 	assert(not assets.apply_source_environment(environment, "Absent"))
+	assets.manifest.assets.synthetic.texture_importer.mipmaps = 0
+	var without_chain = assets.create_scene_background("Test")
+	assert(without_chain.get_child(0).material_override.albedo_texture == assets.texture_cache.synthetic)
+	assert(without_chain.get_child(0).material_override.texture_filter == BaseMaterial3D.TEXTURE_FILTER_LINEAR)
+	without_chain.free()
+	assets.manifest.assets.synthetic.texture_importer.mipmaps = 1
 	assets.manifest.materials.ground.shader_reference.fileID = "unknown"
 	assert(assets.create_scene_background("Test") == null)
+	var mapper = preload("res://scripts/ui/source_world.gd")
+	var base_tex: Texture2D = assets.texture_cache["synthetic"]
+	assert(mapper.background_texture(base_tex, false) == base_tex)
+	var mipped: Texture2D = mesh.material_override.albedo_texture
+	var bytes := mipped.get_image().get_data()
+	assert(mapper.background_texture(mipped, true) == mipped)
+	assert(mipped.get_image().get_data() == bytes)
+	assert(mapper.background_texture(null, true) == null)
+	# Asymmetric RGBA bytes ensure no base color/alpha conversion is hidden.
+	var asymmetric := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	for y in range(8):
+		for x in range(8): asymmetric.set_pixel(x, y, Color(x/7.0,y/7.0,(x+y)/14.0,(x+1)/8.0))
+	var original := asymmetric.get_data()
+	var original_tex := ImageTexture.create_from_image(asymmetric)
+	var derived: Texture2D = mapper.background_texture(original_tex, true)
+	assert(derived != original_tex and derived.get_image().get_mipmap_count() == 3)
+	assert(derived.get_image().get_data().slice(0, original.size()) == original)
+	assert(original_tex.get_image().get_data() == original and not asymmetric.has_mipmaps())
+	var unsupported := ImageTexture.create_from_image(Image.create(4,4,false,Image.FORMAT_RF))
+	assert(mapper.background_texture(unsupported, true) == unsupported)
+	assert(not unsupported.get_image().has_mipmaps())
 	background.free()
 	print("Source world metadata bindings: PASS")
 	quit()

@@ -24,6 +24,11 @@ static func background(assets: RefCounted, scene: Dictionary) -> Node3D:
 		var pose := preload("res://scripts/ui/source_camera.gd").reflected_pose(entry.get("transform_chain", []))
 		if tex == null or pose.is_empty() or int(importer.get("wrap_u", -1)) != 0 or int(importer.get("wrap_v", -1)) != 0 or int(importer.get("filter_mode", -1)) != 1:
 			continue # Mixed wrap/filter modes need a separate verified mapping.
+		# This plane explicitly requests mipmaps, even when the generic PNG/input-alpha
+		# path returned a base-only texture. Do not alter the shared asset cache.
+		tex = background_texture(tex, bool(importer.get("mipmaps", false)))
+		if tex == null:
+			continue
 		var material := StandardMaterial3D.new()
 		material.resource_name = str(source.get("name", "SourceBackground"))
 		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -61,3 +66,22 @@ static func environment(target: Environment, scene: Dictionary) -> bool:
 	target.ambient_light_energy = float(settings.get("m_AmbientIntensity", 1.0))
 	target.reflected_light_source = 1 # ReflectedLightSource: Background=0, Disabled=1, Sky=2 (runtime property metadata).
 	return true
+
+## Limited to the admitted source background plane; not a global import policy.
+## Existing chains remain byte-for-byte owned by their original texture. Native
+## generated mip texels are not claimed identical to Unity import/compression.
+static func background_texture(texture: Texture2D, wants_mipmaps: bool) -> Texture2D:
+	if texture == null or not wants_mipmaps:
+		return texture
+	var image := texture.get_image()
+	if image == null or image.is_empty():
+		return texture
+	if image.has_mipmaps():
+		return texture
+	# Do not quietly decompress or reinterpret an unsupported imported format.
+	if image.is_compressed() or image.get_format() not in [Image.FORMAT_RGB8, Image.FORMAT_RGBA8]:
+		return texture
+	var derived := image.duplicate() as Image
+	if derived.generate_mipmaps() != OK:
+		return texture
+	return ImageTexture.create_from_image(derived)
