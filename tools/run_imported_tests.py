@@ -24,6 +24,7 @@ SUITES = (
     ("test_private_alpha_cache", r"Private alpha cache data-only bounds and rejection: PASS"),
     ("test_source_board_expansion", r"Source board expansion: [1-9]\d* checks, 0 failures"),
     ("test_source_travel_layout_board", r"Source travel expansion coverage: PASS \(4 positive, 11 guards\)[\s\S]*Source travel layout board: [1-9]\d* checks, 0 failures; headless production boundary only"),
+    ("test_source_travel_fade_progress_board", r"Source fade progress: [1-9]\d* checks, 0 failures"),
     ("test_travel_saved_quest_window", r"TRAVEL_SAVED_QUEST_WINDOW PASS 36"),
     ("test_travel_saved_quest_window_source", r"Source saved travel quest window: 13 checks, 0 failures"),
     ("test_source_stats_imported", r"Source Stats imported layout: PASS \([1-9]\d* checks; no pixel claim\)"),

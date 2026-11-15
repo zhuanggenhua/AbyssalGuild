@@ -20,6 +20,7 @@ MARKERS = {
     "test_private_alpha_cache": "Private alpha cache data-only bounds and rejection: PASS",
     "test_source_board_expansion": "Source board expansion: 97 checks, 0 failures",
     "test_source_travel_layout_board": "Source travel expansion coverage: PASS (4 positive, 11 guards)\nSource travel layout board: 1 checks, 0 failures; headless production boundary only",
+    "test_source_travel_fade_progress_board": "Source fade progress: 107 checks, 0 failures",
     "test_travel_saved_quest_window": "TRAVEL_SAVED_QUEST_WINDOW PASS 36",
     "test_travel_saved_quest_window_source": "Source saved travel quest window: 13 checks, 0 failures",
     "test_source_restore_layout": "Source restore layout planner: 32 checks, 0 failures; no live board integration",

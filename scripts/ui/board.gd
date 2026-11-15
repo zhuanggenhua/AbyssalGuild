@@ -1141,6 +1141,24 @@ func _sync_card_hover(gui: Control) -> void:
 		info_requests.submit("card", 0, info)
 		_sync_source_info()
 
+## Source ProgressUI is an old-scene object, not owned by the fade CanvasGroup.
+## Keep only the source-attested ordinary playing scene. Menu/modal behavior is unchanged.
+func _source_fade_progress_allowed() -> bool:
+	if not (running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()): return false
+	# A completed non-travel tail has unresolved source action ordering. Do not
+	# silently suppress or display that task as part of this visibility adapter.
+	var ready_travels := 0
+	for stack in session.stacks.values():
+		if stack.recipe_guid.is_empty(): continue
+		var entry: Dictionary = catalog.get_definition(stack.recipe_guid)
+		var duration: float = float(entry.get("fields", {}).get("craftingDuration", 0))
+		var boundary := PackedFloat32Array([stack.progress, duration])
+		if not is_finite(boundary[0]) or not is_finite(boundary[1]) or boundary[1] <= 0: return false
+		if boundary[0] >= boundary[1]:
+			if entry.get("script_class") != "TravelRecipe" or stack.progress < duration: return false
+			ready_travels += 1
+	return ready_travels == 1
+
 func _sync_card_feedback() -> void:
 	if not is_instance_valid(card_hover) or not is_instance_valid(craft_progress): return
 	# Numeric IDs may be reused after travel/load, so clear before reading a new owner.
@@ -1152,15 +1170,25 @@ func _sync_card_feedback() -> void:
 		_clear_card_hover()
 		if is_instance_valid(craft_progress): craft_progress.reset()
 		return
+	var fade_progress: bool = _source_fade_progress_allowed()
 	if _ui_pause_active() or _navigation_modal_active():
 		_clear_card_hover()
-		craft_progress.reset()
-		return # Existing held pointer permission/model pause is never changed here.
+		if not fade_progress:
+			craft_progress.reset()
+			return # Existing held pointer permission/model pause is never changed here.
 	var progress: Dictionary = CardInteraction.crafting_progress(session)
+	if fade_progress and session.travel_pending:
+		# Source removes finished task UIs in the same Update, including travel.
+		# Native's transaction retains those stacks until the destination swap.
+		for id in progress.keys():
+			if float(progress[id].remaining) <= 0 and catalog.get_definition(str(progress[id].recipe_guid)).get("script_class") == "TravelRecipe": progress.erase(id)
 	if vendor_unlock.is_active():
 		for descriptor in progress.values(): descriptor.paused = true
 	craft_progress.bind_source(visual_assets, session.scene_name)
 	craft_progress.sync(progress)
+	if fade_progress:
+		_clear_card_hover()
+		return # Presentation only. No pointer/hover is admitted through the shade.
 	var gui: Control = get_viewport().gui_get_hovered_control()
 	_sync_card_hover(gui)
 
