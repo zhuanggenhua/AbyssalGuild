@@ -4,7 +4,18 @@ This fixes the composition of **the existing migrated flat ambient model** for a
 
 ## Evidence and scope
 
-The locked template uses an opaque metallic-zero, smoothness-zero board graph. Its admitted direct-light bridge is unchanged. Actual Main and Island imports both bind one source directional light, flat ambient, no fog, and zero board emission. Main and Island board colors differ; those inputs are preserved. The original Main LightingData / runtime SH remains unavailable, so the scene's sky color is not promoted to a verified SH measurement.
+The locked template uses an opaque metallic-zero, smoothness-zero board graph. Its admitted direct-light bridge is unchanged. Actual Main and Island imports both bind one source directional light, flat ambient, no fog, and zero board emission. Main and Island board colors differ; those inputs are preserved. The original Main and Island LightingData / runtime SH remain unavailable, so neither scene's sky color is promoted to a verified SH measurement.
+
+The private visual importer preserves each Unity scene's serialized
+`LightmapSettings` next to `RenderSettings`. This retains scene-local baked-data
+references, flags and explicit nulls for further investigation; it does not
+resolve a reference, generate a lightmap, obtain runtime SH or change the Godot
+renderer. Main and Island must remain separate even if some authored settings
+match. An exact audit of all 10,719 tracked metadata files found neither scene's
+referenced LightingData GUID, including in the rest of the Unity repository.
+This rules out a matching asset definition in the tracked metadata, not
+untracked bake artifacts, external packages or a live Unity binding. The
+generated manifest stays private.
 
 Official Godot 4.6.3 Compatibility has separate base and shadowed-light encoding: its GLES3 scene shader adds encoded ambient/base color to separately encoded shadowed direct color. A source-independent native plane with the production material factory measured RGB8 `(111,120,122)` without shadows but `(157,170,176)` with shadows, despite no occlusion. With ambient disabled both cases measured `(93,97,88)`. Enabling a shadow flag alone must not brighten an unoccluded point.
 

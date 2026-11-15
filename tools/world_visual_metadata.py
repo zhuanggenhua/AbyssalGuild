@@ -6,6 +6,10 @@ from visual_scene_metadata import transform_chain
 def world_metadata(documents):
     settings = next((deepcopy(d['fields']) for d in documents
                      if d['object_type'] == 'RenderSettings'), {})
+    # Serialized scene evidence only. References do not prove the target asset
+    # exists or that its baked data is bound by the original runtime.
+    lightmaps = next((deepcopy(d['fields']) for d in documents
+                      if d['object_type'] == 'LightmapSettings'), {})
     meshes = []
     for doc in documents:
         if doc['object_type'] != 'MeshRenderer':
@@ -20,4 +24,5 @@ def world_metadata(documents):
                        'enabled': fields.get('m_Enabled', 0),
                        'cast_shadows': fields.get('m_CastShadows', 0),
                        'receive_shadows': fields.get('m_ReceiveShadows', 0)})
-    return {'render_settings': settings, 'scene_meshes': meshes}
+    return {'render_settings': settings, 'lightmap_settings': lightmaps,
+            'scene_meshes': meshes}

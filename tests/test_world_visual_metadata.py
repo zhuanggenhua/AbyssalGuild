@@ -21,5 +21,24 @@ class WorldMetadataTests(unittest.TestCase):
         mesh['materials'][0]['guid'] = 'changed'
         self.assertEqual(docs[1]['fields']['m_Materials'][0]['guid'], 'synthetic')
 
+    def test_lightmap_settings_are_scene_local_and_not_resolved(self):
+        main = {'object_type': 'LightmapSettings', 'fields': {
+            'm_LightingDataAsset': {'fileID': '112000001', 'guid': 'fixture-main', 'type': 2},
+            'm_GISettings': {'m_EnableBakedLightmaps': 1},
+        }}
+        island = {'object_type': 'LightmapSettings', 'fields': {
+            'm_LightingDataAsset': {'fileID': '112000001', 'guid': 'fixture-island', 'type': 2},
+            'm_LightingSettings': {'fileID': '0'},
+        }}
+        for scene in (main, island):
+            item = world_metadata([scene])['lightmap_settings']
+            self.assertEqual(item, scene['fields'])
+            item['m_LightingDataAsset']['guid'] = 'changed'
+            self.assertNotEqual(scene['fields']['m_LightingDataAsset']['guid'], 'changed')
+        explicitly_null = {'m_LightingDataAsset': {'fileID': '0'}}
+        self.assertEqual(world_metadata([{'object_type': 'LightmapSettings',
+                                         'fields': explicitly_null}])['lightmap_settings'],
+                         explicitly_null)
+
     def test_empty_input_has_no_fabricated_world(self):
-        self.assertEqual(world_metadata([]), {'render_settings': {}, 'scene_meshes': []})
+        self.assertEqual(world_metadata([]), {'render_settings': {}, 'lightmap_settings': {}, 'scene_meshes': []})
