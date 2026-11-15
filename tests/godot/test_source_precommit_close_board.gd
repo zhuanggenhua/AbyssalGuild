@@ -14,14 +14,14 @@ func pair(b,name,pos):
  check(b.session.move_to_stack(worker,b.session.cards[id].stack_id),"pair")
  return b.session.stacks[b.session.cards[id].stack_id]
 func run():
- for mode in ["plain","tail","failure","stale","mixed","inbound","unverified","paused","restore_failure"]:
+ for mode in ["plain","tail","failure","stale","mixed","unverified_inbound","unverified","paused","restore_failure"]:
   var path="user://close-%s-%d"%[mode,Time.get_ticks_usec()]
   var b=make_board(path);await process_frame;b.start_new();b.set_process(false);b.feedback.assets=null;b.feedback.stream_cache.clear()
   b.vendor_unlock.cancel();b.session.cycle.reset();b.session.phase="playing";b.session.paused=false;b.pause_overlay.hide()
   for id in b.session.cards.keys():b.session._remove_card(id)
   var tail=null
   if mode in ["tail","failure"]:tail=pair(b,"Wood",Vector2(-4,0));b.session.crafting.advance(2)
-  if mode=="unverified":b.catalog.data.provenance.source_commit="unknown"
+  if mode in ["unverified","unverified_inbound"]:b.catalog.data.provenance.source_commit="unknown"
   var portal=pair(b,"Grand Portal",Vector2(4,0));var travelers=portal.card_ids.duplicate()
   b.session.crafting.advance(5)
   check(b.scene_transition.phase=="out" and b.session.travel_pending,"pending ordinary travel")
@@ -32,8 +32,9 @@ func run():
   if mode=="paused":b.pause_overlay.show()
   if mode=="stale":b.scene_transition.generation+=1
   if mode=="mixed":pair(b,"Grand Portal",Vector2(8,0))
-  if mode=="inbound":b._process(1)
+  if mode=="unverified_inbound":b._process(1)
   else:b._process(.25)
+  if mode=="unverified_inbound":departure=FileAccess.get_file_as_string(file) # Unsupported arrival retains its legacy checkpoint.
   var calls=[0];b.quit_callback=func():calls[0]+=1
   var original_root=b.slot_root
   if mode=="failure":
@@ -46,7 +47,7 @@ func run():
    check(b.notice.text.contains("SAVE FAILED"),"rejected snapshot visible error")
    check(FileAccess.get_file_as_string(file)==departure and FileAccess.get_file_as_string(file+".bak")==backup,"restore rejection no disk write")
    b.session.day=day_before;b._notification(Node.NOTIFICATION_WM_CLOSE_REQUEST)
-  if mode in ["stale","mixed","inbound","unverified","paused"]:
+  if mode in ["stale","mixed","unverified_inbound","unverified","paused"]:
    check(calls[0]==0 and not b.quit_dispatched,"unsupported close unchanged "+mode)
    check(FileAccess.get_file_as_string(file)==departure,"unsupported disk untouched "+mode)
    b.queue_free();await process_frame;continue

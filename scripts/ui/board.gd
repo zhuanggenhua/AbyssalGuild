@@ -1713,6 +1713,7 @@ func _select_slot(index: int) -> void:
 
 var _first_departure_save_owner = null
 var _source_close_receipt: Dictionary = {}
+var _source_inbound_close_receipt: Dictionary = {}
 
 func _save_active_slot() -> Dictionary:
 	if active_slot <= 0: return {"ok": false, "error": "No active save slot"}
@@ -1800,6 +1801,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_source_inbound_close_receipt = {}
 	if running: options_panel.reset_source_lifecycle()
 	quest_journal.clear()
 	ledger_session_id = 0
@@ -1856,6 +1858,9 @@ func _notification(what: int) -> void:
 		return
 	if what != NOTIFICATION_WM_CLOSE_REQUEST or quit_dispatched or _navigation_modal_active(): return
 	if scene_transition.active():
+		if scene_transition.phase == "in":
+			if preload("res://scripts/ui/source_inbound_close.gd").allowed(self, _source_inbound_close_receipt) and _prepare_quit(): _execute_quit()
+			return
 		var snapshot: Dictionary = preload("res://scripts/ui/source_precommit_close.gd").capture(self, _source_close_receipt)
 		if snapshot.is_empty(): return
 		var save_owner = Session.new()
@@ -1907,6 +1912,7 @@ func _confirm_quit() -> void:
 		_execute_quit()
 
 func _execute_quit() -> void:
+	_source_inbound_close_receipt = {}
 	_source_close_receipt = {}
 	scene_transition.cancel()
 	session.travel_pending = false
@@ -2716,6 +2722,8 @@ func _build_scene_fader() -> void:
 	_sync_scene_fader()
 
 func _sync_scene_fader() -> void:
+	if not scene_transition.active() or (not _source_inbound_close_receipt.is_empty() and _source_inbound_close_receipt.get("generation") != scene_transition.generation):
+		_source_inbound_close_receipt = {}
 	if scene_shade == null: return
 	scene_shade.color = Color(0, 0, 0, scene_transition.alpha)
 	scene_shade.visible = scene_transition.active()
@@ -2723,6 +2731,7 @@ func _sync_scene_fader() -> void:
 
 func _request_scene_change(action: Callable) -> bool:
 	if quit_dispatched or not scene_transition.begin(action): return false
+	_source_inbound_close_receipt = {}
 	panning = false
 	pending_quit = ""
 	_clear_card_hover()
@@ -2818,6 +2827,8 @@ func _complete_travel_tail(task: Dictionary, members: Array, step: float, serial
 	preload("res://scripts/ui/source_craft_tail_permit.gd").execute(self,task,members,step,serial,receipt)
 
 func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
+	var incoming: Dictionary = preload("res://scripts/ui/source_inbound_close.gd").admit_commit(self, _source_close_receipt, owner, candidate, provenance)
+	_source_inbound_close_receipt = {}
 	_source_close_receipt = {}
 	_tail_receipt = {}
 	owner.travel_pending = false
@@ -2827,12 +2838,15 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 	session = candidate
 	var source_arrival_no_save: bool = provenance.get("source_arrival_no_save", false)
 	_enter_game(provenance)
+	if not incoming.is_empty() and session == candidate and scene_transition.generation == incoming.generation and scene_transition.phase == "commit":
+		_source_inbound_close_receipt = incoming
 	if source_arrival_no_save:
 		notice.text = "Arrived at " + session.scene_name
 	else:
 		_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	_source_inbound_close_receipt = {}
 	_source_close_receipt = {}
 	_tail_receipt = {}
 	quest_journal.clear()
