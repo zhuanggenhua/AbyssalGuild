@@ -1048,6 +1048,8 @@ func _sync_source_info() -> void:
 		"ready": modal = {"header": "Start of Day %d" % (session.day+1), "body": "Everything is ready.", "action": "Start Day"}
 		"game_over": modal = {"header": "Game Over", "body": "You have no people left.", "action": "Return to Title"}
 	info_requests.submit("day_cycle", 2, modal)
+	var action_extent: Vector2 = preload("res://scripts/ui/source_info_action_layout.gd").resolve(catalog.data, str(info_requests.current().get("action", "")))
+	card_hover.configure_source_action_height(action_extent.y if action_extent.y > 0.0 else -1.0)
 	card_hover.set_descriptor(info_requests.current())
 	notice.visible = market_panel.visible
 	var action: String = str(info_requests.current().get("action", ""))
@@ -1056,6 +1058,9 @@ func _sync_source_info() -> void:
 	info_action.add_theme_font_size_override("font_size", 30)
 	info_action.position = card_hover.position + Vector2(20, card_hover.size.y-40)
 	info_action.size = Vector2(card_hover.size.x-40, 40)
+	if action_extent.y > 0.0:
+		info_action.position = card_hover.bottom_anchor - Vector2(0, action_extent.y)
+		info_action.size = action_extent
 
 func _record_card_pointer(screen: Vector2) -> void:
 	if not screen.is_finite(): return

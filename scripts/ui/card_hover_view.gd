@@ -6,6 +6,12 @@ var body: RichTextLabel
 var descriptor: Dictionary = {}
 var font_scale: float = 1.0
 var bottom_anchor := Vector2.ZERO
+var source_action_height: float = -1.0
+
+func configure_source_action_height(value: float) -> void:
+	if source_action_height == value: return
+	source_action_height = value
+	_layout_content()
 const PADDING = 20.0
 
 func _init() -> void:
@@ -77,7 +83,7 @@ func _layout_content() -> void:
 	var body_font := body.get_theme_font("normal_font")
 	var header_height: float = header_font.get_multiline_string_size(header.text, HORIZONTAL_ALIGNMENT_LEFT, width, 34).y if not header.text.is_empty() else 0.0
 	var body_height: float = body_font.get_multiline_string_size(body.text, HORIZONTAL_ALIGNMENT_LEFT, width, 30).y if not body.text.is_empty() else 0.0
-	var action_height: float = 40.0 if not str(descriptor.get("action", "")).is_empty() else 0.0
+	var action_height: float = (source_action_height if source_action_height >= 0.0 else 40.0) if not str(descriptor.get("action", "")).is_empty() else 0.0
 	var preferred := minf(header_height+body_height+PADDING*2+action_height, maxf(60, bottom_anchor.y-30))
 	if not is_equal_approx(size.y, preferred): size.y = preferred
 	position = bottom_anchor-Vector2(0, preferred)
