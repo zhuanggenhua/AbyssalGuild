@@ -33,7 +33,12 @@ static func execute(board, task:Dictionary, members:Array, step:float, serial:in
 	var duration:float=float(recipe.fields.get("craftingDuration",0))
 	if not is_finite(duration) or duration<=0:return false
 	var progressed:float=stack.progress+(step if not stack.paused and stack.progress<duration else 0.0)
-	if progressed<duration:return false
+	if progressed < duration:
+		# The original UpdateProgress occurs before the source completion check.
+		# This one-frame branch cannot dispatch recipe/quest/effect callbacks.
+		if progressed <= stack.progress or not _source_still_incomplete(stack.progress, step, duration): return false
+		stack.progress = progressed
+		return true
 	var output:String=session.catalog.ref_guid(recipe.fields.get("resultingCard",{}))
 	if session.catalog.get_definition(output).get("script_class") != "CardDefinition" or int(session.catalog.fields(output).get("category", -1)) != 4 or not session.collection.is_card_discovered(output): return false
 	if session._selecting_spawn or bool(session.catalog.fields(output).get("isAggressive", false)): return false
@@ -106,3 +111,12 @@ static func _plain_unattached(session,stack,fields:Dictionary,output:String)->bo
 		if type in [Quest.QuestType.HAVE,Quest.QuestType.FOOD,Quest.QuestType.COINS,Quest.QuestType.CAPACITY]:return false
 		if type in [Quest.QuestType.OBTAIN,Quest.QuestType.CRAFT] and session.catalog.ref_guid(quest.targetCard)==output:return false
 	return true
+
+## Unity task fields and Time.deltaTime are single precision. Do not grant a
+## timer-only update when source rounding would already take its completion path.
+static func _source_still_incomplete(progress: float, step: float, duration: float) -> bool:
+	var source: PackedFloat32Array = PackedFloat32Array([progress, step, duration])
+	if not is_finite(source[0]) or not is_finite(source[1]) or not is_finite(source[2]): return false
+	if source[0] >= source[2]: return false
+	var advanced: PackedFloat32Array = PackedFloat32Array([source[0] + source[1]])
+	return is_finite(advanced[0]) and advanced[0] < source[2]
