@@ -17,6 +17,7 @@ import run_imported_tests as runner
 
 MARKERS = {
     "test_source_departure_checkpoint_board": "Source departure checkpoint: 133 failures 0",
+    "test_source_craft_tail_permit": "Source craft tail permit: 202 checks",
     "test_source_cold_crafting_board": "Source cold crafting board: 142 checks, 0 failures; actual headless Continue",
     "test_private_alpha_cache": "Private alpha cache data-only bounds and rejection: PASS",
     "test_source_board_expansion": "Source board expansion: 97 checks, 0 failures",

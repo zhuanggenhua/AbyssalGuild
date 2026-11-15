@@ -124,6 +124,7 @@ var pending_quit: String = ""
 var quit_dispatched: bool = false
 var friendly_choice: CheckBox
 var session = Session.new()
+var _tail_receipt: Dictionary = {}
 var camera: Camera3D
 var source_light: DirectionalLight3D
 var panning: bool = false
@@ -735,6 +736,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	slots.configure(session.campaign, slot_root)
 	session.campaign.before_travel = _departure_checkpoint
 	session.travel_request = _request_travel
+	session.travel_tail_request = _complete_travel_tail
 	session.combat.start_overlap_selector = _combat_start_overlaps
 	session.combat.resize_overlap_selector = _combat_resize_overlaps
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
@@ -2768,9 +2770,19 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		if session.stacks.has(stack_id): session.stacks[stack_id].cancel_craft()
 		_on_session_event("travel_failed", result)
 		return false
-	return _request_scene_change(_commit_travel.bind(session, candidate, provenance))
+	var accepted: bool = _request_scene_change(_commit_travel.bind(session, candidate, provenance))
+	if accepted:
+		_tail_receipt = {"owner":session.get_instance_id(),"generation":scene_transition.generation,"serial":session.crafting._active_serial}
+	return accepted
+
+func _complete_travel_tail(task: Dictionary, members: Array, step: float, serial: int) -> void:
+	var receipt: Dictionary = _tail_receipt
+	_tail_receipt = {} # One attempt only, including a rejected attempt.
+	if task.is_empty(): return
+	preload("res://scripts/ui/source_craft_tail_permit.gd").execute(self,task,members,step,serial,receipt)
 
 func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
+	_tail_receipt = {}
 	owner.travel_pending = false
 	if owner != session or not running: return
 	# Atomic validated candidate swap; real-time old-scene activity after the
@@ -2780,6 +2792,7 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 	_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	_tail_receipt = {}
 	quest_journal.clear()
 	world_post_process.cancel()
 	scene_transition.cancel()

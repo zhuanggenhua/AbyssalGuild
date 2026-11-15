@@ -32,6 +32,7 @@ var drag = HeldStack.new()
 var crafting = CraftingOrder.new()
 var travel_request: Callable = Callable()
 var travel_pending: bool = false
+var travel_tail_request: Callable = Callable()
 var scene_name: String = "Main"
 var friendly_mode: bool = false
 var board_bounds: Variant = null

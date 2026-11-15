@@ -4,6 +4,8 @@ extends RefCounted
 ## (including a replacement on the same stack) starts advancing next frame.
 var _session: WeakRef
 var _tasks: Array = []
+var _frame_serial: int = 0
+var _active_serial: int = 0
 
 func configure(session) -> void:
 	_session = weakref(session)
@@ -35,8 +37,13 @@ func _prune() -> void:
 func advance(step: float) -> bool:
 	var session = _session.get_ref()
 	if session.get("travel_pending") == true: return true
+	_frame_serial += 1
+	_active_serial = _frame_serial
 	var scene: String = session.scene_name
 	var frame: Array = _live_tasks()
+	var original_members: Array = []
+	if frame.size() == 2 and session.catalog.get_definition(frame[1].recipe).get("script_class") == "TravelRecipe":
+		original_members = frame[0].stack.card_ids.duplicate()
 	for index in range(frame.size() - 1, -1, -1):
 		var task: Dictionary = frame[index]
 		if not _current(task):
@@ -49,9 +56,21 @@ func advance(step: float) -> bool:
 			stack.progress += step
 		if stack.progress >= duration:
 			session._complete_recipe(stack)
-			if session.get("travel_pending") == true or session.scene_name != scene:
+			var pending: bool = session.get("travel_pending") == true
+			if pending or session.scene_name != scene:
+				# Only a successful Board async request may issue a one-frame permit.
+				# Never revisit appended/replacement tasks or leak into paused frames.
+				if pending and session.scene_name == scene:
+					var tail_request = session.get("travel_tail_request")
+					if tail_request is Callable and tail_request.is_valid():
+						if frame.size() == 2 and index == 1 and not original_members.is_empty():
+							tail_request.call(frame[0], original_members, step, _active_serial)
+						else:
+							tail_request.call({}, [], step, _active_serial)
+				_active_serial = 0
 				return true
 	_prune()
+	_active_serial = 0
 	return false
 
 func save_state() -> Dictionary:
