@@ -198,3 +198,27 @@ func reflow_saved_footer(controls: Array) -> Dictionary:
 			controls[index].get_parent().size = result.rectangles[index].size
 	result.measurement_provenance = "native_font_measurement_not_verified_TMP_preferred_width"
 	return result
+
+# Only Title navigation controls with the original TextButton and callback graph
+# may accept the three pointer buttons. No confirm, quit or archive transactions.
+func admit_navigation_pointer(data: Dictionary, role: String, button: Button) -> bool:
+	if role not in ["new", "load", "options", "cancel", "saves_close"]: return false
+	var valid := false
+	if role == "options":
+		valid = preload("res://scripts/ui/source_title_options_contract.gd").admits(data)
+	else:
+		valid = preload("res://scripts/ui/source_title_overlay_contract.gd").admits(data, "preferences" if role in ["new", "cancel"] else "saves")
+	if not valid or not source_backed: return false
+	var id := layout.resolve(PATHS[role])
+	if not nodes.has(id) or button.get_parent() != nodes[id]: return false
+	var expected: String = {"new":"2057193291", "load":"2053956281", "options":"1573722792", "cancel":"964648665", "saves_close":"1958241573"}[role]
+	for scene in data.get("scenes", []):
+		if scene.get("name", "") != "Title": continue
+		for doc in scene.get("documents", []):
+			if str(doc.get("file_id", "")) != expected or doc.get("script_class", "") != "TextButton": continue
+			var fields: Dictionary = doc.get("fields", {})
+			if fields.get("m_Enabled", 0) != 1 or fields.get("m_Script", {}).get("guid", "") != "ef98d84a856977b44bbf49a1bab2060a": return false
+			if fields.get("m_GameObject", {}) != layout.records[id].rect.get("m_GameObject", {}): return false
+			button.button_mask = MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
+			return true
+	return false

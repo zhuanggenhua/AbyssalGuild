@@ -10,6 +10,9 @@ func cancel(east=false,pressed=true,echo=false):
   var e=InputEventJoypadButton.new();e.button_index=JOY_BUTTON_B;e.pressed=pressed;return e
  var e=InputEventKey.new();e.keycode=KEY_ESCAPE;e.pressed=pressed;e.echo=echo;return e
 func admitted(b):return b._source_title_overlay_cancel() if b.has_method("_source_title_overlay_cancel") else false
+func click_at(index:int, down:bool, position:Vector2):
+ var motion=InputEventMouseMotion.new();motion.position=position;motion.global_position=position;root.push_input(motion,true)
+ var event=InputEventMouseButton.new();event.button_index=index;event.pressed=down;event.position=position;event.global_position=position;root.push_input(event,true)
 func _init():call_deferred("run")
 func run():
  root.gui_embed_subwindows=true
@@ -18,6 +21,52 @@ func run():
  b.options_apply_adapter=func(_plan):return {"ok":true,"capabilities":{},"warnings":[]}
  root.add_child(b);await process_frame;b.set_process(false)
  var sourced=b.source_title!=null
+ for role in ["new","load","options","cancel","saves_close"]:
+  var controls={"new":b.title_new_button,"load":b.title_load_button,"options":b.title_options_button,"cancel":b.title_cancel_button,"saves_close":b.title_back_button}
+  check(controls[role].button_mask==(7 if sourced else MOUSE_BUTTON_MASK_LEFT),role+" pointer admission is source only")
+ for button in [b.title_quit_button,b.title_confirm_button,b.archive_all_button,b.continue_button]:
+  check(button.button_mask==MOUSE_BUTTON_MASK_LEFT,"transaction scope unchanged")
+ if sourced:
+  for role in ["new","load"]:
+   var opener=b.title_new_button if role=="new" else b.title_load_button
+   var close=b.title_cancel_button if role=="new" else b.title_back_button
+   var overlay=b.title_preferences if role=="new" else b.title_saves
+   for index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_RIGHT,MOUSE_BUTTON_MIDDLE]:
+    var pos=opener.get_global_rect().get_center()
+    click_at(index,true,pos);check(not overlay.visible,role+" no opening on press")
+    click_at(index,false,pos);await process_frame
+    check(overlay.visible,role+" opens on matching release")
+    pos=close.get_global_rect().get_center()
+    click_at(index,true,pos);check(overlay.visible,role+" no close on press")
+    click_at(index,false,pos);await process_frame
+    check(not overlay.visible and not b.running and b.active_slot==0,role+" safe close on release")
+  for index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_RIGHT,MOUSE_BUTTON_MIDDLE]:
+   var pos=b.title_options_button.get_global_rect().get_center()
+   click_at(index,true,pos);check(not b.options_panel.visible,"options no opening on press")
+   click_at(index,false,pos);await process_frame
+   check(b.options_panel.visible,"options opens on release")
+   b.options_panel.request_close();await process_frame
+  var release_pos=b.title_new_button.get_global_rect().get_center()
+  click_at(MOUSE_BUTTON_RIGHT,true,release_pos);click_at(MOUSE_BUTTON_RIGHT,false,Vector2(-100,-100));await process_frame
+  check(not b.title_preferences.visible,"release outside cannot open title overlay")
+  b.archive_dialog.popup_centered();await process_frame
+  click_at(MOUSE_BUTTON_RIGHT,true,release_pos);click_at(MOUSE_BUTTON_RIGHT,false,release_pos);await process_frame
+  check(not b.title_preferences.visible,"modal continues to own pointer input")
+  b.archive_dialog.hide();await process_frame
+  var original=b.catalog.data
+  var bad=original.duplicate(true);bad.provenance.source_commit="wrong"
+  var mask=b.title_new_button.button_mask;b.title_new_button.button_mask=MOUSE_BUTTON_MASK_LEFT
+  check(not b.source_title.admit_navigation_pointer(bad,"new",b.title_new_button),"wrong source rejected")
+  check(b.title_new_button.button_mask==MOUSE_BUTTON_MASK_LEFT,"rejection does not widen input")
+  bad=original.duplicate(true)
+  for scene in bad.scenes:
+   if scene.name=="Title":
+    for doc in scene.documents:
+     if str(doc.file_id)=="2057193291":doc.fields.m_Enabled=0
+  check(not b.source_title.admit_navigation_pointer(bad,"new",b.title_new_button),"disabled TextButton rejected")
+  b.title_new_button.button_mask=mask
+  check(not b.source_title.admit_navigation_pointer(original,"quit",b.title_quit_button),"quit cannot be admitted")
+  check(not b.source_title.admit_navigation_pointer(original,"new",b.title_load_button),"wrong mounted node rejected")
  for dest in ["preferences","saves"]:
   var opener=b.title_new_button if dest=="preferences" else b.title_load_button
   var close=b.title_cancel_button if dest=="preferences" else b.title_back_button

@@ -586,7 +586,8 @@ func _configure_source_title() -> void:
 	var old_panel := title_panel
 	var native_saves := title_saves
 	for pair in [["new", title_new_button], ["load", title_load_button], ["options", title_options_button], ["quit", title_quit_button], ["duration_label", duration_label], ["duration", duration], ["friendly", friendly_choice], ["confirm", title_confirm_button], ["cancel", title_cancel_button], ["saves_close", title_back_button], ["saves_clear", archive_all_button]]:
-		candidate.mount(pair[0], pair[1])
+		if candidate.mount(pair[0], pair[1]) and pair[0] in ["new", "load", "options", "cancel", "saves_close"]:
+			candidate.admit_navigation_pointer(catalog.data, pair[0], pair[1])
 	var source_controls: Dictionary = candidate.bind_source_controls(catalog.data)
 	if not source_controls.get("duration", {}).is_empty():
 		duration_adapter = preload("res://scripts/ui/source_slider_adapter.gd").new()

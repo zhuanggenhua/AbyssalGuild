@@ -28,3 +28,20 @@ Confirm protection, visibility revocation, replacement and true unsupported
 fallback. Existing title navigation tests retain exact-one-slot creation, load,
 explicit failure/confirmation and archive handling. No Unity runtime, framebuffer
 or overall migration parity is claimed.
+
+## Explicit pointer buttons
+
+Locked TitleScreen.Start wires New Game, Load Game and Game Options to their
+panel Open callbacks. GameplayPrefsUI.Start wires Cancel to Close and
+SavedGamesUI.Start wires Close to Close. Their enabled source TextButton
+components use the same unfiltered OnPointerClick as the graphics controls;
+they do not restrict PointerEventData.button to left.
+
+The Title adapter admits left/right/middle only for these five mounted roles,
+after verifying the locked source graph, exact component ID and script GUID,
+enabled state, owner GameObject and mounted node. Confirm, Quit, archive,
+recovery, native fallback and shared feedback defaults remain primary-only.
+The Options panel's own Close is not widened by this change. Sequential release,
+not press, executes the existing guarded callbacks and sound. Tests include
+outside cancellation and modal ownership; simultaneous-button ownership and
+physical-device/Unity-side event timing are not established by these tests.
