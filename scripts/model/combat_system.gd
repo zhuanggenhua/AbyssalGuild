@@ -14,6 +14,8 @@ var _next_id: int = 1
 # Scene adapters own exact geometry; selectors must not mutate combat membership.
 var start_overlap_selector: Callable = Callable()
 var resize_overlap_selector: Callable = Callable()
+# Standalone entrance observation only; merges and restored tasks never sample.
+var start_center_sampler: Callable = Callable()
 var _selecting_geometry: bool = false
 
 func configure(session, equipment_system) -> void:
@@ -100,16 +102,25 @@ func start_combat(attackers: Array, defenders: Array, player_is_attacker: bool =
 			return -1
 		if not selected.ids.is_empty():
 			return merge_combats(selected.ids, attackers, defenders)
-	return _create_combat(attackers, defenders, player_is_attacker)
+	var center: Variant = null
+	if start_center_sampler.is_valid():
+		_selecting_geometry = true
+		center = start_center_sampler.call(attackers.duplicate(), defenders.duplicate())
+		_selecting_geometry = false
+		if not _valid_new_sides(attackers, defenders, player_is_attacker): return -1
+	return _create_combat(attackers, defenders, player_is_attacker, center)
 
 ## Internal creation never invokes overlap selectors: source merge does not
 ## recursively merge again, and pre-start merging must not draw progress twice.
-func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool) -> int:
+func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool, initial_center: Variant = null) -> int:
 	var session = _session.get_ref()
 	var positions: Dictionary = session.capture_card_targets(attackers + defenders)
 	var task_id: int = _next_id
 	_next_id += 1
 	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}, "combatants": []}
+	# Ephemeral receipt is excluded by save_state and consumed by the Board.
+	if initial_center is Vector2 and initial_center.is_finite():
+		tasks[task_id]["initial_center"] = initial_center
 	for id in attackers + defenders:
 		_enter(task_id, id, positions.get(id))
 	session.event_occurred.emit("combat_started", {"combat_id": task_id})

@@ -78,13 +78,14 @@ static func imported_config(data: Dictionary, scene_name: String) -> Dictionary:
 
 ## Unit records: {id:int, position:Vector2, size:Vector2, faction:int}.
 ## Attackers remain the negative row even when they are mobs.
-static func initialize(attackers: Array, defenders: Array, config: Dictionary, board: Rect2, top_margin: float) -> Dictionary:
+static func initialize(attackers: Array, defenders: Array, config: Dictionary, board: Rect2, top_margin: float, initial_center: Variant = null) -> Dictionary:
 	if attackers.is_empty() or defenders.is_empty() or not config.get("ok", false):
 		return {}
 	var center := Vector2.ZERO
 	for unit in attackers + defenders:
 		center += unit.position
 	center /= attackers.size() + defenders.size()
+	if initial_center is Vector2 and initial_center.is_finite(): center = initial_center
 	var size := required_size(attackers.size(), defenders.size(), attackers[0].size)
 	center = Board.clamp_rect(center, size * config.scale, board, top_margin)
 	var state := {"center": center, "cell": attackers[0].size + MARGIN, "config": config.duplicate(true)}

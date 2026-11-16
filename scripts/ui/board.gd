@@ -779,6 +779,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	session.travel_request = _request_travel
 	session.travel_tail_request = _complete_travel_tail
 	session.combat.start_overlap_selector = _combat_start_overlaps
+	session.combat.start_center_sampler = _combat_start_center
 	session.combat.resize_overlap_selector = _combat_resize_overlaps
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
 	combat_rectangles.clear()
@@ -2327,8 +2328,9 @@ func _sync_combat_layouts() -> void:
 		var defenders: Array = _fighter_records(task.defenders)
 		var previous: Dictionary = task.get("layout", {})
 		if not previous.is_empty(): previous["config"] = config
-		var state: Dictionary = CombatLayout.initialize(attackers, defenders, config, session.board_bounds, session.board_top_margin) if previous.is_empty() else CombatLayout.update_layout(previous, attackers, defenders)
+		var state: Dictionary = CombatLayout.initialize(attackers, defenders, config, session.board_bounds, session.board_top_margin, task.get("initial_center")) if previous.is_empty() else CombatLayout.update_layout(previous, attackers, defenders)
 		if state.is_empty(): continue
+		task.erase("initial_center") # Never overwrite an existing/saved layout center.
 		task["layout"] = state
 		combat_layouts[id] = state
 		for card_id in state.positions: session.cards[card_id].position = state.positions[card_id]
@@ -2452,6 +2454,18 @@ func _departure_checkpoint(checkpoint_campaign = null) -> Dictionary:
 	var result: Dictionary = _checkpoint("Travel departure")
 	_first_departure_save_owner = null
 	return result
+
+# CombatRect.Initialize averages live transforms before EnterCombat. Admit only
+# complete ordinary grounded observations, never a mixed live/target center.
+func _combat_start_center(attackers: Array, defenders: Array) -> Variant:
+	var ids: Array = attackers + defenders
+	if attackers.is_empty() or defenders.is_empty(): return null
+	var center := Vector2.ZERO
+	for id in ids:
+		var pose: Variant = _sample_ai_actor_pose(id)
+		if not pose is Vector3 or not pose.is_finite() or pose.y != 0.0: return null
+		center += Vector2(pose.x, pose.z)
+	return center / ids.size()
 
 func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 	_sync_combat_layouts()

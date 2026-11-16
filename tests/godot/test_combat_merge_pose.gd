@@ -26,5 +26,10 @@ func _init() -> void:
 	check(Geometry.current_ground_records(raw,Callable()) == raw,"absent observer retains model fallback")
 	var far := Geometry.current_ground_records(live,func(_id):return Vector3(40,0,40))
 	check(Geometry.before_start([far[0]],[far[1]],active).is_empty(),"live far excludes stale-near merge")
+	var seeded := Layout.initialize([raw[0]],[raw[1]],cfg,Rect2(-100,-100,200,200),0,Vector2(3,4))
+	check(seeded.center == Vector2(3,4),"finite standalone live center overrides target average")
+	check(Layout.update_layout(seeded,[raw[0]],[raw[1]]).center == seeded.center,"layout update retains receipt-derived center")
+	for invalid in [null,Vector3.ZERO,Vector2(NAN,0)]:
+		check(Layout.initialize([raw[0]],[raw[1]],cfg,Rect2(-100,-100,200,200),0,invalid).center == Vector2(20,20),"unsupported receipt retains target fallback")
 	print("Combat merge pose: %d/%d passed" % [checks-failures,checks])
 	quit(1 if failures else 0)

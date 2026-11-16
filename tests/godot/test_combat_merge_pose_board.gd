@@ -1,6 +1,7 @@
 extends SceneTree
 const Board = preload("res://scripts/ui/board.gd")
 const Geometry = preload("res://scripts/model/combat_merge_geometry.gd")
+const Layout = preload("res://scripts/model/combat_layout.gd")
 const AudioDrain = preload("res://tests/godot/source_test_audio_drain.gd")
 var checks := 0
 var failures := 0
@@ -28,10 +29,39 @@ func run() -> void:
 			mob = entry.guid; break
 	var p0: int = s.spawn_card(player,Vector2.ZERO,-1,{"refuse_attach":true})
 	var m0: int = s.spawn_card(mob,Vector2.ZERO,-1,{"refuse_attach":true})
+	board._refresh()
+	board.views[p0].global_position = Vector3(2,0.06,0)
+	board.views[m0].global_position = Vector3(4,0.06,0)
+	check(board._combat_start_center([p0],[m0]) == Vector2(3,0),"complete native live average differs from queued origin")
+	board.views[m0].global_position.y = 0.2
+	check(board._combat_start_center([p0],[m0]) == null,"one unsupported pose rejects whole entrance receipt")
+	board.views[m0].global_position.y = 0.06
+	var entrance_target: Vector2 = s.card_target_position(p0)
+	var entrance_rng: int = s.rng.state
+	var entrance_calls := [0]
+	s.combat.start_center_sampler = func(a,b):
+		entrance_calls[0] += 1
+		check(s.combat.membership.is_empty() and s.rng.state == entrance_rng,"center sampled before entry and RNG draws")
+		check(s.card_target_position(p0) == entrance_target,"sampling precedes model target changes")
+		return board._combat_start_center(a,b)
 	var initial: int = s.combat.start_combat([p0],[m0])
+	check(entrance_calls[0] == 1,"standalone samples once")
+	s.combat.start_center_sampler = board._combat_start_center
 	board._refresh()
 	check(initial >= 0 and board.combat_layouts.has(initial),"existing real combat layout")
 	var center: Vector2 = board.combat_layouts[initial].center
+	var cfg: Dictionary = Layout.imported_config(board.catalog.data,s.scene_name)
+	var expected: Dictionary = Layout.initialize(board._fighter_records([p0]),board._fighter_records([m0]),cfg,s.board_bounds,s.board_top_margin,Vector2(3,0))
+	check(center == expected.center,"native rectangle uses source live average then imported board clamp")
+	check(not s.combat.tasks[initial].has("initial_center"),"receipt consumed after initial layout")
+	check(not s.combat.save_state().tasks[0].has("initial_center"),"ephemeral receipt absent from saves")
+	board.views[p0].global_position.x += 10
+	board._sync_combat_layouts()
+	check(board.combat_layouts[initial].center == center,"later live view changes cannot recenter existing rectangle")
+	# A saved/restored layout is authoritative even if a stale receipt is present.
+	s.combat.tasks[initial]["initial_center"] = Vector2(99,99)
+	board._sync_combat_layouts()
+	check(board.combat_layouts[initial].center == center and not s.combat.tasks[initial].has("initial_center"),"existing saved-layout path ignores and consumes stale receipt")
 	var far := center + Vector2(12,0)
 	var p1: int = s.spawn_card(player,far,-1,{"refuse_attach":true})
 	var m1: int = s.spawn_card(mob,far,-1,{"refuse_attach":true})
@@ -56,7 +86,10 @@ func run() -> void:
 	for id in [p1,m1]:
 		board._set_board_card_position(id,far)
 		board.views[id].global_position = Vector3(center.x,0.06,-center.y)
+	var merged_calls := [0]
+	s.combat.start_center_sampler = func(_a,_b): merged_calls[0] += 1; return Vector2(88,88)
 	var merged: int = s.combat.start_combat([p1],[m1])
+	check(merged_calls[0] == 0 and not s.combat.tasks[merged].has("initial_center"),"merge creation does not reuse standalone center observer")
 	check(merged >= 0 and merged != initial and not s.combat.tasks.has(initial),"real start merges old task selected from live observations")
 	check(s.combat.tasks.size() == 1 and s.combat.tasks[merged].attackers.size() == 2
 		and s.combat.tasks[merged].defenders.size() == 2,"all imported fighters belong to single merged combat")
