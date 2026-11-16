@@ -1,7 +1,12 @@
 extends RefCounted
-## Read-only model adapter. All motion is reconstructed from execution snapshots.
+## Read-only model adapter. Melee follows execution; captured projectiles outlive canceled tasks.
 const SourceTween = preload("res://scripts/ui/source_tween.gd")
 var projectiles: Dictionary = {}
+# 原 CombatProjectile.Fire 是独立 WorldCanvas 子节点，合并只停止攻击协程。
+# 只为有实际捕获端点的飞行保留独立时钟；旧存档仍沿用其显式恢复路径。
+var projectile_flights: Dictionary = {}
+var retired_projectiles: Dictionary = {}
+var _next_detached_projectile: int = -1
 var visual_assets
 var scene_name: String = "Main"
 var hurts: Dictionary = {}
@@ -41,6 +46,18 @@ func capture(task_id: int, execution: Dictionary, pose_sampler: Callable, home_s
 	var record := {"actor":actor, "phase":phase, "combat_type":int(execution.combat_type), "start":start, "finish":finish, "duration":duration}
 	motions[task_id] = record.duplicate(true)
 	motions[task_id]["age"] = 0.0
+	if phase == "travel" and int(execution.combat_type) in [2,3] and duration > 0:
+		# 同任务再次发射仍是新的源实例；把旧 flight 移到私有负号 key。
+		if projectile_flights.has(task_id):
+			var detached: int = _next_detached_projectile
+			_next_detached_projectile -= 1
+			projectile_flights[detached] = projectile_flights[task_id]
+			if projectiles.has(task_id):
+				projectiles[detached] = projectiles[task_id]
+				projectiles.erase(task_id)
+		retired_projectiles.erase(task_id)
+		projectile_flights[task_id] = record.duplicate(true)
+		projectile_flights[task_id]["age"] = 0.0
 	return record
 
 func sample_actor(id: int) -> Variant:
@@ -67,6 +84,8 @@ func hit(id: int, descriptor: Dictionary) -> void:
 func advance(real_delta: float) -> void:
 	if not is_finite(real_delta) or real_delta < 0: return
 	shake_age += real_delta
+	for flight in projectile_flights.values():
+		flight.age = minf(float(flight.duration), float(flight.age) + real_delta)
 	for record in motions.values(): record.age = minf(record.duration, float(record.get("age",0)) + real_delta)
 	for id in hurts:
 		hurts[id].age += real_delta
@@ -80,6 +99,24 @@ func camera_offset() -> Vector2:
 
 func sync(tasks: Dictionary, views: Dictionary, durations: Dictionary, parent: Node3D) -> void:
 	var live: Dictionary = {}
+	# 恢复中的有效 travel 可以重建一次独立飞行，不能靠失效任务伪造新飞行。
+	for id in tasks:
+		var task: Dictionary = tasks[id]
+		var execution: Dictionary = task.get("execution",{})
+		var recorded: Dictionary = task.get("visual_motion",{})
+		if not projectile_flights.has(id) and not retired_projectiles.has(id) and not recorded.is_empty() and recorded.phase == "travel" and int(recorded.combat_type) in [2,3] and execution.get("phase","") == "travel":
+			projectile_flights[id] = recorded.duplicate(true)
+			projectile_flights[id]["age"] = clampf(float(recorded.duration)-float(execution.remaining),0,float(recorded.duration))
+	for id in retired_projectiles.keys():
+		if not tasks.has(id): retired_projectiles.erase(id)
+	# 完成 flight 在清理帧精确落到旧终点，然后释放；不产生任何 model callback。
+	for id in projectile_flights.keys():
+		var flight: Dictionary = projectile_flights[id]
+		if float(flight.age) >= float(flight.duration):
+			if projectiles.has(id) and is_instance_valid(projectiles[id]):
+				projectiles[id].global_position = flight.finish
+			projectile_flights.erase(id)
+			if tasks.has(id): retired_projectiles[id] = true
 	for id in motions.keys():
 		if not tasks.has(id) or tasks[id].get("execution", {}).get("phase", "") not in ["travel", "return"]: motions.erase(id)
 	for id in tasks:
@@ -91,34 +128,19 @@ func sync(tasks: Dictionary, views: Dictionary, durations: Dictionary, parent: N
 		if pose.is_empty() and not tasks[id].has("visual_motion") and not motions.has(id):
 			pose = execution_pose(execution, actor.position, float(durations.get(int(execution.combat_type), 0.3)))
 		if pose.has("actor"): actor.global_position = pose.actor
-		if pose.has("projectile"):
+		if pose.has("projectile") and not tasks[id].has("visual_motion") and not motions.has(id):
+			# 无捕获几何的旧存档兼容路径仍由其 phase 控制。
+			_draw_projectile(id,int(execution.combat_type),pose,parent)
 			live[id] = true
-			if not projectiles.has(id):
-				var node: Node3D
-				if visual_assets != null and visual_assets.has_method("create_projectile"):
-					node = visual_assets.create_projectile(int(execution.combat_type), scene_name)
-				if node == null:
-					node = MeshInstance3D.new()
-					var mesh := SphereMesh.new()
-					mesh.radius = 0.06
-					mesh.height = 0.12
-					(node as MeshInstance3D).mesh = mesh
-					var material := StandardMaterial3D.new()
-					material.albedo_color = Color(0.4,0.65,1) if int(execution.combat_type) == 3 else Color(1,0.8,0.3)
-					material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-					(node as MeshInstance3D).material_override = material
-				parent.add_child(node)
-				projectiles[id] = node
-			projectiles[id].global_position = pose.projectile
-			# Sprite source is XY-facing; reflect flight direction into the Godot board.
-			if projectiles[id] is Sprite3D:
-				var direction: Vector3 = pose.direction
-				direction.y = 0
-				if direction.length_squared() > 0.000001:
-					projectiles[id].basis = Basis.looking_at(direction.normalized(), Vector3.UP) * Basis(Vector3.RIGHT, -PI / 2.0)
+	for id in projectile_flights:
+		var flight: Dictionary = projectile_flights[id]
+		var pose := {"projectile":flight.start.lerp(flight.finish,float(flight.age)/float(flight.duration)),
+			"direction":flight.finish-flight.start}
+		_draw_projectile(id,int(flight.combat_type),pose,parent)
+		live[id] = true
 	for id in projectiles.keys():
 		if not live.has(id):
-			projectiles[id].queue_free()
+			if is_instance_valid(projectiles[id]): projectiles[id].queue_free()
 			projectiles.erase(id)
 	for id in hurts.keys():
 		if not views.has(id):
@@ -148,6 +170,31 @@ func sync(tasks: Dictionary, views: Dictionary, durations: Dictionary, parent: N
 		affected[id] = view
 		if age >= 0.3: hurts.erase(id)
 
+func _draw_projectile(id: int, combat_type: int, pose: Dictionary, parent: Node3D) -> void:
+	if not projectiles.has(id):
+		var node: Node3D
+		if visual_assets != null and visual_assets.has_method("create_projectile"):
+			node = visual_assets.create_projectile(combat_type, scene_name)
+		if node == null:
+			node = MeshInstance3D.new()
+			var mesh := SphereMesh.new()
+			mesh.radius = 0.06
+			mesh.height = 0.12
+			(node as MeshInstance3D).mesh = mesh
+			var material := StandardMaterial3D.new()
+			material.albedo_color = Color(0.4,0.65,1) if combat_type == 3 else Color(1,0.8,0.3)
+			material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			(node as MeshInstance3D).material_override = material
+		parent.add_child(node)
+		projectiles[id] = node
+	projectiles[id].global_position = pose.projectile
+	# Sprite source is XY-facing; reflect flight direction into the Godot board.
+	if projectiles[id] is Sprite3D:
+		var direction: Vector3 = pose.direction
+		direction.y = 0
+		if direction.length_squared() > 0.000001:
+			projectiles[id].basis = Basis.looking_at(direction.normalized(), Vector3.UP) * Basis(Vector3.RIGHT, -PI / 2.0)
+
 static func _read_flash(view: Node3D) -> float:
 	for property in view.get_property_list():
 		if property.name == "hurt_flash": return float(view.get("hurt_flash"))
@@ -161,6 +208,9 @@ func reset() -> void:
 			view.rotation = Vector3.ZERO
 			if view.has_method("set_hurt_flash"): view.set_hurt_flash(0)
 	projectiles.clear()
+	projectile_flights.clear()
+	retired_projectiles.clear()
+	_next_detached_projectile = -1
 	motions.clear()
 	affected.clear()
 	hurts.clear()

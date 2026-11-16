@@ -36,6 +36,7 @@ func tied_actor(s, ids: Array) -> int:
 	return int(task.execution.actor)
 func _init() -> void:
 	_test_constructor()
+	_test_join_visibility()
 	var s = fresh()
 	var ids := fixture(s)
 	var task: Dictionary = s.combat.tasks[ids[3]]
@@ -157,3 +158,38 @@ func _test_constructor() -> void:
 	var snapshot: Dictionary = Codec.capture(s)
 	var restored = fresh(s.catalog)
 	check(Codec.restore(restored, snapshot).ok and Codec.capture(restored) == snapshot, "restore preserves progress and RNG without constructor draws")
+
+func _test_join_visibility() -> void:
+	var s = fresh()
+	var p: int = s.spawn_card("p")
+	var m: int = s.spawn_card("m")
+	var p1: int = s.spawn_card("p")
+	var m1: int = s.spawn_card("m")
+	var p2: int = s.spawn_card("p")
+	var id: int = s.combat.start_combat([m], [p], false)
+	var task: Dictionary = s.combat.tasks[id]
+	var expected := RandomNumberGenerator.new()
+	expected.state = s.rng.state
+	var entries: Array = []
+	var recruits: Array = [p1,m1,p2]
+	var prior_progress: Dictionary = task.progress.duplicate()
+	var observer := func(kind: String, payload: Dictionary):
+		if kind != "combat_entered": return
+		var incoming: int = int(payload.card_id)
+		entries.append(incoming)
+		check(task.combatants == [m,p] + recruits.slice(0,entries.size()), "both source lists admit current recruit at entry, not any later recruit")
+		check(incoming in task.defenders if incoming in [p1,p2] else incoming in task.attackers, "side list precedes entry including reversed player orientation")
+		check(s.combat.membership.get(incoming,-1) == id and s.cards[incoming].stack_id == -1, "entry observes ordinary source membership/detach")
+		check(task.progress == prior_progress and not task.progress.has(incoming), "old and prior incoming progress exist; current recruit not randomized yet")
+		check(s.rng.randf() == expected.randf(),"callback RNG still precedes this recruit's progress draw")
+		prior_progress[incoming] = expected.randf_range(0.0,0.5)
+	var selected: Array = []
+	s.combat.resize_overlap_selector = func(task_id: int):
+		selected.append(task_id)
+		check(task.combatants == [m,p] + recruits and task.progress == prior_progress, "resize observes all valid recruits and their source-ordered draws")
+		return []
+	s.event_occurred.connect(observer)
+	check(s.combat.add_combatants(id,[p1,p1,-1,m1,m1,p2]), "all valid factions added; invalid and duplicate entries skipped")
+	s.event_occurred.disconnect(observer)
+	check(entries == recruits and selected == [id], "three ordered entry boundaries, then one resize")
+	check(s.rng.state == expected.state, "only one progress draw per admitted recruit")

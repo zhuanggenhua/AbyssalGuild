@@ -127,18 +127,15 @@ func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool
 	for id in tasks[task_id].combatants:
 		tasks[task_id].progress[id] = session.rng.randf_range(0.0, 0.5)
 	for id in attackers + defenders:
-		_enter(task_id, id, positions.get(id), false)
+		_enter(task_id, id, positions.get(id))
 	session.event_occurred.emit("combat_started", {"combat_id": task_id})
 	return task_id
 
-func _enter(task_id: int, card_id: int, position: Variant = null, initialize_join_progress: bool = true) -> void:
+func _enter(task_id: int, card_id: int, position: Variant = null) -> void:
 	var session = _session.get_ref()
 	Equipment.detach(session, card_id, position)
 	membership[card_id] = task_id
 	session.event_occurred.emit("combat_entered", {"combat_id":task_id,"card_id":card_id})
-	if initialize_join_progress:
-		tasks[task_id].combatants.append(card_id)
-		tasks[task_id].progress[card_id] = session.rng.randf_range(0.0, 0.5)
 
 func add_combatants(task_id: int, card_ids: Array) -> bool:
 	if _selecting_geometry or not tasks.has(task_id):
@@ -153,8 +150,12 @@ func add_combatants(task_id: int, card_ids: Array) -> bool:
 		if faction not in [1, 2] or int(session.catalog.fields(session.cards[id].definition_guid).get("category", 0)) not in [2, 9]:
 			continue
 		var side: String = "attackers" if ((faction == 1) == tasks[task_id].player_is_attacker) else "defenders"
+		# Unity joins both lists before EnterCombat, then draws progress only
+		# for this member after EnterCombat returns.
 		tasks[task_id][side].append(id)
+		tasks[task_id].combatants.append(id)
 		_enter(task_id, id, positions.get(id))
+		tasks[task_id].progress[id] = session.rng.randf_range(0.0, 0.5)
 		added = true
 	if added and resize_overlap_selector.is_valid():
 		_selecting_geometry = true
