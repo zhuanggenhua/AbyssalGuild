@@ -79,6 +79,8 @@ MARKERS = {
     "test_starter_framing": "Starter framing: 1/1 passed (synthetic, no private data or rendered acceptance)",
     "test_gui_layout": "GUI layout and title reset: 1 checks, 0 failures",
     "test_ai_actor_pose_board": "AI actor pose board: 1/1 passed",
+    "test_ai_detach_pose": "AI detach pose: 1/1 passed",
+    "test_ai_detach_pose_board": "AI detach pose Board: 1/1 passed",
     "test_ai_placement_board": "AI placement board: 1/1 passed",
     "test_crafting_order_board": "Crafting order board clock: 1/1 passed",
     "test_card_feedback_board": "Card feedback board checks: 1 passed / 1 total",

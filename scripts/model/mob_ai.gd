@@ -148,6 +148,12 @@ func _detach(card_id: int) -> void:
 		return
 	var was_crafting: bool = not stack.recipe_guid.is_empty()
 	var target: Vector2 = session.card_target_position(card_id)
+	# CardAI.DetachFromStack constructs from the unchanged current transform.
+	# Sample before removal changes model-derived pose indices. Only ground fits;
+	# elevated detachment retains the prior explicit fallback, not claimed parity.
+	var current: Vector3 = world.actor_pose(card_id)
+	if current.y == 0.0:
+		target = Vector2(current.x, current.z)
 	Equipment.detach(session, card_id, target)
 	Equipment.return_to_board(session, card_id)
 	# Source stops an existing task, otherwise checks newly exposed ingredients.

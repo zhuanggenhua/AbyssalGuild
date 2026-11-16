@@ -97,6 +97,8 @@ SUITES = (
     ("test_gui_layout", r"GUI layout and title reset: [1-9]\d* checks, 0 failures"),
     ("test_ui_smoke", r"UI checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_ai_actor_pose_board", r"AI actor pose board: [1-9]\d*/[1-9]\d* passed"),
+    ("test_ai_detach_pose", r"AI detach pose: [1-9]\d*/[1-9]\d* passed"),
+    ("test_ai_detach_pose_board", r"AI detach pose Board: [1-9]\d*/[1-9]\d* passed"),
     ("test_ai_placement_board", r"AI placement board: [1-9]\d*/[1-9]\d* passed"),
     ("test_crafting_order_board", r"Crafting order board clock: [1-9]\d*/[1-9]\d* passed"),
     ("test_card_feedback_board", r"Card feedback board checks: [1-9]\d* passed / [1-9]\d* total"),

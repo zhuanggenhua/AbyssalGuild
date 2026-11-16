@@ -47,7 +47,7 @@ Other cases deliberately control view poses; none is a Unity screenshot comparis
 The stack model still stores XZ targets: vertical target persistence/animation is
 not established by this change, including elevated approach. Combat region centers
 still use the existing settled layout adapter, not an independently sampled animated
-Rect transform. AI detach still uses its prior
+Rect transform. Elevated AI detach retains its prior
 settled-target adapter; passive patrol correctly remains based on stack target
 as in `MoveRandomly`. No raw original files/assets or screenshots are distributed.
 This is bounded decision and horizontal approach correction, not full AI or visual
@@ -66,3 +66,22 @@ Tests cover the due runtime adapter and default spawn, standalone world path,
 elevated/invalid fallback, no producer movement, and drag exclusion; actual imported
 Cow Board integration controls a stable-ground view with a different queued target.
 This does not establish elevated spawning, drag-height parity, or screenshot parity.
+
+## Ground detachment origin
+
+Pinned `CardAI.DetachFromStack` removes just the AI member and constructs its new
+`CardStack` at the current `transform.position` (lines 239–263), before patrol
+uses that new stack target. Native `_detach` now snapshots the established current
+pose before removing membership; source Y=0 uses current XZ. Nonzero/invalid or
+unsupported view poses retain the previous settled planar fallback. This is not
+elevated-detachment parity: source `CardStack` preserves the supplied Y while the
+native target still cannot. Singletons are untouched. Remaining-stack recipe
+rechecks, patrol rejection and production timing are unchanged.
+
+Private focused coverage checks pre-removal sampling, ground/elevated/invalid/
+missing cases, singleton exclusion and unchanged remaining target. Actual Board
+integration legally stacks two imported Cows, controls the first card's steady
+ground view, triggers its due AI tick and rejects patrol candidates. It proves
+that the detached target and every candidate use the live ground origin, with the
+remaining Cow retaining its old stack target. Neither controlled motion tests nor
+these assertions establish native Unity screenshot or whole-AI acceptance.
