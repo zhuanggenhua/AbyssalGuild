@@ -780,6 +780,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	session.travel_tail_request = _complete_travel_tail
 	session.combat.start_overlap_selector = _combat_start_overlaps
 	session.combat.start_center_sampler = _combat_start_center
+	session.combat.merge_center_sampler = _combat_merge_center
 	session.combat.resize_overlap_selector = _combat_resize_overlaps
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
 	combat_rectangles.clear()
@@ -2463,6 +2464,44 @@ func _combat_start_center(attackers: Array, defenders: Array) -> Variant:
 	var center := Vector2.ZERO
 	for id in ids:
 		var pose: Variant = _sample_ai_actor_pose(id)
+		if not pose is Vector3 or not pose.is_finite() or pose.y != 0.0: return null
+		center += Vector2(pose.x, pose.z)
+	return center / ids.size()
+
+# Called after CleanUpForMerge removed old tasks/membership, before replacement
+# entry/progress draws. A blocked old fighter is not an ordinary raised card.
+func _combat_merge_center(attackers: Array, defenders: Array, old_members: Dictionary) -> Variant:
+	if attackers.is_empty() or defenders.is_empty() or global_transform != Transform3D.IDENTITY: return null
+	var ids: Array = attackers + defenders
+	var center := Vector2.ZERO
+	for id in ids:
+		var pose: Variant
+		if int(session.cycle.presentation_state().get("card_id", -1)) == id: return null
+		if old_members.has(id):
+			if not old_members[id] or dragging == id or session.equipment.owners.has(id): return null
+			if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return null
+			var card = session.cards[id]
+			if views[id].get_meta("definition_guid", "") != card.definition_guid: return null
+			if card_motion.states.has(id):
+				var motion: Dictionary = card_motion.states[id]
+				if motion.get("mode", "") != "blocked" or motion.get("identity", "") != "%d:%s" % [card.get_instance_id(),card.definition_guid]: return null
+			var laid_out := false
+			for layout in combat_layouts.values():
+				if id in layout.attackers or id in layout.defenders:
+					laid_out = true
+					break
+			if not laid_out: return null
+			# Even a ground endpoint can still belong to an in-flight/pending tween.
+			if combat_presentation.sample_actor(id) != null: return null
+			# Source resize arranges instantly. Do not read a stale rendered pose
+			# before this Board has synchronized the updated model slot.
+			var slot: Vector2 = session.card_target_position(id)
+			if views[id].position != Vector3(slot.x, 0, -slot.y): return null
+			var point: Vector3 = views[id].global_position
+			if not point.is_finite() or point.y != 0.0: return null
+			pose = Vector3(point.x, 0, -point.z)
+		else:
+			pose = _sample_ai_actor_pose(id)
 		if not pose is Vector3 or not pose.is_finite() or pose.y != 0.0: return null
 		center += Vector2(pose.x, pose.z)
 	return center / ids.size()

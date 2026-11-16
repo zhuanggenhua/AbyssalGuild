@@ -14,8 +14,9 @@ var _next_id: int = 1
 # Scene adapters own exact geometry; selectors must not mutate combat membership.
 var start_overlap_selector: Callable = Callable()
 var resize_overlap_selector: Callable = Callable()
-# Standalone entrance observation only; merges and restored tasks never sample.
+# Standalone and merge observations are separate; restored tasks never sample.
 var start_center_sampler: Callable = Callable()
+var merge_center_sampler: Callable = Callable()
 var _selecting_geometry: bool = false
 
 func configure(session, equipment_system) -> void:
@@ -387,13 +388,23 @@ func merge_combats(task_ids: Array, initial_attackers: Array = [], initial_defen
 			mobs.append(id)
 	if players.is_empty() or mobs.is_empty():
 		return -1
+	var old_members: Dictionary = {}
 	for task_id in selected.ids:
-		for id in tasks[task_id].attackers + tasks[task_id].defenders:
+		var old_task: Dictionary = tasks[task_id]
+		for id in old_task.attackers + old_task.defenders:
+			# Preserve conservative admission before cleanup removes old task flags.
+			old_members[id] = membership.get(id, -1) == task_id and not dragged.has(id) and old_task.get("execution", {}).is_empty()
 			membership.erase(id)
 			dragged.erase(id)
 		# Do not _finish: source cleanup bypasses survivor stacks and end events.
 		tasks.erase(task_id)
-	return _create_combat(players, mobs, true)
+	var center: Variant = null
+	if merge_center_sampler.is_valid():
+		_selecting_geometry = true
+		center = merge_center_sampler.call(players.duplicate(), mobs.duplicate(), old_members.duplicate())
+		_selecting_geometry = false
+		if not _valid_new_sides(players, mobs, true): return -1
+	return _create_combat(players, mobs, true, center)
 
 func save_state() -> Dictionary:
 	var records: Array = []

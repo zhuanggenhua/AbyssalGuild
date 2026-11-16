@@ -83,16 +83,52 @@ func run() -> void:
 	for id in [p1,m1]: board.views[id].global_position.y = 0.2
 	check(board._sample_ai_actor_pose(p1) == null,"elevated/unproven view is not flattened")
 	check(board._combat_start_overlaps([p1],[m1]) == [initial],"unsupported vertical view explicitly falls back to settled preview")
+	# Prior deliberate stale old fighter is not an admitted settled observation.
+	check(board._combat_merge_center([p0,p1],[m0,m1],{p0:true,m0:true}) == null,"stale old pose after layout change rejects entire center")
+	board._refresh()
 	for id in [p1,m1]:
 		board._set_board_card_position(id,far)
 		board.views[id].global_position = Vector3(center.x,0.06,-center.y)
+	var old_poses := {p0:true,m0:true}
+	var receipt: Variant = board._combat_merge_center([p1,p0],[m1,m0],old_poses)
+	check(receipt is Vector2,"settled old and ordinary new views admit complete receipt")
+	var old_point: Vector3 = board.views[p0].global_position
+	board.views[p0].global_position.y = 0.1
+	check(board._combat_merge_center([p1,p0],[m1,m0],old_poses) == null,"old lifted fighter rejects whole group")
+	board.views[p0].global_position = old_point
+	var old_motion: Variant = board.card_motion.states.get(p0)
+	board.card_motion.states[p0] = {"mode":"animated"}
+	check(board._combat_merge_center([p1,p0],[m1,m0],old_poses) == null,"old ordinary mode is not combat ground evidence")
+	if old_motion == null: board.card_motion.states.erase(p0)
+	else: board.card_motion.states[p0] = old_motion
+	check(board._combat_merge_center([p1,p0],[m1,m0],{p0:false,m0:true}) == null,"captured drag or execution flag survives task cleanup")
+	board.combat_presentation.motions[initial] = {"actor":p0,"combat_type":0,"start":old_point,"finish":old_point,"duration":1.0,"age":1.0}
+	check(board._combat_merge_center([p1,p0],[m1,m0],old_poses) == null,"finished but unreleased melee tween rejects even ground endpoint")
+	board.combat_presentation.motions.erase(initial)
+	board.position.x = 1
+	check(board._combat_merge_center([p1,p0],[m1,m0],old_poses) == null,"nonidentity Board coordinate frame is not inferred")
+	board.position.x = 0
+	var merge_rng: int = s.rng.state
+	var merge_sample_calls := [0]
+	s.combat.merge_center_sampler = func(a,b,old):
+		merge_sample_calls[0] += 1
+		check(not s.combat.tasks.has(initial) and s.combat.membership.is_empty(),"merge center observed after old cleanup before new entry")
+		check(s.rng.state == merge_rng,"merge center precedes replacement random progress")
+		check(a == [p1,p0] and b == [m1,m0] and old == old_poses,"source faction/order and preserved old identity")
+		return board._combat_merge_center(a,b,old)
 	var merged_calls := [0]
 	s.combat.start_center_sampler = func(_a,_b): merged_calls[0] += 1; return Vector2(88,88)
 	var merged: int = s.combat.start_combat([p1],[m1])
-	check(merged_calls[0] == 0 and not s.combat.tasks[merged].has("initial_center"),"merge creation does not reuse standalone center observer")
+	check(merged_calls[0] == 0 and merge_sample_calls[0] == 1,"merge creation does not reuse standalone center observer")
 	check(merged >= 0 and merged != initial and not s.combat.tasks.has(initial),"real start merges old task selected from live observations")
 	check(s.combat.tasks.size() == 1 and s.combat.tasks[merged].attackers.size() == 2
 		and s.combat.tasks[merged].defenders.size() == 2,"all imported fighters belong to single merged combat")
+	check(s.combat.tasks[merged].get("initial_center") == receipt,"merged receipt uses final complete set rather than entrant center")
+	board._refresh()
+	var merged_expected: Dictionary = Layout.initialize(board._fighter_records([p1,p0]),board._fighter_records([m1,m0]),cfg,s.board_bounds,s.board_top_margin,receipt)
+	check(board.combat_layouts[merged].center == merged_expected.center,"replacement rect clamps source receipt once")
+	check(not s.combat.tasks[merged].has("initial_center"),"merged receipt consumed and not serialized")
+	s.combat.merge_center_sampler = board._combat_merge_center
 	board.queue_free(); await process_frame
 	check(await audio_drain.wait_after_teardown(self),"native BGM releases before fixture exit")
 	print("Combat merge pose Board: %d/%d passed" % [checks-failures,checks])
