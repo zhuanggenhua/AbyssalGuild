@@ -18,6 +18,8 @@ var resize_overlap_selector: Callable = Callable()
 var flee_layout_updater: Callable = Callable()
 # Standalone and merge observations are separate; restored tasks never sample.
 var start_center_sampler: Callable = Callable()
+# Optional standalone native Rect.Initialize stage, before constructor RNG/Enter.
+var start_layout_initializer: Callable = Callable()
 var merge_center_sampler: Callable = Callable()
 var _selecting_geometry: bool = false
 # Ephemeral scope: never serialized, never reusable by a later standalone merge.
@@ -119,18 +121,26 @@ func start_combat(attackers: Array, defenders: Array, player_is_attacker: bool =
 		center = start_center_sampler.call(attackers.duplicate(), defenders.duplicate())
 		_selecting_geometry = false
 		if not _valid_new_sides(attackers, defenders, player_is_attacker): return -1
-	return _create_combat(attackers, defenders, player_is_attacker, center)
+	var initial_layout: Dictionary = {}
+	if start_layout_initializer.is_valid():
+		_selecting_geometry = true
+		initial_layout = start_layout_initializer.call(attackers.duplicate(), defenders.duplicate(), center)
+		_selecting_geometry = false
+		if not _valid_new_sides(attackers, defenders, player_is_attacker): return -1
+	return _create_combat(attackers, defenders, player_is_attacker, center, initial_layout)
 
 ## Internal creation never invokes overlap selectors: source merge does not
 ## recursively merge again, and pre-start merging must not draw progress twice.
-func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool, initial_center: Variant = null) -> int:
+func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool, initial_center: Variant = null, initial_layout: Dictionary = {}) -> int:
 	var session = _session.get_ref()
-	var positions: Dictionary = session.capture_card_targets(attackers + defenders)
+	var positions: Dictionary = session.capture_card_targets(attackers + defenders) if initial_layout.is_empty() else initial_layout.positions.duplicate()
 	var task_id: int = _next_id
 	_next_id += 1
 	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}, "combatants": attackers + defenders}
+	# Native initializer has already arranged every card before constructor draws.
+	if not initial_layout.is_empty(): tasks[task_id]["layout"] = initial_layout
 	# Ephemeral receipt is excluded by save_state and consumed by the Board.
-	if initial_center is Vector2 and initial_center.is_finite():
+	if initial_layout.is_empty() and initial_center is Vector2 and initial_center.is_finite():
 		tasks[task_id]["initial_center"] = initial_center
 	# CombatTask constructor seeds the entire attacker-then-defender list before
 	# CombatManager enters even its first member. Joining an existing task differs.

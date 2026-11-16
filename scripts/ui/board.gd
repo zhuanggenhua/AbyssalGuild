@@ -781,6 +781,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	session.travel_tail_request = _complete_travel_tail
 	session.combat.start_overlap_selector = _combat_start_overlaps
 	session.combat.start_center_sampler = _combat_start_center
+	session.combat.start_layout_initializer = _combat_start_layout
 	session.combat.merge_center_sampler = _combat_merge_center
 	session.combat.resize_overlap_selector = _combat_resize_overlaps
 	session.combat.flee_layout_updater = _combat_flee_layout
@@ -2473,6 +2474,50 @@ func _combat_start_center(attackers: Array, defenders: Array) -> Variant:
 		if not pose is Vector3 or not pose.is_finite() or pose.y != 0.0: return null
 		center += Vector2(pose.x, pose.z)
 	return center / ids.size()
+
+# Standalone singleton entrants, optionally with separated ordinary stacks.
+# Both original ResolveOverlaps passes must attempt no separation. Check source
+# target-position bounds, not live transforms or equal final clamped positions.
+# Crowded/partial/merge/restore paths retain their prior adapter.
+func _combat_start_layout(attackers: Array, defenders: Array, center: Variant) -> Dictionary:
+	var ids: Array = attackers + defenders
+	if global_transform != Transform3D.IDENTITY or not center is Vector2 or not center.is_finite(): return {}
+	if not session.combat.tasks.is_empty() or not combat_layouts.is_empty() or not layout_locks.is_empty(): return {}
+	if session.drag.active() or dragging >= 0: return {}
+	var fresh_center := Vector2.ZERO
+	for id in ids:
+		if not session.cards.has(id) or int(session.cycle.presentation_state().get("card_id", -1)) == id: return {}
+		var card = session.cards[id]
+		var stack = session.stacks.get(card.stack_id)
+		if stack == null or stack.card_ids != [id] or session.equipment.owners.has(id): return {}
+		var pose: Variant = _sample_ai_actor_pose(id)
+		if not pose is Vector3 or not pose.is_finite() or pose.y != 0.0: return {}
+		if views[id].get_parent() != self or views[id].get_meta("definition_guid", "") != card.definition_guid: return {}
+		if not session.card_target_position_3d(id).is_finite(): return {}
+		if card_motion.states[id].get("identity", "") != "%d:%s" % [card.get_instance_id(),card.definition_guid]: return {}
+		fresh_center += Vector2(pose.x, pose.z)
+	if ids.is_empty() or not (fresh_center / ids.size()).is_equal_approx(center): return {}
+	var config: Dictionary = CombatLayout.imported_config(catalog.data, session.scene_name)
+	if not config.get("ok", false) or not session.board_bounds is Rect2: return {}
+	var layout: Dictionary = CombatLayout.initialize(_fighter_records(attackers), _fighter_records(defenders), config, session.board_bounds, session.board_top_margin, center)
+	if layout.is_empty(): return {}
+	for point in layout.positions.values():
+		if not point.is_finite(): return {}
+	var stacks: Array = _layout_states()
+	for i in stacks.size():
+		if stacks[i].locked: return {}
+		for j in range(i + 1, stacks.size()):
+			if BoardLayout.separation(BoardLayout.stack_bounds(stacks[i]), BoardLayout.stack_bounds(stacks[j])) != Vector2.ZERO: return {}
+		# EnterCombat removes the whole singleton participating stack. Remaining
+		# stacks must also have no separation against the newly registered rect.
+		if session.stacks[stacks[i].id].card_ids[0] not in ids:
+			if BoardLayout.separation(BoardLayout.stack_bounds(stacks[i]), layout.bounds) != Vector2.ZERO: return {}
+	# Validate the whole cohort before changing even its first native transform.
+	for id in ids:
+		var point: Vector2 = layout.positions[id]
+		views[id].position = Vector3(point.x, 0, -point.y)
+		card_motion.states.erase(id)
+	return layout
 
 # Called after CleanUpForMerge removed old tasks/membership, before replacement
 # entry/progress draws. A blocked old fighter is not an ordinary raised card.
