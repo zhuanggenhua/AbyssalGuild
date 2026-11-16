@@ -783,6 +783,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	session.combat.start_center_sampler = _combat_start_center
 	session.combat.merge_center_sampler = _combat_merge_center
 	session.combat.resize_overlap_selector = _combat_resize_overlaps
+	session.combat.flee_layout_updater = _combat_flee_layout
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
 	combat_rectangles.clear()
 	combat_layouts.clear()
@@ -2326,18 +2327,21 @@ func _sync_combat_layouts() -> void:
 		notice.text = "Combat layout unavailable: " + str(config.get("error", "Unknown source configuration"))
 		return
 	for id in session.combat.tasks:
-		var task: Dictionary = session.combat.tasks[id]
-		var attackers: Array = _fighter_records(task.attackers)
-		var defenders: Array = _fighter_records(task.defenders)
-		var previous: Dictionary = task.get("layout", {})
-		if not previous.is_empty(): previous["config"] = config
-		var state: Dictionary = CombatLayout.initialize(attackers, defenders, config, session.board_bounds, session.board_top_margin, task.get("initial_center")) if previous.is_empty() else CombatLayout.update_layout(previous, attackers, defenders)
-		if state.is_empty(): continue
-		task.erase("initial_center") # Never overwrite an existing/saved layout center.
-		task["layout"] = state
-		combat_layouts[id] = state
-		for card_id in state.positions: session.cards[card_id].position = state.positions[card_id]
-		_draw_combat_rectangle(id, state)
+		_sync_combat_task_layout(id, config)
+
+func _sync_combat_task_layout(id: int, config: Dictionary) -> void:
+	var task: Dictionary = session.combat.tasks[id]
+	var attackers: Array = _fighter_records(task.attackers)
+	var defenders: Array = _fighter_records(task.defenders)
+	var previous: Dictionary = task.get("layout", {})
+	if not previous.is_empty(): previous["config"] = config
+	var state: Dictionary = CombatLayout.initialize(attackers, defenders, config, session.board_bounds, session.board_top_margin, task.get("initial_center")) if previous.is_empty() else CombatLayout.update_layout(previous, attackers, defenders)
+	if state.is_empty(): return
+	task.erase("initial_center") # Never overwrite an existing/saved layout center.
+	task["layout"] = state
+	combat_layouts[id] = state
+	for card_id in state.positions: session.cards[card_id].position = state.positions[card_id]
+	_draw_combat_rectangle(id, state)
 
 func _draw_combat_rectangle(id: int, state: Dictionary) -> void:
 	if not combat_rectangles.has(id):
@@ -2573,6 +2577,15 @@ func _combat_resize_native_slots(task_id: int) -> bool:
 		card_motion.states.erase(id)
 		views[id].position = Vector3(slot.x, 0.0, -slot.y)
 	return true
+
+# Flee removes membership and calls Rect.UpdateLayout, not CheckAndMergeCombats.
+# Reuse atomic native slot guards, but issue neither merge selection nor receipt.
+func _combat_flee_layout(task_id: int) -> void:
+	if not session.combat.tasks.has(task_id): return
+	var config: Dictionary = CombatLayout.imported_config(catalog.data, session.scene_name)
+	if not config.get("ok", false): return
+	_sync_combat_task_layout(task_id, config)
+	_combat_resize_native_slots(task_id)
 
 func _combat_resize_overlaps(task_id: int) -> Array:
 	_ranged_resize_receipt = {}

@@ -14,6 +14,8 @@ var _next_id: int = 1
 # Scene adapters own exact geometry; selectors must not mutate combat membership.
 var start_overlap_selector: Callable = Callable()
 var resize_overlap_selector: Callable = Callable()
+# Flee resizes its own rectangle only; never run AddCombatants merge selection.
+var flee_layout_updater: Callable = Callable()
 # Standalone and merge observations are separate; restored tasks never sample.
 var start_center_sampler: Callable = Callable()
 var merge_center_sampler: Callable = Callable()
@@ -340,10 +342,17 @@ func flee(card_id: int) -> bool:
 	var task: Dictionary = tasks[membership[card_id]]
 	if not task.player_is_attacker or card_id not in task.attackers:
 		return false
-	remove_combatant(card_id)
+	var execution: Dictionary = task.get("execution", {})
+	# Do not reinterpret the existing dangling actor/target safety cancellation as
+	# an idle layout. This slice covers unaffected surviving executions only.
+	var unaffected: bool = execution.is_empty() or card_id not in [execution.get("actor", -1), execution.get("target", -1)]
+	_remove_combatant(card_id, true, unaffected)
 	return true
 
 func remove_combatant(card_id: int, return_to_board: bool = true) -> void:
+	_remove_combatant(card_id, return_to_board, false)
+
+func _remove_combatant(card_id: int, return_to_board: bool, update_flee_layout: bool) -> void:
 	if not return_to_board:
 		# A former actor can be destroyed after fleeing. Preserve the wait but
 		# drop the stale reference rather than following source coroutine errors.
@@ -363,6 +372,10 @@ func remove_combatant(card_id: int, return_to_board: bool = true) -> void:
 		task.erase("visual_motion") # Safety: cancel dangling attack; never reroll a replacement.
 	membership.erase(card_id)
 	dragged.erase(card_id)
+	# Source Flee arranges survivors after LeaveCombat, before HandleCombatDrop
+	# registers the departing stack. Terminal removal ordering is not expanded.
+	if update_flee_layout and not task.attackers.is_empty() and not task.defenders.is_empty() and flee_layout_updater.is_valid():
+		flee_layout_updater.call(task_id)
 	if return_to_board:
 		Equipment.return_to_board(_session.get_ref(), card_id)
 	if task.attackers.is_empty() or task.defenders.is_empty():
