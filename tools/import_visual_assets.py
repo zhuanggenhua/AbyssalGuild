@@ -9,7 +9,7 @@ import yaml
 from import_stackcraft import parse_unity, json_bytes, sha256, UnityLoader
 from visual_scene_metadata import apply_overrides, camera_records, light_records, transform_chain
 from card_visual_metadata import annotations, single_line_text_fields
-from combat_visual_metadata import combat_metadata, sprite_metadata
+from combat_visual_metadata import combat_metadata, sprite_metadata, canvas_reference_ppu
 from puff_visual_metadata import scene_puff_metadata
 from world_visual_metadata import world_metadata
 from progress_visual_metadata import progress_metadata, world_canvas_chain, board_effective_pose
@@ -132,7 +132,7 @@ def build(source, catalog, output):
             f = doc['fields']
             if 'progressUIPrefab' in f:
                 config['progress'] = progress_metadata(f, read)
-            if any(key in f for key in ('arrowProjectile', 'magicProjectile', 'hitUIPrefab')):
+            if any(key in f for key in ('arrowProjectile', 'magicProjectile', 'hitUIPrefab', 'combatRectPrefab')):
                 config['combat'] = combat_metadata(f, read)
             if 'buyerPrefab' in f and 'vendorPrefab' in f:
                 config['trading'] = trade_metadata(f, read, index, source)
@@ -165,7 +165,9 @@ def build(source, catalog, output):
                 if not external_parent:
                     config['lights'].extend(light_records(effective))
                     canvas = world_canvas_chain(effective)
-                    if canvas: config['world_canvas_chain'] = canvas
+                    if canvas:
+                        config['world_canvas_chain'] = canvas
+                        config['world_canvas_reference_ppu'] = canvas_reference_ppu(effective)
                     if guid in config['boards']:
                         config.setdefault('board_poses', {})[guid] = board_effective_pose(effective)
         result['scenes'][scene['name']] = config

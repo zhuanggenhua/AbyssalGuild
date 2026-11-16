@@ -28,9 +28,84 @@ def sprite_metadata(importer, png_bytes):
     width, height = struct.unpack('>II', png_bytes[16:24])
     if not width or not height:
         return {}
-    return {'pixels_per_unit': ppu, 'pivot': copy.deepcopy(pivot), 'pixel_size': {'x': width, 'y': height},
+    result = {'pixels_per_unit': ppu, 'pivot': copy.deepcopy(pivot), 'pixel_size': {'x': width, 'y': height},
             'filter_mode': importer.get('textureSettings', {}).get('filterMode'),
             'mesh_type': importer.get('spriteMeshType'), 'mode': 'single_full_image'}
+
+    border = importer.get('spriteBorder')
+    if _finite_vector(border, 'xyzw') and min(border.values()) >= 0:
+        result['border_pixels'] = copy.deepcopy(border)
+        result['packing_tag'] = str(importer.get('spritePackingTag') or '')
+    return result
+
+
+def _identity_rect(rect, require_zero_z):
+    rotation = {k: 0 if v == '-0' else v for k, v in rect.get('m_LocalRotation', {}).items()}
+    scale = rect.get('m_LocalScale', {})
+    position = rect.get('m_LocalPosition', {})
+    return (_finite_vector(position, 'xyz') and _finite_vector(rotation, 'xyzw') and
+            _finite_vector(scale, 'xyz') and all(position[k] == 0 for k in 'xy') and
+            (not require_zero_z or position['z'] == 0) and
+            all(rotation[k] == 0 for k in 'xyz') and rotation['w'] == 1 and
+            all(scale[k] == 1 for k in 'xyz'))
+
+
+def combat_rect_metadata(documents, component_ref):
+    """Resolve the locked one-child stretched, default UI/Image Sliced structure."""
+    by_id = {str(d['file_id']): d for d in documents}
+    component = by_id.get(str(component_ref.get('fileID')), {})
+    if component.get('object_type') != 'MonoBehaviour':
+        return {}
+    root = _rect(documents, component['fields'].get('m_GameObject'))
+    if not root or str(root['fields'].get('m_Father', {}).get('fileID')) != '0':
+        return {}
+    rf = root['fields']
+    children = [d for d in documents if d['object_type'] == 'RectTransform'
+                and str(d['fields'].get('m_Father', {}).get('fileID')) == str(root['file_id'])]
+    if len(children) != 1 or not _identity_rect(rf, True):
+        return {}
+    child = children[0]['fields']
+    owner = child['m_GameObject']
+    child_go = by_id.get(str(owner['fileID']), {})
+    if child_go.get('object_type') != 'GameObject' or child_go['fields'].get('m_IsActive') != 1:
+        return {}
+    if (not _identity_rect(child, False) or child.get('m_AnchorMin') != {'x': 0, 'y': 0}
+            or child.get('m_AnchorMax') != {'x': 1, 'y': 1}
+            or any(child.get(k) != {'x': 0, 'y': 0} for k in ('m_SizeDelta', 'm_AnchoredPosition'))
+            or not _finite_vector(rf.get('m_Pivot'), 'xy') or not _finite_vector(child.get('m_Pivot'), 'xy')):
+        return {}
+    components = [d for d in documents if d['fields'].get('m_GameObject') == owner]
+    if sum(d['object_type'] == 'CanvasRenderer' for d in components) != 1:
+        return {}
+    images = [d['fields'] for d in components if d['object_type'] == 'MonoBehaviour'
+              and d['fields'].get('m_Script', {}).get('guid') == 'fe87c0e1cc204ed48ad3b37840f39efc']
+    if len(images) != 1:
+        return {}
+    image = images[0]; sprite = image.get('m_Sprite', {}); multiplier = image.get('m_PixelsPerUnitMultiplier')
+    if (image.get('m_Type') != 1 or image.get('m_Enabled') != 1 or image.get('m_RaycastTarget') != 0
+            or image.get('m_PreserveAspect') != 0 or image.get('m_FillCenter') not in (0, 1)
+            or str(image.get('m_Material', {}).get('fileID')) != '0' or not sprite.get('guid')
+            or str(sprite.get('fileID')) != '21300000' or not _finite_vector(image.get('m_Color'), 'rgba')
+            or not isinstance(multiplier, (int, float)) or not math.isfinite(multiplier) or multiplier <= 0):
+        return {}
+    return copy.deepcopy({'sprite': sprite, 'sprite_ppu_multiplier': multiplier, 'fill_center': bool(image['m_FillCenter']),
+                          'color': image['m_Color'], 'pivot': rf['m_Pivot'], 'normal_offset': child['m_LocalPosition']['z']})
+
+
+def canvas_reference_ppu(documents):
+    owners = [d['fields'].get('m_GameObject') for d in documents if d['object_type'] == 'MonoBehaviour'
+              and d['fields'].get('m_Script', {}).get('guid') == 'd5480d6e0dbe4a343a6a4a6bfaff57fb']
+    if len(owners) != 1 or not owners[0]:
+        return None
+    fields = [d for d in documents if d['fields'].get('m_GameObject') == owners[0]]
+    canvases = [d['fields'] for d in fields if d['object_type'] == 'Canvas']
+    scalers = [d['fields'] for d in fields if d['object_type'] == 'MonoBehaviour'
+               and d['fields'].get('m_Script', {}).get('guid') == '0cd44c1031e13a943bb63640046fad76']
+    if (len(canvases) != 1 or len(scalers) != 1 or canvases[0].get('m_RenderMode') != 2
+            or canvases[0].get('m_Enabled') != 1 or scalers[0].get('m_Enabled') != 1):
+        return None
+    ppu = scalers[0].get('m_ReferencePixelsPerUnit')
+    return ppu if isinstance(ppu, (int, float)) and math.isfinite(ppu) and ppu > 0 else None
 
 
 def projectile_metadata(documents, component_ref):
@@ -129,4 +204,10 @@ def combat_metadata(fields, read):
         if record:
             record['prefab_guid'] = reference['guid']
             result['hit_ui'] = record
+    reference = fields.get('combatRectPrefab', {})
+    if reference.get('guid'):
+        record = combat_rect_metadata(read(reference['guid']), reference)
+        if record:
+            record['prefab_guid'] = reference['guid']
+            result['rectangle'] = record
     return result

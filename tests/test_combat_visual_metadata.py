@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from combat_visual_metadata import sprite_metadata, projectile_metadata, hit_ui_metadata, combat_metadata
+from combat_visual_metadata import sprite_metadata, projectile_metadata, hit_ui_metadata, combat_metadata, canvas_reference_ppu
 from import_visual_assets import build
 
 
@@ -82,6 +82,47 @@ class CombatVisualMetadataTests(unittest.TestCase):
         self.assertEqual(result['hit_ui']['prefab_guid'], 'renamed')
         self.assertEqual(result['projectiles'], {})
         self.assertNotIn('hit_ui', combat_metadata({'hitUIPrefab': {'guid': 'unresolved'}}, read))
+
+    def test_stretched_rectangle_uses_component_and_its_own_image(self):
+        owner = {'fileID': '2'}
+        child = rect(2, '10', (0, 0), amin=(0, 0), amax=(1, 1))
+        child['m_LocalPosition'] = {'x': 0, 'y': 0, 'z': .025}
+        child['m_LocalRotation']['y'] = '-0'
+        root = rect(1, pivot=(.3,.7))
+        root['m_LocalPosition'] = {'x': 0, 'y': 0, 'z': 0}
+        docs = [doc('RectTransform', 10, **root), doc('RectTransform', 11, **child),
+                doc('GameObject', 2, m_IsActive=1), doc('CanvasRenderer', 3, m_GameObject=owner),
+                doc('MonoBehaviour', 4, m_GameObject=owner, m_Script={'guid':'fe87c0e1cc204ed48ad3b37840f39efc'},
+                    m_Enabled=1, m_Material={'fileID':0}, m_RaycastTarget=0, m_FillCenter=1, m_Type=1,
+                    m_PreserveAspect=0, m_PixelsPerUnitMultiplier=128, m_Color=dict.fromkeys('rgba',1),
+                    m_Sprite={'fileID':21300000,'guid':'source-sprite'}),
+                doc('MonoBehaviour', 5, m_GameObject={'fileID':'1'})]
+        read = lambda guid: docs if guid == 'source-prefab' else []
+        selected = {'combatRectPrefab': {'fileID': '5', 'guid': 'source-prefab'}}
+        result = combat_metadata(selected, read)['rectangle']
+        self.assertEqual(result['sprite']['guid'], 'source-sprite')
+        self.assertEqual(result['sprite_ppu_multiplier'], 128)
+        self.assertEqual(result['normal_offset'], .025)
+        self.assertEqual(result['pivot'], {'x':.3,'y':.7})
+        self.assertTrue(result['fill_center'])
+        for key, wrong in [('m_Type',0),('m_Material',{'fileID':6}),('m_RaycastTarget',1),('m_PixelsPerUnitMultiplier',0)]:
+            before = docs[4]['fields'][key]
+            docs[4]['fields'][key] = wrong
+            self.assertNotIn('rectangle',combat_metadata(selected, read))
+            docs[4]['fields'][key] = before
+        docs[1]['fields']['m_AnchorMax'] = {'x':.5,'y':1}
+        self.assertNotIn('rectangle',combat_metadata(selected,read))
+
+    def test_canvas_scaler_resolves_only_world_canvas_owner(self):
+        owner = {'fileID': '2'}
+        fields = [doc('MonoBehaviour', 1, m_GameObject=owner, m_Script={'guid':'d5480d6e0dbe4a343a6a4a6bfaff57fb'}),
+                  doc('Canvas', 3, m_GameObject=owner, m_RenderMode=2,m_Enabled=1),
+                  doc('MonoBehaviour', 4, m_GameObject={'fileID':'6'}, m_ReferencePixelsPerUnit=200),
+                  doc('MonoBehaviour', 5, m_GameObject=owner, m_Enabled=1, m_ReferencePixelsPerUnit=100,
+                      m_Script={'guid':'0cd44c1031e13a943bb63640046fad76'})]
+        self.assertEqual(canvas_reference_ppu(fields),100)
+        fields[1]['fields']['m_RenderMode'] = 0
+        self.assertIsNone(canvas_reference_ppu(fields))
 
     def test_private_import_records_sprite_metadata_input_hash(self):
         with tempfile.TemporaryDirectory() as directory:

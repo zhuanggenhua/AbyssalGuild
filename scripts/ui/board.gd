@@ -38,6 +38,7 @@ const SaveSlots = preload("res://scripts/model/save_slots.gd")
 const SaveCodec = preload("res://scripts/model/save_codec.gd")
 const AudioFeedback = preload("res://scripts/ui/audio_feedback.gd")
 const QUIT_AUDIO_DRAIN_SECONDS := 0.5
+const SourceCombatRectangle = preload("res://scripts/ui/source_combat_rectangle.gd")
 const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
 const SourceBoardLifetime = preload("res://scripts/ui/source_board_lifetime.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
@@ -2345,30 +2346,16 @@ func _sync_combat_task_layout(id: int, config: Dictionary) -> void:
 	_draw_combat_rectangle(id, state)
 
 func _draw_combat_rectangle(id: int, state: Dictionary) -> void:
-	if not combat_rectangles.has(id):
-		var rectangle := MeshInstance3D.new()
-		var material := StandardMaterial3D.new()
-		material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		material.albedo_color = Color(0.9, 0.24, 0.16, 0.2)
-		material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		material.cull_mode = BaseMaterial3D.CULL_DISABLED
-		rectangle.material_override = material
+	var rectangle: MeshInstance3D = combat_rectangles.get(id)
+	if rectangle == null:
+		rectangle = SourceCombatRectangle.bind(visual_assets,visual_assets.scene_configuration(session.scene_name))
+		if rectangle == null: return # Nothing synthetic replaces a missing licensed visual.
 		add_child(rectangle)
 		combat_rectangles[id] = rectangle
-	var rectangle: MeshInstance3D = combat_rectangles[id]
-	if rectangle.get_meta("size", Vector2.ZERO) == state.size: return
-	rectangle.set_meta("size", state.size)
-	var vertices := PackedVector3Array()
-	var minimum: Vector2 = -state.config.pivot * state.size
-	for local in [minimum, minimum + Vector2(state.size.x, 0), minimum + state.size, minimum, minimum + state.size, minimum + Vector2(0, state.size.y)]:
-		var point: Vector2 = state.center + state.config.axis_x * local.x + state.config.axis_y * local.y
-		vertices.append(Vector3(point.x, 0.015, -point.y))
-	var arrays: Array = []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	var mesh := ArrayMesh.new()
-	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-	rectangle.mesh = mesh
+	if not SourceCombatRectangle.update(rectangle,state):
+		combat_rectangles.erase(id)
+		rectangle.hide()
+		rectangle.queue_free()
 
 func _can_drag_card(id: int) -> bool:
 	if not _allows_card_actions(): return false

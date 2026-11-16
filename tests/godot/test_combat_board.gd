@@ -56,7 +56,32 @@ func run() -> void:
 	var state: Dictionary = board.combat_layouts[task_id]
 	var center: Vector2 = state.center
 	var cell: Vector2 = state.cell
-	check(board.combat_rectangles.has(task_id) and board.combat_rectangles[task_id].mesh != null, "original generated rectangle rendered")
+	check(board.combat_rectangles.has(task_id) and board.combat_rectangles[task_id].mesh != null, "source sliced rectangle rendered")
+	if board.combat_rectangles.has(task_id):
+		var rectangle: MeshInstance3D = board.combat_rectangles[task_id]
+		var texture: Texture2D = rectangle.material_override.albedo_texture
+		var record: Dictionary = board.visual_assets.scene_configuration(board.session.scene_name).combat.rectangle
+		check(rectangle.name == "SourceCombatRectangle" and rectangle.get_meta("source_prefab_guid") == record.prefab_guid,
+			"Board binds authored rectangle prefab, not placeholder")
+		check(texture == board.visual_assets.texture(record.sprite.guid) and texture.get_size() == Vector2(128,128),
+			"original cached rectangle texture on actual Board mesh")
+		check(rectangle.position.is_equal_approx(Vector3(center.x,-0.025,-center.y))
+			and rectangle.material_override.albedo_color == Color.WHITE, "source child depth and white tint")
+		check(rectangle.mesh.surface_get_array_len(0) == 36 and rectangle.mesh.surface_get_array_index_len(0) == 54,
+			"UGUI full nine quads including center on live Board")
+		var original_mesh: Mesh = rectangle.mesh
+		var moved_center: Vector2 = center + Vector2(0.375,-0.625)
+		var moved := state.duplicate(true)
+		moved.center = moved_center
+		board._draw_combat_rectangle(task_id,moved)
+		check(board.combat_rectangles[task_id] == rectangle and rectangle.mesh == original_mesh
+			and rectangle.position.is_equal_approx(Vector3(moved_center.x,-0.025,-moved_center.y)),
+			"same-size relocation updates pose without rebuilding mesh")
+		board._draw_combat_rectangle(task_id,state)
+		var island: Dictionary = board.visual_assets.scene_configuration("Island")
+		check(island.world_canvas_reference_ppu == 100 and island.combat.rectangle == record,
+			"Island shares the locked rectangle and effective CanvasScaler")
+
 	check(board.session.cards[player].position == state.positions[player] and board.session.cards[enemy].position == state.positions[enemy], "helper slots applied to model fighters")
 	check(board.views[player].position.z == -state.positions[player].y, "combat view reflects helper world Z")
 	check(board._combat_geometry()[0].position == center, "AI gets actual retained rectangle center")
