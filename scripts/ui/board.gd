@@ -2512,8 +2512,38 @@ func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 	var defending: Array = CombatMergeGeometry.current_ground_records(_fighter_records(defenders), _sample_ai_actor_pose)
 	return CombatMergeGeometry.before_start(attacking, defending, combat_layouts)
 
+# AddCombatants calls Rect.UpdateLayout (instant grounded transforms) before
+# CheckAndMergeCombats. Only synchronize a complete, inactive observed group;
+# active action/drag states retain the existing conservative target fallback.
+func _combat_resize_native_slots(task_id: int) -> bool:
+	if global_transform != Transform3D.IDENTITY or not session.combat.tasks.has(task_id): return false
+	var task: Dictionary = session.combat.tasks[task_id]
+	if not task.get("execution", {}).is_empty() or not combat_layouts.has(task_id): return false
+	var positions: Dictionary = combat_layouts[task_id].positions
+	var ids: Array = task.attackers + task.defenders
+	if ids.is_empty(): return false
+	for id in ids:
+		if not session.cards.has(id) or not positions.has(id): return false
+		if session.combat.membership.get(id, -1) != task_id or session.combat.dragged.has(id): return false
+		if dragging == id or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id", -1)) == id: return false
+		if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return false
+		if views[id].get_parent() != self: return false
+		var card = session.cards[id]
+		if views[id].get_meta("definition_guid", "") != card.definition_guid: return false
+		if combat_presentation.sample_actor(id) != null: return false
+		if card_motion.states.has(id) and card_motion.states[id].get("identity", "") != "%d:%s" % [card.get_instance_id(), card.definition_guid]: return false
+		if not positions[id] is Vector2 or not positions[id].is_finite(): return false
+	# The source instant setter cancels ordinary movement before setting position.
+	# Observe only after writing the native nodes, never relabel model slots as poses.
+	for id in ids:
+		var slot: Vector2 = positions[id]
+		card_motion.states.erase(id)
+		views[id].position = Vector3(slot.x, 0.0, -slot.y)
+	return true
+
 func _combat_resize_overlaps(task_id: int) -> Array:
 	_sync_combat_layouts()
+	_combat_resize_native_slots(task_id)
 	return CombatMergeGeometry.after_resize(task_id, combat_layouts)
 
 func _sync_trade_zones() -> void:

@@ -14,3 +14,26 @@ Board 只接受完整可证集合：
 任一参与者拒绝时，整个初始中心回到现有模型目标位置路径，不将部分观测拼成新中心。有效中心仅是新任务的一次性收据，不存档。已有或恢复的 layout 仍优先，后续布局更新不重新居中。
 
 本改动只验证中心来源及采样边界，不宣称原版全部入战时序、完整 overlap 推挤、动态图形、在途/抬高参与者或 Unity 画面对照已完成。现有 Godot 在 combat_started 时更新布局，尚不能由本项推导为 Unity 在构造 CombatTask 前完成所有布局和所有随机进度的逐步等价。
+
+## AddCombatants 同步重排（受限原生接入）
+
+锁定 Unity `a11a89b` 中 `CombatTask.AddCombatants`：有效新增成员完成
+`EnterCombat` 和初始进度之后，调用 `CombatRect.UpdateLayout`；后者经
+`ArrangeCards/ArrangeRow` 对本战斗所有成员执行 `SetTargetInstant(forceGround:true)`，
+随后才 `CheckAndMergeCombats`。瞬时 setter 取消普通目标跟随和 tween，再落地设置 transform。
+
+Godot 在 resize selector 中先更新布局，再对**整组可验证且无活跃动作**的原生
+CardView 同步落位；取消该组同身份 CardMotion 状态。只有实际写入原生节点后，
+既有合并采样器才读取这些节点。不会把模型目标冒充原生观测，也不重排被相交的其他战斗。
+板节点必须单位变换，view 必须为直接子节点且定义身份匹配。缺视图、旧身份、拖拽、
+装备/周期演出占用或尚有攻击 presentation 时，整组不写入，保留原有保守回退。
+
+注意：Unity 原代码**没有** execution/dragged 门禁，且 KillTweens 不停止战斗 coroutine。
+本次门禁是尚未迁移这些交互时的明确覆盖限制，不是原规则。活跃攻击中新增成员的完整
+取消/继续顺序、真实图形与同帧 Unity 对照仍未验收。
+
+原生 Board 回归使用导入参数：54 项通过。新增覆盖有效加入时先同步原生位置、普通
+运动取消、整组平均、原地不刷新即可移位、拖拽和执行中原子拒绝；另外两矩形起初不交，
+新增一人扩宽后确实相交并替换两个任务，候选任务节点保持不动。删除仅这一同步调用的
+负对照为 47/54，七项失败（包括真实 resize merge 观测）；恢复后 54/54，无错误/泄漏。
+这些是无头原生逻辑证据，不是渲染验收截图。

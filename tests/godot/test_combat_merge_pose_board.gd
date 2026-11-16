@@ -129,6 +129,72 @@ func run() -> void:
 	check(board.combat_layouts[merged].center == merged_expected.center,"replacement rect clamps source receipt once")
 	check(not s.combat.tasks[merged].has("initial_center"),"merged receipt consumed and not serialized")
 	s.combat.merge_center_sampler = board._combat_merge_center
+	# AddCombatants must place native nodes before the overlap/merge observation.
+	var extra: int = s.spawn_card(player, far, -1, {"refuse_attach":true})
+	board._refresh()
+	var untouched: Vector3 = board.views[p0].position
+	var seen := [false]
+	s.combat.resize_overlap_selector = func(task_id):
+		board._sync_combat_layouts()
+		var members: Dictionary = {}
+		for card_id in s.combat.tasks[task_id].attackers + s.combat.tasks[task_id].defenders: members[card_id] = true
+		check(board._combat_merge_center(s.combat.tasks[task_id].attackers,s.combat.tasks[task_id].defenders,members) == null,"before native resize new slots cannot masquerade as current poses")
+		var picked: Array = board._combat_resize_overlaps(task_id)
+		seen[0] = true
+		var total := Vector2.ZERO
+		for card_id in members:
+			var pos: Vector3 = board.views[card_id].global_position
+			var slot: Vector2 = s.card_target_position(card_id)
+			check(pos == Vector3(slot.x,0,-slot.y),"resized native member is grounded before merge check")
+			total += Vector2(pos.x,-pos.z)
+		check(not board.card_motion.states.has(extra),"source instant setter cancels new entrant ordinary motion")
+		check(board._combat_merge_center(s.combat.tasks[task_id].attackers,s.combat.tasks[task_id].defenders,members) == total/members.size(),"merge observes complete native resize receipt")
+		return picked
+	check(s.combat.add_combatants(merged,[extra]) and seen[0],"real add entry crosses synchronous resize selector")
+	check(board.views[p0].position != untouched,"old attacker moved to resized row without refresh")
+	var retained: Vector3 = board.views[p0].position
+	board.views[p0].position.x += 1
+	var changed: Vector3 = board.views[p0].position
+	s.combat.dragged[p0] = true
+	check(not board._combat_resize_native_slots(merged) and board.views[p0].position == changed,"dragged group rejects native overwrite atomically")
+	s.combat.dragged.erase(p0)
+	s.combat.tasks[merged]["execution"] = {"actor":p0}
+	check(not board._combat_resize_native_slots(merged) and board.views[p0].position == changed,"active action remains conservative fallback")
+	s.combat.tasks[merged].erase("execution")
+	board.views[p0].position = retained
+	# Actual two-rectangle crossing caused only by adding one attacker.
+	s.combat.start_overlap_selector = Callable()
+	s.combat.start_center_sampler = Callable()
+	var p2: int = s.spawn_card(player,Vector2.ZERO,-1,{"refuse_attach":true})
+	var m2: int = s.spawn_card(mob,Vector2.ZERO,-1,{"refuse_attach":true})
+	board._refresh()
+	var neighbor: int = s.combat.start_combat([p2],[m2])
+	board._refresh()
+	var bounds: Rect2 = Layout.manager_bounds(board.combat_layouts[merged])
+	var other: Rect2 = Layout.manager_bounds(board.combat_layouts[neighbor])
+	var cell_width: float = board.combat_layouts[merged].size.x / 3.0
+	var near_center: Vector2 = board.combat_layouts[merged].center + Vector2((bounds.size.x+other.size.x)*0.5+cell_width*0.2,0)
+	s.combat.tasks[neighbor].layout.center = near_center
+	board._refresh()
+	check(Geometry.after_resize(merged,board.combat_layouts).is_empty(),"rectangles are disjoint before extra attacker")
+	var neighbor_pose: Vector3 = board.views[p2].position
+	var p3: int = s.spawn_card(player,far,-1,{"refuse_attach":true})
+	board._refresh()
+	var observed := [false]
+	s.combat.resize_overlap_selector = func(task_id):
+		var found: Array = board._combat_resize_overlaps(task_id)
+		check(found == [neighbor],"source expansion crosses actual neighboring rectangle")
+		check(board.views[p2].position == neighbor_pose,"neighbor native transform is not rearranged by source resize")
+		observed[0] = true
+		return found
+	s.combat.merge_center_sampler = func(a,b,old):
+		var value: Variant = board._combat_merge_center(a,b,old)
+		check(value is Vector2,"actual resize merge samples complete native positions")
+		return value
+	check(s.combat.add_combatants(merged,[p3]) and observed[0],"real add runs overlap then replacement merge")
+	check(not s.combat.tasks.has(merged) and not s.combat.tasks.has(neighbor) and s.combat.tasks.size()==1,"both resized and overlapping tasks replaced")
+	s.combat.merge_center_sampler = Callable()
+	s.combat.resize_overlap_selector = Callable()
 	board.queue_free(); await process_frame
 	check(await audio_drain.wait_after_teardown(self),"native BGM releases before fixture exit")
 	print("Combat merge pose Board: %d/%d passed" % [checks-failures,checks])
