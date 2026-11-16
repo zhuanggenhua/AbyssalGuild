@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SUITES = (
     ("test_combat_preenter_board", r"Combat preenter Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_ranged_flee_board", r"Combat ranged flee Board: ([1-9]\d*)/\1 passed"),
+    ("test_combat_held_release_board", r"Combat held release Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_ranged_merge_center_board", r"Combat ranged merge center Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_ranged_resize_board", r"Combat ranged resize Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_merge_pose_board", r"Combat merge pose Board: [1-9]\d*/[1-9]\d* passed"),

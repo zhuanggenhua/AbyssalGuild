@@ -138,6 +138,8 @@ var views: Dictionary = {}
 var running: bool = false
 var selected: int = -1
 var dragging: int = -1
+# Scoped source combat hold; ordinary drag and unsupported combat owners retain their paths.
+var _combat_hold: Dictionary = {}
 var press_position := Vector2.ZERO
 var drag_grant: int = -1
 var drag_origin := Vector2.ZERO
@@ -898,6 +900,7 @@ func _name(guid: String) -> String:
 	return str(fields.get("displayName", fields.get("id", guid)))
 
 func _sync_views(real_delta: float = 0.0) -> void:
+	if not _combat_hold.is_empty() and not _source_combat_hold_current(dragging): _combat_hold = {}
 	if dragging >= 0 and not session.cards.has(dragging):
 		session.drag.finish_standard()
 		session.combat.dragged.erase(dragging)
@@ -936,7 +939,7 @@ func _sync_views(real_delta: float = 0.0) -> void:
 		views[id].highlight(id == selected)
 		if session.combat.membership.has(id):
 			var combat_position: Vector2 = session.cards[id].position + (drag_delta if dragging == id else Vector2.ZERO)
-			views[id].position = Vector3(combat_position.x, 0.0, -combat_position.y)
+			views[id].position = _combat_hold.pose if _combat_hold.get("id", -1) == id and dragging == id else Vector3(combat_position.x, 0.0, -combat_position.y)
 	var motion_records: Array = []
 	var motion_settings: Dictionary = CardDragInput.source_settings(catalog, session.scene_name)
 	var cycle_id: int = int(session.cycle.presentation_state().get("card_id", -1))
@@ -1262,6 +1265,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	if dragging >= 0: return
 	_record_card_pointer(screen)
 	drag_grant = -1
+	_combat_hold = {}
 	var id: int = int(hit.get("card_id", -1))
 	var panel: int = int(hit.get("panel_owner", -1))
 	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5
@@ -1306,6 +1310,10 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	drag_anchor = session.card_target_position(dragging) if session.cards.has(dragging) else Vector2.ZERO
 	drag_delta = Vector2.ZERO
 	drag_moved = false
+	if dragging >= 0 and _source_combat_hold_allowed(id):
+		var pose: Vector3 = views[id].global_position
+		_combat_hold = {"id":id,"task":session.combat.membership[id],"card":session.cards[id].get_instance_id(),"view":views[id].get_instance_id(),"pose":pose}
+		drag_anchor = Vector2(pose.x,-pose.z)
 	if dragging >= 0: _capture_drag_highlights(dragging)
 	_sync_card_feedback()
 
@@ -1402,16 +1410,64 @@ func _input(event: InputEvent) -> void:
 		var hovered := get_viewport().gui_get_hovered_control()
 		if hovered != null and hovered != hud: equipment_display.pointer_down()
 	if running and dragging >= 0:
-		if event is InputEventMouseMotion: _update_drag_position(event.position)
+		if event is InputEventMouseMotion:
+			if _source_combat_hold_current(dragging): _record_card_pointer(event.position)
+			else: _update_drag_position(event.position)
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 			# Pointer-up belongs to the original press even over GUI or later locks.
 			_finish_drag(event.position)
+
+# Only a source-backed singleton attacker unrelated to an idle/ranged surviving task.
+# No melee actor, current target, terminal removal, equipment or transformed board.
+func _source_combat_hold_allowed(id: int) -> bool:
+	if global_transform != Transform3D.IDENTITY or not session.combat.membership.has(id): return false
+	if catalog.data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT or session.scene_name not in ["Main","Island"]: return false
+	var task_id: int = session.combat.membership[id]
+	if not session.combat.tasks.has(task_id) or not combat_layouts.has(task_id): return false
+	var task: Dictionary = session.combat.tasks[task_id]
+	if not task.player_is_attacker or id not in task.attackers or task.attackers.size() < 2 or task.defenders.is_empty(): return false
+	var execution: Dictionary = task.get("execution", {})
+	if not execution.is_empty():
+		if execution.get("combat_type", -1) not in [2,3] or execution.get("phase","") not in ["travel","return"]: return false
+		if id in [execution.get("actor",-1),execution.get("target",-1)]: return false
+	if session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id",-1)) == id: return false
+	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion() or views[id].get_parent() != self: return false
+	return combat_presentation.sample_actor(id) == null and views[id].global_position.is_finite()
+
+func _source_flee_unobstructed(id: int, destination: Vector2) -> bool:
+	var task_id: int = session.combat.membership.get(id,-1)
+	if not session.combat.tasks.has(task_id) or not combat_layouts.has(task_id): return false
+	var task: Dictionary = session.combat.tasks[task_id]
+	var remaining: Array = task.attackers.duplicate()
+	remaining.erase(id)
+	var resized: Dictionary = CombatLayout.update_layout(combat_layouts[task_id],_fighter_records(remaining),_fighter_records(task.defenders))
+	if resized.is_empty(): return false
+	var states: Array = _layout_states()
+	states.append(BoardLayout.stack_state(-999,destination,_card_footprint(id),1,false,_stack_step()))
+	var rectangles: Array = []
+	for key in combat_layouts: rectangles.append(resized.bounds if key == task_id else combat_layouts[key].bounds)
+	for i in states.size():
+		var bounds: Rect2 = BoardLayout.stack_bounds(states[i])
+		for rectangle in rectangles:
+			if BoardLayout.separation(bounds,rectangle) != Vector2.ZERO: return false
+		for j in range(i+1,states.size()):
+			if BoardLayout.separation(bounds,BoardLayout.stack_bounds(states[j])) != Vector2.ZERO: return false
+	return true
+
+func _source_combat_hold_current(id: int) -> bool:
+	return _combat_hold.get("id",-1) == id and _source_combat_hold_allowed(id) and _combat_hold.task == session.combat.membership[id] and _combat_hold.card == session.cards[id].get_instance_id() and _combat_hold.view == views[id].get_instance_id()
 
 func _update_drag_position(screen: Vector2) -> void:
 	if not session.cards.has(dragging) or not screen.is_finite(): return
 	_record_card_pointer(screen)
 	var point := _board_point(screen)
 	drag_delta = point - drag_origin
+	if _source_combat_hold_current(dragging):
+		var held := _clamp_stack_position(dragging, drag_anchor + drag_delta, false)
+		var height := float(CardDragInput.source_settings(catalog,session.scene_name).get("dragHeight",0.1))
+		_combat_hold.pose = Vector3(held.x,height,-held.y)
+		views[dragging].global_position = _combat_hold.pose
+		drag_delta = held - session.cards[dragging].position
 	if session.drag.active() and not session.combat.membership.has(dragging):
 		# Move the registered split, not only its drawing: saves/other systems
 		# observe the real held position. Combat keeps its separate drag offset.
@@ -1425,6 +1481,9 @@ func _finish_drag(screen: Vector2) -> void:
 		pressed_panel = -1
 		return
 	var id: int = dragging
+	# Pointer-up's event position is not a new UpdateDragPosition sample.
+	var held_pose: Variant = views[id].global_position if _source_combat_hold_current(id) else null
+	_combat_hold = {}
 	var carried_press: bool = id >= 0 and drag_grant == id and running
 	drag_grant = -1
 	session.combat.dragged.clear()
@@ -1439,9 +1498,13 @@ func _finish_drag(screen: Vector2) -> void:
 		_sync_combat_layouts()
 		var task_id: int = session.combat.membership[id]
 		var task: Dictionary = session.combat.tasks[task_id]
-		var result: Dictionary = CombatLayout.drop_result(id, session.cards[id].position + drag_delta, combat_layouts.get(task_id, {}), task.player_is_attacker, _card_footprint(id), session.board_bounds, session.board_top_margin)
+		var released: Vector2 = Vector2(held_pose.x,-held_pose.z) if held_pose is Vector3 else session.cards[id].position + drag_delta
+		var result: Dictionary = CombatLayout.drop_result(id, released, combat_layouts.get(task_id, {}), task.player_is_attacker, _card_footprint(id), session.board_bounds, session.board_top_margin)
 		if result.flee:
-			session.cards[id].position = result.position
+			# Only no-separation releases enter the source held-position transaction.
+			# Complex overlap settlement retains its existing, unaccepted adapter.
+			var source_release: bool = held_pose is Vector3 and _source_flee_unobstructed(id, result.position)
+			session.cards[id].position = released if source_release else result.position
 			if session.combat.flee(id):
 				_set_board_card_position(id, result.position)
 				notice.text = "Fled combat."
