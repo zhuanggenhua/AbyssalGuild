@@ -59,5 +59,37 @@ func _init() -> void:
 	s.world.configure(s, "Island")
 	check(s.world.actor_pose_sampler == Callable(self, "sample"), "configure preserves geometry adapter across scene entry")
 	check(s.world.actor_pose(-99) == Vector3.ZERO, "unknown actor does not invoke external sampler")
+	test_production()
 	print("AI actor pose: %d/%d passed" % [checks-failures, checks])
 	quit(1 if failures else 0)
+
+func test_production() -> void:
+	var catalog = Catalog.new()
+	catalog.configure({"cards": [
+		{"guid": "cow", "fields": {"category": 9, "produceCard": {"guid": "milk"}, "produceInterval": 10}},
+		{"guid": "milk", "fields": {"category": 3}}],
+		"referenced_prefabs": [{"guid": "ai", "documents": [{"script_class": "CardAI"}]}],
+		"scenes": [{"name": "Main", "documents": [{"script_class": "CardManager", "fields": {"cardPrefabs": [{"category": 9, "prefab": {"guid": "ai"}}]}}]}]})
+	var s = Session.new(); s.configure(catalog, 123)
+	var cow: int = s.spawn_card("cow", Vector2(8, 9))
+	s.world.actor_pose_sampler = sample; poses = {cow: Vector3(2, 0, 3)}
+	var captured: Array = []
+	s.ai.produce_spawner = func(guid, position, ignored): captured.append([guid, position, ignored])
+	s.world.production_timers[cow] = 0; s.ai.tick(0.01)
+	check(captured == [["milk", Vector2(2, 3), -1]], "due production adapter receives current ground origin, not queued target")
+	check(s.card_target_position(cow) == Vector2(8, 9), "sampling production origin never moves producer")
+	check(s.world.production_timers[cow] == 10.0, "current origin preserves interval reset")
+	poses[cow] = Vector3(2, 1, 3)
+	check(s.world.production_origin(cow) == Vector2(8, 9), "elevated production keeps explicit prior planar fallback")
+	poses[cow] = Vector3(INF, 0, 3)
+	check(s.world.production_origin(cow) == Vector2(8, 9), "invalid production sample falls back")
+	poses[cow] = Vector3(2, 0, 3); s.ai.produce_spawner = Callable()
+	s.world.production_timers[cow] = 0; s.ai.tick(0.01)
+	check(s.card_target_position(s.cards.keys().back()) == Vector2(2, 3), "default runtime spawn receives current ground origin")
+	s.world.production_timers[cow] = 0
+	var created: Array = s.world.tick_production(0.01)
+	check(created.size() == 1 and s.card_target_position(created[0]) == Vector2(2, 3), "standalone world production shares same source origin")
+	s.combat.dragged[cow] = true; captured.clear()
+	s.ai.produce_spawner = func(guid, position, ignored): captured.append([guid, position, ignored])
+	s.world.production_timers[cow] = 0; s.ai.tick(0.01)
+	check(captured.is_empty(), "current pose does not bypass source CanMove drag exclusion")

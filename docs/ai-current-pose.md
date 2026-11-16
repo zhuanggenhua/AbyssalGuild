@@ -47,8 +47,22 @@ Other cases deliberately control view poses; none is a Unity screenshot comparis
 The stack model still stores XZ targets: vertical target persistence/animation is
 not established by this change, including elevated approach. Combat region centers
 still use the existing settled layout adapter, not an independently sampled animated
-Rect transform. AI detach and produce spawn still use their prior
-settled-target adapters; passive patrol correctly remains based on stack target
+Rect transform. AI detach still uses its prior
+settled-target adapter; passive patrol correctly remains based on stack target
 as in `MoveRandomly`. No raw original files/assets or screenshots are distributed.
 This is bounded decision and horizontal approach correction, not full AI or visual
 acceptance.
+
+## Passive production origin
+
+`CardAI.cs` lines 303–317 passes the producer's current `transform.position` to
+`CreateCardInstance`, then puffs the producer. Both native production entry points
+now share `WorldRules.production_origin`: established source ground poses use
+current XZ; nonzero source Y keeps the prior settled planar origin because native
+spawn targets cannot retain Y. Invalid/missing/rejected Board samples still fall
+back through the established actor sampler. Timer cadence, CanMove eligibility,
+produce definition, spawn attachment/placement hooks, and puff order are unchanged.
+Tests cover the due runtime adapter and default spawn, standalone world path,
+elevated/invalid fallback, no producer movement, and drag exclusion; actual imported
+Cow Board integration controls a stable-ground view with a different queued target.
+This does not establish elevated spawning, drag-height parity, or screenshot parity.

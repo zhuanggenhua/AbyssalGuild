@@ -239,7 +239,7 @@ func _tick_production(delta: float) -> void:
 		world.production_timers[id] = float(fields.get("produceInterval", 10.0))
 		var produce: String = session.catalog.ref_guid(fields.get("produceCard", {}))
 		if not fields.get("isAggressive", false) and world.can_act(id) and not produce.is_empty():
-			var position: Vector2 = session.card_target_position(id)
+			var position: Vector2 = world.production_origin(id)
 			if produce_spawner.is_valid():
 				produce_spawner.call(produce, position, -1)
 			else:

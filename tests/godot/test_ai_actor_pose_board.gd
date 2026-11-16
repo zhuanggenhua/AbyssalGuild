@@ -54,6 +54,18 @@ func run() -> void:
 	board.session.ai.agents[mob].move_timer = 0; board.session.ai.tick(0.01)
 	check(captured.size() == 1 and captured[0].is_equal_approx(Vector2(-1, 0)), "actual due tick submits ground approach from current view origin")
 	board.session.ai.point_validator = board._ai_point_valid
+	# Passive producer uses the same actual scene-entry adapter and real tick.
+	var cow: int = spawn(board, board.catalog.find_by_name("Cow"), Vector2(6, 5))
+	board._refresh(); pose(board, cow, Vector3(-3, 0, 2))
+	var prior_ids: Array = board.session.cards.keys()
+	board.session.world.production_timers[cow] = 0
+	board.session.ai.agents[cow].move_timer = 100
+	board.session.ai.tick(0.01)
+	var produced: Array = board.session.cards.keys().filter(func(id): return not prior_ids.has(id))
+	check(produced.size() == 1, "actual imported Cow due tick produces exactly one card")
+	if produced.size() == 1:
+		check(board.session.card_target_position(produced[0]) == Vector2(-3, 2), "actual Board producer current ground pose reaches native spawn pipeline")
+	check(board.session.card_target_position(cow) == Vector2(6, 5), "actual production does not replace producer destination")
 	# Missing/queued nodes explicitly fall back without dereferencing dead views.
 	board.views[mob].queue_free()
 	check(board.session.world.actor_pose(mob) == board.session.card_target_position_3d(mob), "queued native view uses explicit model fallback")

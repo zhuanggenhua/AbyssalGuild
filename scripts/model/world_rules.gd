@@ -252,6 +252,15 @@ func start_production(card_id: int) -> bool:
 	production_timers[card_id] = session.rng.randf_range(0.5, 1.0) + float(fields.get("produceInterval", 10.0))
 	return true
 
+## CardAI.SpawnProduce uses the current transform, not the queued endpoint.
+## The native spawn model is planar: only established ground poses are consumed.
+## Elevated/unsupported poses keep the prior explicit settled-target fallback.
+func production_origin(card_id: int) -> Vector2:
+	var position: Vector3 = actor_pose(card_id)
+	if position.y == 0.0:
+		return Vector2(position.x, position.z)
+	return _session.get_ref().card_target_position(card_id)
+
 ## delta is scaled game time, zero while paused. Failed checks consume the interval.
 ## One wake per frame, no catch-up burst (matching coroutine waits).
 func tick_production(delta: float) -> Array:
@@ -270,7 +279,7 @@ func tick_production(delta: float) -> Array:
 		production_timers[id] = float(fields.get("produceInterval", 10.0))
 		var produce: String = session.catalog.ref_guid(fields.get("produceCard", {}))
 		if not fields.get("isAggressive", false) and can_act(id) and not produce.is_empty():
-			spawned.append(session.spawn_card(produce, session.card_target_position(id)))
+			spawned.append(session.spawn_card(produce, production_origin(id)))
 			session.request_puff(id)
 	return spawned
 
