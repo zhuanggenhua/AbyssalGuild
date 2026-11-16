@@ -1,4 +1,5 @@
 extends SceneTree
+const AudioDrain = preload("res://tests/godot/source_test_audio_drain.gd")
 const Board=preload("res://scripts/ui/board.gd")
 const Session=preload("res://scripts/model/game_session.gd")
 const Codec=preload("res://scripts/model/save_codec.gd")
@@ -16,6 +17,8 @@ func run():
  if assets.load_manifest()!=OK or not assets.board_local_rect("Main").has_area() or not assets.board_local_rect("Island").has_area():
   print("Source board expansion: SKIP (licensed FBX cache missing)");quit();return
  var board=Board.new();root.add_child(board);await process_frame;board.set_process(false)
+ var audio_drain := AudioDrain.new()
+ audio_drain.observe_music(board.feedback.music)
  check(not board.catalog.data.is_empty(),"catalog");check(not board.visual_assets.manifest.is_empty(),"visual manifest")
 
  for scene in ["Main","Island"]:
@@ -88,4 +91,5 @@ func run():
   board.session.phase=phase;board.session.elapsed=elapsed;board.session.combat.membership.clear();first_stack.recipe_guid=recipe
 
  board.queue_free();await process_frame;await process_frame
+ check(await audio_drain.wait_after_teardown(self),"native BGM releases before fixture exit")
  print("Source board expansion: ",checks," checks, ",failures," failures");quit(0 if failures==0 else 1)

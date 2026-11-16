@@ -3,6 +3,7 @@ extends SceneTree
 ## A single persistent Board world/light; no per-case WorldEnvironment recreation.
 const Board = preload("res://scripts/ui/board.gd")
 const Lit = preload("res://scripts/ui/source_lit_material.gd")
+const AudioDrain = preload("res://tests/godot/source_test_audio_drain.gd")
 var board
 var checks := 0
 var failures: Array[String] = []
@@ -104,6 +105,8 @@ func run() -> void:
 	root.add_child(board)
 	board.set_process(false)
 	await settle()
+	var audio_drain := AudioDrain.new()
+	audio_drain.observe_music(board.feedback.music)
 	environment=board.world_environment;light=board.source_light
 	check(board.data_error==OK,"private source catalog loaded")
 	check(board.flat_board_lighting.active_count()==0,"initial Title has no board bindings")
@@ -163,6 +166,9 @@ func run() -> void:
 	board.queue_free()
 	await settle()
 	check(final_geometry.get_ref()==null,"active source geometry freed with owner")
+	if not await audio_drain.wait_after_teardown(self):
+		failures.append("Native BGM did not release after owner deletion.")
+		printerr("FAIL: ", failures.back())
 	write_report("PASS" if failures.is_empty() else "FAIL")
 	print(_mode_label()+": ","PASS" if failures.is_empty() else "FAIL"," checks=",checks," failures=",failures.size(),"; no pixel equivalence claim; runner MUST also reject engine error logs")
 	quit(0 if failures.is_empty() else 1)

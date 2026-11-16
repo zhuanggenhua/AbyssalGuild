@@ -1,4 +1,5 @@
 extends SceneTree
+const AudioDrain = preload("res://tests/godot/source_test_audio_drain.gd")
 const Fonts=preload("res://scripts/ui/source_font_registry.gd")
 var checks=0
 func check(ok:bool):
@@ -38,6 +39,8 @@ func run():
  board.legacy_paths.clear()
  root.add_child(board)
  for i in 4:await process_frame
+ var audio_drain := AudioDrain.new()
+ audio_drain.observe_music(board.feedback.music)
  board.session.start_new_game()
  board._enter_game()
  for i in 6:await process_frame
@@ -85,5 +88,6 @@ func run():
  for c in board.stat_labels:check(not c.group_source_enabled)
  board.queue_free()
  await process_frame
+ check(await audio_drain.wait_after_teardown(self))
  print("Source Stats imported layout: PASS (%d checks; no pixel claim)"%checks)
  quit()

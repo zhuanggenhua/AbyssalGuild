@@ -1,4 +1,5 @@
 extends SceneTree
+const AudioDrain = preload("res://tests/godot/source_test_audio_drain.gd")
 const Board=preload("res://scripts/ui/board.gd")
 const Permit=preload("res://scripts/ui/source_craft_tail_permit.gd")
 const Codec=preload("res://scripts/model/save_codec.gd")
@@ -23,11 +24,13 @@ func run():
 	check(not Permit._source_still_incomplete(2, 7.9999998, 10), "source float32 completion boundary rejected")
 	check(not Permit._source_still_incomplete(9.9999998, 0, 10), "source already-complete rounding rejected")
 	check(not Permit._source_still_incomplete(2, 1e300, 10), "source nonfinite conversion rejected")
+	var audio_drain := AudioDrain.new()
 	for mode in ["admitted","admitted_island","admitted_stick","eligible_far","observer","other_portal","active_receiver","unknown_output","quest_delta","new_task","over_budget","timer_incomplete","timer_paused"]:
 		var b=Board.new()
 		var path="user://permit-%d"%Time.get_ticks_usec();b.slot_root=path+"/slots";b.options_path=path+"/options";b.legacy_paths.clear()
 		root.add_child(b);await process_frame;b.start_new();b.set_process(false)
-		# Keep the production audio adapter/callbacks; no native WAV playback in this logic test.
+		audio_drain.observe_music(b.feedback.music)
+		# Keep production audio callbacks; do not load additional SFX in this logic fixture.
 		b.feedback.assets=null;b.feedback.stream_cache.clear()
 		b.vendor_unlock.cancel();b.session.cycle.reset();b.session.phase="playing";b.session.paused=false;b.pause_overlay.hide();b.session.elapsed=0
 		for id in b.session.cards.keys():b.session._remove_card(id)
@@ -111,5 +114,6 @@ func run():
 		check(b._tail_receipt.is_empty(),"receipt cleared")
 		b.feedback.shutdown();await create_timer(.1).timeout
 		b.queue_free();await process_frame
+	check(await audio_drain.wait_after_teardown(self),"native BGM releases before fixture exit")
 	print("Source craft tail permit: %d checks"%checks)
 	quit(0)

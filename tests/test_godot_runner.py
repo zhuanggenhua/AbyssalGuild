@@ -85,6 +85,9 @@ class GodotRunnerTests(unittest.TestCase):
         for message in ("SCRIPT ERROR: synthetic", "ERROR: synthetic", "FAIL: synthetic",
                         "Assertion failed: synthetic", "Assertionfailed: synthetic",
                         "WARNING: ObjectDB instances leaked at exit",
+                        "WARNING: 2 ObjectDB instances were leaked at exit (run with `--verbose` for details).",
+                        "WARNING: 1 ObjectDB instance was leaked at exit",
+                        "ERROR: 1 resources still in use at exit (run with --verbose for details).",
                         "Resource still in use: synthetic.wav (AudioStreamWAV)",
                         "\x1b[31mSCRIPT ERROR:\x1b[0m synthetic"):
             with self.subTest(message=message):

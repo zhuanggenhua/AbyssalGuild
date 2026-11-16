@@ -2455,7 +2455,9 @@ func _departure_checkpoint(checkpoint_campaign = null) -> Dictionary:
 
 func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 	_sync_combat_layouts()
-	return CombatMergeGeometry.before_start(_fighter_records(attackers), _fighter_records(defenders), combat_layouts)
+	var attacking: Array = CombatMergeGeometry.current_ground_records(_fighter_records(attackers), _sample_ai_actor_pose)
+	var defending: Array = CombatMergeGeometry.current_ground_records(_fighter_records(defenders), _sample_ai_actor_pose)
+	return CombatMergeGeometry.before_start(attacking, defending, combat_layouts)
 
 func _combat_resize_overlaps(task_id: int) -> Array:
 	_sync_combat_layouts()
