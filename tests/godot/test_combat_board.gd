@@ -37,7 +37,20 @@ func run() -> void:
 			break
 	var player: int = board.session.spawn_card(villager_guid, Vector2(-3, -1), -1, {"refuse_attach": true})
 	var enemy: int = board.session.spawn_card(enemy_guid, Vector2(1, -1), -1, {"refuse_attach": true})
+	var expected_rng := RandomNumberGenerator.new()
+	expected_rng.state = board.session.rng.state
+	var expected_progress: Dictionary = {player: expected_rng.randf_range(0.0, 0.5), enemy: expected_rng.randf_range(0.0, 0.5)}
+	var entered: Array = []
+	var constructor_observer := func(kind: String, payload: Dictionary):
+		if kind != "combat_entered": return
+		entered.append(payload.card_id)
+		var observed: Dictionary = board.session.combat.tasks[payload.combat_id]
+		check(observed.combatants == [player, enemy] and observed.progress == expected_progress, "native Board entry observes complete constructor progress")
+		check(board.session.rng.state == expected_rng.state, "native Board entry consumers do not reroll constructor progress")
+	board.session.event_occurred.connect(constructor_observer)
 	drop(board, player, board.session.cards[enemy].position)
+	board.session.event_occurred.disconnect(constructor_observer)
+	check(entered == [player, enemy], "native Board publishes each entry once in source order")
 	check(board.session.combat.membership.has(player) and board.session.combat.membership.has(enemy), "drag onto enemy starts fight before ordinary stack")
 	var task_id: int = board.session.combat.membership[player]
 	var state: Dictionary = board.combat_layouts[task_id]

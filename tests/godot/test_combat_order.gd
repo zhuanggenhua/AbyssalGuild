@@ -35,6 +35,7 @@ func tied_actor(s, ids: Array) -> int:
 	s.combat.resolve_turn(ids[3])
 	return int(task.execution.actor)
 func _init() -> void:
+	_test_constructor()
 	var s = fresh()
 	var ids := fixture(s)
 	var task: Dictionary = s.combat.tasks[ids[3]]
@@ -112,3 +113,47 @@ func _test_private() -> void:
 		var restored = fresh(catalog, scene_name)
 		check(Codec.restore(restored, JSON.parse_string(JSON.stringify(Codec.capture(s)))).ok, "actual source in-flight order checkpoint restores")
 		check(tied_actor(restored, ids) == ids[1], "actual source tie order survives Continue")
+
+func _test_constructor() -> void:
+	var s = fresh()
+	var attackers: Array = [s.spawn_card("p"), s.spawn_card("p")]
+	var defenders: Array = [s.spawn_card("m"), s.spawn_card("m")]
+	var ordered: Array = attackers + defenders
+	var expected := RandomNumberGenerator.new()
+	expected.state = s.rng.state
+	var progress: Dictionary = {}
+	for id in ordered: progress[id] = expected.randf_range(0.0, 0.5)
+	var constructor_state: int = expected.state
+	var seen: Array = []
+	var observer := func(kind: String, payload: Dictionary):
+		if kind != "combat_entered": return
+		var task: Dictionary = s.combat.tasks[payload.combat_id]
+		check(task.combatants == ordered, "first and later entry observe full constructor order")
+		check(task.progress == progress, "all progress exists before entry; attacker then defender RNG")
+		check(s.rng.state == (constructor_state if seen.is_empty() else expected.state), "constructor consumes all draws before callback RNG")
+		check(s.cards[payload.card_id].stack_id == -1 and s.combat.membership.has(payload.card_id), "entry still follows detach and membership")
+		seen.append(payload.card_id)
+		check(s.rng.randf() == expected.randf(), "callback RNG cannot interleave initial progress draws")
+	s.event_occurred.connect(observer)
+	var task_id: int = s.combat.start_combat(attackers, defenders)
+	s.event_occurred.disconnect(observer)
+	check(seen == ordered and s.rng.state == expected.state, "exactly one entry and one initial progress draw per member")
+	var before: int = s.rng.state
+	check(s.combat.start_combat(attackers, defenders) == -1 and s.rng.state == before, "invalid already-entered start draws nothing")
+	check(s.combat.start_combat([], defenders) == -1 and s.rng.state == before, "empty start draws nothing")
+	var recruit: int = s.spawn_card("p")
+	expected.state = s.rng.state
+	var join_seen: Array = []
+	var join_observer := func(kind: String, payload: Dictionary):
+		if kind != "combat_entered": return
+		join_seen.append(payload.card_id)
+		check(not s.combat.tasks[task_id].progress.has(recruit), "AddCombatants still enters before initializing progress")
+		check(s.rng.randf() == expected.randf(), "join callback precedes its progress RNG")
+	s.event_occurred.connect(join_observer)
+	check(s.combat.add_combatants(task_id, [recruit]), "join remains available")
+	s.event_occurred.disconnect(join_observer)
+	check(join_seen == [recruit] and s.combat.tasks[task_id].progress[recruit] == expected.randf_range(0.0, 0.5), "join draws exactly once after entry")
+	check(s.rng.state == expected.state, "join RNG state preserved")
+	var snapshot: Dictionary = Codec.capture(s)
+	var restored = fresh(s.catalog)
+	check(Codec.restore(restored, snapshot).ok and Codec.capture(restored) == snapshot, "restore preserves progress and RNG without constructor draws")

@@ -118,22 +118,27 @@ func _create_combat(attackers: Array, defenders: Array, player_is_attacker: bool
 	var positions: Dictionary = session.capture_card_targets(attackers + defenders)
 	var task_id: int = _next_id
 	_next_id += 1
-	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}, "combatants": []}
+	tasks[task_id] = {"attackers": attackers.duplicate(), "defenders": defenders.duplicate(), "player_is_attacker": player_is_attacker, "timer": 1.0, "progress": {}, "combatants": attackers + defenders}
 	# Ephemeral receipt is excluded by save_state and consumed by the Board.
 	if initial_center is Vector2 and initial_center.is_finite():
 		tasks[task_id]["initial_center"] = initial_center
+	# CombatTask constructor seeds the entire attacker-then-defender list before
+	# CombatManager enters even its first member. Joining an existing task differs.
+	for id in tasks[task_id].combatants:
+		tasks[task_id].progress[id] = session.rng.randf_range(0.0, 0.5)
 	for id in attackers + defenders:
-		_enter(task_id, id, positions.get(id))
+		_enter(task_id, id, positions.get(id), false)
 	session.event_occurred.emit("combat_started", {"combat_id": task_id})
 	return task_id
 
-func _enter(task_id: int, card_id: int, position: Variant = null) -> void:
+func _enter(task_id: int, card_id: int, position: Variant = null, initialize_join_progress: bool = true) -> void:
 	var session = _session.get_ref()
 	Equipment.detach(session, card_id, position)
 	membership[card_id] = task_id
 	session.event_occurred.emit("combat_entered", {"combat_id":task_id,"card_id":card_id})
-	tasks[task_id].combatants.append(card_id)
-	tasks[task_id].progress[card_id] = session.rng.randf_range(0.0, 0.5)
+	if initialize_join_progress:
+		tasks[task_id].combatants.append(card_id)
+		tasks[task_id].progress[card_id] = session.rng.randf_range(0.0, 0.5)
 
 func add_combatants(task_id: int, card_ids: Array) -> bool:
 	if _selecting_geometry or not tasks.has(task_id):
