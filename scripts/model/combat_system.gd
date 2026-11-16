@@ -18,6 +18,13 @@ var resize_overlap_selector: Callable = Callable()
 var start_center_sampler: Callable = Callable()
 var merge_center_sampler: Callable = Callable()
 var _selecting_geometry: bool = false
+# Ephemeral scope: never serialized, never reusable by a later standalone merge.
+var _resize_geometry_serial: int = 0
+var _resize_geometry_context: Dictionary = {}
+
+func resize_geometry_context() -> Dictionary:
+	return _resize_geometry_context.duplicate()
+
 
 func configure(session, equipment_system) -> void:
 	_session = weakref(session)
@@ -29,6 +36,7 @@ func reset() -> void:
 	membership.clear()
 	dragged.clear()
 	_next_id = 1
+	_resize_geometry_context.clear()
 
 static func advantage(attacker_type: int, defender_type: int) -> int:
 	if attacker_type == 0 or defender_type == 0 or attacker_type == defender_type:
@@ -158,13 +166,22 @@ func add_combatants(task_id: int, card_ids: Array) -> bool:
 		tasks[task_id].progress[id] = session.rng.randf_range(0.0, 0.5)
 		added = true
 	if added and resize_overlap_selector.is_valid():
+		_resize_geometry_serial += 1
+		_resize_geometry_context = {"serial":_resize_geometry_serial,"task_id":task_id}
 		_selecting_geometry = true
 		var raw = resize_overlap_selector.call(task_id)
 		_selecting_geometry = false
 		var selected: Dictionary = _selected_tasks(raw, task_id)
 		if tasks.has(task_id) and selected.ok and not selected.ids.is_empty():
 			var source: Dictionary = tasks[task_id]
+			# Cleanup will erase these flags. Invalidate the native receipt before
+			# that information is lost, even if a selector changed only model drag.
+			for member in source.attackers + source.defenders:
+				if membership.get(member, -1) != task_id or dragged.has(member):
+					_resize_geometry_context.clear()
+					break
 			merge_combats(selected.ids + [task_id], source.attackers, source.defenders)
+		_resize_geometry_context.clear()
 	return added
 
 ## Advance one rendered frame. Real clock drives travel/return even when paused.

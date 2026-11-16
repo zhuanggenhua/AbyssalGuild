@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_combat_ranged_merge_center_board": "Combat ranged merge center Board: 1/1 passed",
     "test_combat_ranged_resize_board": "Combat ranged resize Board: 134/134 passed",
     "test_source_inbound_close_board": "Incoming close: 69 checks 0 failures",
     "test_source_precommit_close_board": "Precommit close: 73 checks 0 failures",

@@ -70,6 +70,7 @@ var source_crafting_report: Dictionary = {}
 var source_travel_report: Dictionary = {}
 var layout_locks: Dictionary = {}
 var combat_layouts: Dictionary = {}
+var _ranged_resize_receipt: Dictionary = {}
 var combat_rectangles: Dictionary = {}
 var puffs: Array[Node3D] = []
 var puff_rng := RandomNumberGenerator.new()
@@ -785,6 +786,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
 	combat_rectangles.clear()
 	combat_layouts.clear()
+	_ranged_resize_receipt.clear()
 	if not session.event_occurred.is_connected(_on_session_event):
 		session.event_occurred.connect(_on_session_event)
 	vendor_guids = SceneConfig.offered_packs(catalog, session.scene_name)
@@ -2473,12 +2475,13 @@ func _combat_start_center(attackers: Array, defenders: Array) -> Variant:
 func _combat_merge_center(attackers: Array, defenders: Array, old_members: Dictionary) -> Variant:
 	if attackers.is_empty() or defenders.is_empty() or global_transform != Transform3D.IDENTITY: return null
 	var ids: Array = attackers + defenders
+	var resized: Dictionary = _consume_ranged_resize_receipt(ids, old_members)
 	var center := Vector2.ZERO
 	for id in ids:
 		var pose: Variant
 		if int(session.cycle.presentation_state().get("card_id", -1)) == id: return null
 		if old_members.has(id):
-			if not old_members[id] or dragging == id or session.equipment.owners.has(id): return null
+			if (not old_members[id] and not resized.has(id)) or dragging == id or session.equipment.owners.has(id): return null
 			if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return null
 			var card = session.cards[id]
 			if views[id].get_meta("definition_guid", "") != card.definition_guid: return null
@@ -2505,6 +2508,26 @@ func _combat_merge_center(attackers: Array, defenders: Array, old_members: Dicti
 		if not pose is Vector3 or not pose.is_finite() or pose.y != 0.0: return null
 		center += Vector2(pose.x, pose.z)
 	return center / ids.size()
+
+# Receipt is valid only inside the exact synchronous AddCombatants selector/merge
+# call. The source task reference survives cleanup solely to validate no callback
+# changed its phase or membership after the native grounded write.
+func _consume_ranged_resize_receipt(ids: Array, old_members: Dictionary) -> Dictionary:
+	var receipt: Dictionary = _ranged_resize_receipt
+	_ranged_resize_receipt = {}
+	if receipt.is_empty() or receipt.context != session.combat.resize_geometry_context(): return {}
+	var source: Dictionary = receipt.task
+	if source != receipt.snapshot or session.combat.tasks.has(receipt.context.task_id): return {}
+	var source_ids: Array = source.attackers + source.defenders
+	if source_ids != receipt.ids: return {}
+	for id in source_ids:
+		if id not in ids or not old_members.has(id) or old_members[id]: return {}
+		if not session.cards.has(id) or session.combat.membership.has(id): return {}
+		if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return {}
+		if views[id].get_parent() != self or views[id].get_instance_id() != receipt.views[id]: return {}
+		if session.cards[id].get_instance_id() != receipt.cards[id]: return {}
+		if views[id].position != receipt.positions[id]: return {}
+	return receipt.positions
 
 func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 	_sync_combat_layouts()
@@ -2552,8 +2575,21 @@ func _combat_resize_native_slots(task_id: int) -> bool:
 	return true
 
 func _combat_resize_overlaps(task_id: int) -> Array:
+	_ranged_resize_receipt = {}
 	_sync_combat_layouts()
-	_combat_resize_native_slots(task_id)
+	var applied: bool = _combat_resize_native_slots(task_id)
+	var context: Dictionary = session.combat.resize_geometry_context()
+	if applied and context.get("task_id", -1) == task_id:
+		var task: Dictionary = session.combat.tasks[task_id]
+		if not task.get("execution", {}).is_empty():
+			var ids: Array = task.attackers + task.defenders
+			var receipt := {"context":context,"task":task,"snapshot":task.duplicate(true),
+				"ids":ids.duplicate(),"views":{},"cards":{},"positions":{}}
+			for id in ids:
+				receipt.views[id] = views[id].get_instance_id()
+				receipt.cards[id] = session.cards[id].get_instance_id()
+				receipt.positions[id] = views[id].position
+			_ranged_resize_receipt = receipt
 	return CombatMergeGeometry.after_resize(task_id, combat_layouts)
 
 func _sync_trade_zones() -> void:
