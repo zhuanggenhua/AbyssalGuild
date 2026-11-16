@@ -2513,12 +2513,22 @@ func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 	return CombatMergeGeometry.before_start(attacking, defending, combat_layouts)
 
 # AddCombatants calls Rect.UpdateLayout (instant grounded transforms) before
-# CheckAndMergeCombats. Only synchronize a complete, inactive observed group;
-# active action/drag states retain the existing conservative target fallback.
+# CheckAndMergeCombats. Ranged travel/return has no card combat tween: its
+# projectile owns an independent captured world endpoint and clock. Only reset
+# complete observed card slots; never alter execution or presentation records.
+# Melee, death-wait, unknown actions and drag retain the conservative fallback.
 func _combat_resize_native_slots(task_id: int) -> bool:
 	if global_transform != Transform3D.IDENTITY or not session.combat.tasks.has(task_id): return false
 	var task: Dictionary = session.combat.tasks[task_id]
-	if not task.get("execution", {}).is_empty() or not combat_layouts.has(task_id): return false
+	if not combat_layouts.has(task_id): return false
+	var execution: Dictionary = task.get("execution", {})
+	if not execution.is_empty():
+		if execution.get("combat_type", -1) not in [2, 3] or execution.get("phase", "") not in ["travel", "return"]: return false
+		var members: Array = task.attackers + task.defenders
+		if execution.get("actor", -1) not in members or execution.get("target", -1) not in members: return false
+		if (execution.actor in task.attackers) == (execution.target in task.attackers): return false
+		var remaining: Variant = execution.get("remaining")
+		if not (remaining is float or remaining is int) or not is_finite(float(remaining)) or float(remaining) < 0: return false
 	var positions: Dictionary = combat_layouts[task_id].positions
 	var ids: Array = task.attackers + task.defenders
 	if ids.is_empty(): return false

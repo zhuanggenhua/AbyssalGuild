@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_combat_ranged_resize_board", r"Combat ranged resize Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_merge_pose_board", r"Combat merge pose Board: [1-9]\d*/[1-9]\d* passed"),
     ("test_source_inbound_close_board", r"Incoming close: [1-9]\d* checks 0 failures"),
     ("test_source_precommit_close_board", r"Precommit close: [1-9]\d* checks 0 failures"),
