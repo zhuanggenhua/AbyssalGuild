@@ -25,17 +25,23 @@ func run() -> void:
 	s.spawn_layout_resolver = Callable()
 	var friendly := ""
 	var hostile := ""
+	var passive := ""
 	for entry in b.catalog.data.cards:
 		if int(entry.fields.get("category",0)) == 2 and int(entry.fields.get("faction",0)) == 1 and int(entry.fields.get("combatType",0)) == 1: friendly = entry.guid
-		if int(entry.fields.get("category",0)) == 9 and int(entry.fields.get("faction",0)) == 2: hostile = entry.guid
-	if friendly.is_empty() or hostile.is_empty(): b.free(); quit(2); return
+		if entry.fields.get("displayName", "") == "Crab": hostile = entry.guid
+		if entry.fields.get("displayName", "") == "Chicken": passive = entry.guid
+	if friendly.is_empty() or hostile.is_empty() or passive.is_empty(): b.free(); quit(2); return
 	var departing: int = s.spawn_card(friendly, Vector2(-2,0), -1, {"refuse_attach":true})
-	var first: int = s.spawn_card(hostile, Vector2(1,0), -1, {"refuse_attach":true})
+	# Reverse identity/insertion order so a public-event resync cannot pass.
 	var second: int = s.spawn_card(hostile, Vector2(4,0), -1, {"refuse_attach":true})
+	var first: int = s.spawn_card(passive, Vector2(1,0), -1, {"refuse_attach":true})
+	expect(not s.ai.has_ai(departing), "locked departing player prefab has no AI")
+	expect(s.ai.has_ai(first) and s.ai.has_ai(second), "locked producer and aggressive prefabs have AI")
 	b._refresh()
 	var task: int = s.combat.start_combat([departing],[first,second])
 	b._refresh()
 	var observation: Dictionary = {}
+	var expected: Dictionary = {}
 	var sampler: Callable = s.combat.terminal_flee_layout_sampler
 	var closer: Callable = s.combat.terminal_flee_rect_closer
 	expect(sampler.call(task).is_empty(), "nonterminal task excluded")
@@ -62,11 +68,13 @@ func run() -> void:
 	s.combat.terminal_flee_rect_closer = func(id: int) -> void:
 		expect(not s.combat.tasks.has(id), "Finished before Rect.Close")
 		expect(s.cards[first].stack_id == -1 and s.cards[second].stack_id == -1 and s.cards[departing].stack_id == -1, "close before all singleton registrations")
+		expect(not s.ai.agents[first].running and not s.ai.agents[second].running, "survivor AI still stopped at Rect.Close")
 		closer.call(id)
 		expect(not b.combat_rectangles.has(id) and not b.combat_layouts.has(id), "close excludes rectangle from live geometry")
 	var on_end: Callable = func(kind: String, payload: Dictionary) -> void:
 		if kind == "combat_ended" and int(payload.combat_id) == task:
 			expect(s.cards[first].stack_id >= 0 and s.cards[second].stack_id >= 0 and s.cards[departing].stack_id >= 0, "public completion event after all registrations")
+			expect(is_equal_approx(s.ai.agents[first].move_timer, expected.move_first) and is_equal_approx(s.world.production_timers[first], expected.produce_first) and is_equal_approx(s.ai.agents[second].move_timer, expected.move_second), "ordered timers already settled at public event")
 			expect(not s.combat.membership.has(first) and not s.combat.membership.has(second), "public event after survivors LeaveCombat")
 	s.event_occurred.connect(on_end)
 	var held_start: Vector3 = b.views[departing].position
@@ -79,7 +87,19 @@ func run() -> void:
 	var release := InputEventMouseButton.new()
 	release.button_index = MOUSE_BUTTON_LEFT
 	release.position = ghost.position
+	var rng := RandomNumberGenerator.new()
+	rng.seed = s.rng.seed
+	rng.state = s.rng.state
+	expected.move_first = rng.randf_range(.5,1) + s.ai.move_interval
+	expected.produce_first = rng.randf_range(.5,1) + float(s.catalog.fields(passive).get("produceInterval",10.0))
+	expected.move_second = rng.randf_range(.5,1) + s.ai.move_interval
+	var next := rng.randi()
 	b._input(release)
+	expect(is_equal_approx(s.ai.agents[first].move_timer, expected.move_first), "producer movement draw first")
+	expect(is_equal_approx(s.world.production_timers[first], expected.produce_first), "producer production draw second")
+	expect(is_equal_approx(s.ai.agents[second].move_timer, expected.move_second), "next survivor movement draw third")
+	expect(s.rng.randi() == next, "public resync does not duplicate restart RNG")
+
 	expect(not s.combat.tasks.has(task) and not b.combat_rectangles.has(task), "terminal rectangle removed from live solver")
 	var depart_stack: int = s.cards[departing].stack_id
 	var first_stack: int = s.cards[first].stack_id
@@ -92,6 +112,15 @@ func run() -> void:
 	# Guard rejection is tested with a separately restored callback while the
 	# finished task is gone; no receipt may be replayed to close another task.
 	expect(sampler.call(task).is_empty(), "finished task cannot produce another receipt")
+	# Missing-agent recovery must run register's single restart, not restart again.
+	s.ai.agents.erase(first)
+	rng.state = s.rng.state
+	var missing_move: float = rng.randf_range(.5,1) + s.ai.move_interval
+	var missing_produce: float = rng.randf_range(.5,1) + float(s.catalog.fields(passive).get("produceInterval",10.0))
+	var missing_next := rng.randi()
+	s.ai.leave_combat(first)
+	expect(is_equal_approx(s.ai.agents[first].move_timer, missing_move) and is_equal_approx(s.world.production_timers[first],missing_produce), "missing agent starts both timers once")
+	expect(s.rng.randi() == missing_next, "missing agent registration no duplicate draw")
 	s.combat.terminal_flee_layout_sampler = sampler
 	s.combat.terminal_flee_rect_closer = closer
 	s.event_occurred.disconnect(on_end)

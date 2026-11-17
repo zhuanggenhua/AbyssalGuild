@@ -87,6 +87,17 @@ func register(card_id: int) -> bool:
 		_restart(card_id)
 	return true
 
+## Scoped source LeaveCombat: StartAI synchronously draws movement jitter then
+## optional production jitter, before the caller constructs the singleton stack.
+## Registration already restarts a missing agent; do not draw twice in that case.
+func leave_combat(card_id: int) -> void:
+	if _session.get_ref().combat.membership.has(card_id) or not has_ai(card_id):
+		return
+	if not agents.has(card_id):
+		register(card_id)
+	else:
+		_restart(card_id)
+
 func _restart(card_id: int) -> void:
 	var session = _session.get_ref()
 	agents[card_id].running = true

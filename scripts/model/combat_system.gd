@@ -387,7 +387,7 @@ func _remove_combatant(card_id: int, return_to_board: bool, update_flee_layout: 
 	dragged.erase(card_id)
 	# Original terminal Flee updates the remaining row before EndCombat. Only an
 	# idle, native-observed receipt may use the scoped source cleanup ordering.
-	if update_flee_layout and task.attackers.is_empty() and not task.defenders.is_empty() and task.get("execution", {}).is_empty() and terminal_flee_layout_sampler.is_valid() and terminal_flee_rect_closer.is_valid():
+	if update_flee_layout and task.attackers.is_empty() and not task.defenders.is_empty() and task.get("execution", {}).is_empty() and terminal_flee_layout_sampler.is_valid() and terminal_flee_rect_closer.is_valid() and not _session.get_ref().ai.has_ai(card_id):
 		var receipt: Dictionary = terminal_flee_layout_sampler.call(task_id)
 		if _finish_terminal_flee(task_id, receipt):
 			if return_to_board: Equipment.return_to_board(_session.get_ref(), card_id)
@@ -404,7 +404,10 @@ func _remove_combatant(card_id: int, return_to_board: bool, update_flee_layout: 
 
 # Source order: stop/finish, close Rect, then each survivor's observed singleton;
 # the departing singleton belongs to HandleCombatDrop and is registered later.
-# Presentation tween and per-survivor AI restart are not accepted by this slice.
+# The locked player prefabs have no CardAI. AI-bearing departing cards are
+# excluded above: their pre-layout StartAI needs separate pre-mutation admission.
+# Survivor StartAI draws run here, not in the later public-event resync.
+# Presentation tween and exact coroutine wait framing remain unaccepted.
 func _finish_terminal_flee(task_id: int, receipt: Dictionary) -> bool:
 	var task: Dictionary = tasks[task_id]
 	var ids: Array = task.attackers + task.defenders
@@ -424,6 +427,7 @@ func _finish_terminal_flee(task_id: int, receipt: Dictionary) -> bool:
 	for id in ids:
 		membership.erase(id)
 		dragged.erase(id)
+		session.ai.leave_combat(id)
 		session.cards[id].position = positions[id]
 		Equipment.return_to_board(session, id)
 		# Source assigns a ground placement target after RegisterStack. The model
