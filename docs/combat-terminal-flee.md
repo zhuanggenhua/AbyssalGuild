@@ -94,3 +94,22 @@ frame update, `0.1` height, physical clamp versus header placement, consumed hol
 missing-survivor/active-execution rejection and survivor contact exclusion, along
 with the earlier ordered cleanup and RNG assertions. This is not paired Unity
 runtime or screenshot acceptance.
+
+## Combat pointer audio dispatch
+
+At the same locked source revision, `CardController.OnPointerDown` returns from
+its combat branch before reaching the standard branch's `PlaySFX(CardPick)`.
+The Board no longer sends that extra pick request for an accepted combat press.
+`OnPointerUp` still sends `CardDrop` before `HandleCombatDrop` classifies the
+release; this order is unchanged. Standard accepted press/release retain their
+pick/drop events. Equipped-card early-return semantics are a separate, unaccepted
+routing item, not implicitly certified by this change.
+
+The existing native Board regression compares ordinary and terminal combat
+press/release using private imported AudioManager clip mappings and real pool
+slots. It checks no combat pick request/slot, original pick clip on ordinary
+press, original drop clip on combat release, and the drop request already present
+when terminal Flee layout is called. Cooldown bookkeeping is cleared between
+independent cases so a wrongly sent pick cannot hide behind cooldown rejection.
+No replacement audio assets or production cooldown changes are introduced. This
+proves dispatch and clip routing, not listening/acoustic or paired Unity parity.

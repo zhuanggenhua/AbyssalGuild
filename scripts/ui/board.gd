@@ -1306,7 +1306,9 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	drag_grant = dragging
 	if dragging >= 0:
 		session.combat.dragged[dragging] = true
-		feedback.play_event("CardPick")
+		# Source combat PointerDown returns before the standard CardPick call.
+		# Do not suppress CardDrop: accepted PointerUp dispatches it before drop classification.
+		if not session.combat.membership.has(dragging): feedback.play_event("CardPick")
 	press_position = screen
 	drag_origin = _board_point(screen)
 	drag_anchor = session.card_target_position(dragging) if session.cards.has(dragging) else Vector2.ZERO

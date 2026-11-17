@@ -38,6 +38,21 @@ func run() -> void:
 	expect(not s.ai.has_ai(departing), "locked departing player prefab has no AI")
 	expect(s.ai.has_ai(first) and s.ai.has_ai(second), "locked producer and aggressive prefabs have AI")
 	b._refresh()
+	# Compare confirmed ordinary input against the combat early-return branch using
+	# the real imported AudioManager and actual allocated native audio slots.
+	b.feedback.last_played.erase("CardPick")
+	b.feedback.last_played.erase("CardDrop")
+	var standard_point: Vector2 = b.camera.unproject_position(b.views[departing].global_position)
+	var slot_before: int = b.feedback.next_player
+	b._begin_card_press({"card_id":departing},standard_point)
+	expect(b.dragging == departing and b.feedback.last_played.has("CardPick"), "accepted standard press requests CardPick")
+	expect(b.feedback.next_player == (slot_before+1)%b.feedback.pool.size() and b.feedback.pool[slot_before].stream == b.feedback.stream_for_event("CardPick"), "standard CardPick routes original clip to native pool")
+	var standard_up := InputEventMouseButton.new()
+	standard_up.button_index = MOUSE_BUTTON_LEFT; standard_up.position = standard_point
+	b._input(standard_up)
+	expect(b.feedback.last_played.has("CardDrop"), "accepted standard release requests CardDrop")
+	b.feedback.last_played.erase("CardPick")
+	b.feedback.last_played.erase("CardDrop")
 	var task: int = s.combat.start_combat([departing],[first,second])
 	b._refresh()
 	var observation: Dictionary = {}
@@ -57,6 +72,7 @@ func run() -> void:
 	s.combat.tasks[task].attackers = original_attackers
 	s.combat.terminal_flee_layout_sampler = func(id: int) -> Dictionary:
 		expect(id == task and not s.combat.membership.has(departing), "departing LeaveCombat before terminal layout")
+		expect(b.feedback.last_played.has("CardDrop"), "combat CardDrop dispatched before Flee classification and terminal layout")
 		expect(s.cards[departing].stack_id == -1, "departing not registered during layout")
 		expect(not held_expected.is_empty() and s.cards[departing].position.is_equal_approx(held_expected[0]), "terminal layout observes held position before header placement")
 		var receipt: Dictionary = sampler.call(id)
@@ -91,7 +107,9 @@ func run() -> void:
 	expect(not b._source_flee_unobstructed(departing,survivor_target), "terminal contact guard includes newly registered survivor singleton")
 	var held_start: Vector3 = b.views[departing].position
 	var press := b.camera.unproject_position(held_start + Vector3(-.13,0,.09))
+	slot_before = b.feedback.next_player
 	b._begin_card_press({"card_id":departing},press)
+	expect(not b.feedback.last_played.has("CardPick") and b.feedback.next_player == slot_before, "accepted combat press emits no CardPick request or audio slot")
 	expect(b._combat_hold.get("id",-1) == departing, "idle last attacker admitted to source hold")
 	expect(b.views[departing].global_position == held_start, "terminal press preserves actual pose until frame")
 	var ghost := InputEventMouseMotion.new()
@@ -121,6 +139,8 @@ func run() -> void:
 	expected.move_second = rng.randf_range(.5,1) + s.ai.move_interval
 	var next := rng.randi()
 	b._input(release)
+	expect(not b.feedback.last_played.has("CardPick"), "combat release never synthesizes missing CardPick")
+	expect(b.feedback.next_player == (slot_before+1)%b.feedback.pool.size() and b.feedback.pool[slot_before].stream == b.feedback.stream_for_event("CardDrop"), "combat release allocates only original CardDrop clip")
 	expect(s.card_target_position(departing).is_equal_approx(settled), "terminal release applies header placement after Flee despite inside release point")
 	expect(b._combat_hold.is_empty(), "terminal hold consumed")
 	expect(is_equal_approx(s.ai.agents[first].move_timer, expected.move_first), "producer movement draw first")
