@@ -11,6 +11,92 @@ func _init() -> void: call_deferred("run")
 func settle() -> void:
 	await process_frame
 	await process_frame
+func point_event(point: Vector2, button := 0, pressed := true, factor := 1.0) -> void:
+	var motion := InputEventMouseMotion.new()
+	motion.position = point
+	motion.global_position = point
+	root.push_input(motion,true)
+	if button == 0: return
+	var event := InputEventMouseButton.new()
+	event.position = point
+	event.global_position = point
+	event.button_index = button
+	event.pressed = pressed
+	event.factor = factor
+	root.push_input(event,true)
+
+func test_native_scroll(board, q, r) -> void:
+	board._configure_source_hud()
+	board.journal_slide.reset(true)
+	await settle()
+	q.set_process(false)
+	r.set_process(false)
+	check(q.clip_contents and is_equal_approx(q.size.x,400) and is_equal_approx(q.position.y,60),
+		"full source viewport under header, not permanently clipped padding")
+	check(q.content.size.x == q.size.x and q.motion.hidden_length() > 0,
+		"overflow from actual content bounds in full-width host")
+	var where: Vector2 = q.get_global_transform_with_canvas()*Vector2(5,5)
+	q.reset_scroll()
+	board.session.phase = "playing"
+	var forward: Vector3 = -board.camera.global_basis.z
+	board.camera_motion.configure(-forward*10)
+	var expected_camera = preload("res://scripts/ui/camera_motion.gd").new()
+	expected_camera.configure(board.camera_motion.target)
+	expected_camera.zoom(-1,forward)
+	point_event(where,MOUSE_BUTTON_WHEEL_DOWN)
+	check(is_equal_approx(q.motion.position,6) and q.content.position.y == -6 and r.motion.position == 0,
+		"one viewport-routed wheel tick scrolls only active body by six source units")
+	check(board.camera_motion.target.is_equal_approx(expected_camera.target),
+		"same event keeps exactly one independent camera wheel update")
+	point_event(where,MOUSE_BUTTON_WHEEL_LEFT,true,.5)
+	check(is_equal_approx(q.motion.position,3),"fractional horizontal wheel uses vertical-only source fallback")
+	var tab: Control = board.journal_tabs.get_child(0)
+	point_event(tab.get_global_transform_with_canvas()*(tab.size/2),MOUSE_BUTTON_WHEEL_DOWN)
+	check(is_equal_approx(q.motion.position,3),"header does not acquire body wheel")
+	var blocker := Control.new()
+	blocker.mouse_filter = Control.MOUSE_FILTER_STOP
+	board.source_hud.add_child(blocker)
+	blocker.position = board.detail_panel.position + q.position
+	blocker.size = q.size
+	await settle()
+	point_event(where,MOUSE_BUTTON_WHEEL_DOWN)
+	check(is_equal_approx(q.motion.position,3),"topmost GUI blocker prevents rectangle-based input leak")
+	blocker.free()
+	q.reset_scroll()
+	var group: String = board.ledger_visible_groups.keys()[0]
+	var hit: Vector2 = q.get_global_transform_with_canvas()*Vector2(30,25)
+	point_event(hit,MOUSE_BUTTON_LEFT)
+	point_event(hit+Vector2(0,30))
+	point_event(hit+Vector2(0,50))
+	point_event(hit+Vector2(0,50),MOUSE_BUTTON_LEFT,false)
+	check(board.ledger_expansion.get(group,true) and board.dragging == -1,
+		"scroll drag cancels row click and cannot grab the board")
+	q.reset_scroll()
+	await process_frame
+	point_event(hit,MOUSE_BUTTON_LEFT)
+	point_event(hit,MOUSE_BUTTON_LEFT,false)
+	check(not board.ledger_expansion.get(group,true),"actual below-threshold release collapses header group")
+	point_event(hit,MOUSE_BUTTON_LEFT)
+	point_event(hit,MOUSE_BUTTON_LEFT,false)
+	check(board.ledger_expansion.get(group,true),"same actual header node expands again")
+	point_event(hit,MOUSE_BUTTON_RIGHT)
+	point_event(hit,MOUSE_BUTTON_RIGHT,false)
+	check(not board.ledger_expansion.get(group,true),"source TextButton header also accepts actual right click")
+	point_event(hit,MOUSE_BUTTON_RIGHT)
+	point_event(hit,MOUSE_BUTTON_RIGHT,false)
+	check(board.ledger_expansion.get(group,true),"right click keeps the same group owner")
+	q.motion.position = 25
+	q.motion.velocity = 120
+	board._show_journal_tab("recipes")
+	q.advance_unscaled(.05)
+	check(q.motion.position > 25 and r.motion.position == 0,
+		"hidden tab continues its own unscaled inertia while Recipes is selected")
+	board._show_journal_tab("quests")
+	q.reset_scroll()
+	r.reset_scroll()
+	point_event(where-Vector2(10,40))
+	await settle()
+
 func run() -> void:
 	var drain = preload("res://tests/godot/source_test_audio_drain.gd").new()
 	var board = Board.new()
@@ -45,76 +131,79 @@ func run() -> void:
 	board.session.quest_tracker.restore_state({"CompletedQuests":[],"ActiveQuests":active})
 	board.active_tab = "quests"
 	board._refresh_ledger()
-	var q: RichTextLabel = board.journal_bodies.quests
-	var r: RichTextLabel = board.journal_bodies.recipes
+	var q: Control = board.journal_bodies.quests
+	var r: Control = board.journal_bodies.recipes
+	var qrows: Control = board.journal_rows.quests
+	var rrows: Control = board.journal_rows.recipes
 	await settle()
-	check(q != r and q.get_v_scroll_bar() != r.get_v_scroll_bar(), "two real persistent native bodies and scrollbars")
-	check(board.ledger == q and q.visible and not r.visible, "active public reference and inactive participation")
-	q.get_v_scroll_bar().value = 120
-	check(q.get_v_scroll_bar().value == 120, "quest nonzero scroll established")
+	check(q != r and q.motion != r.motion, "two real persistent native motion owners")
+	check(board.ledger == qrows and q.visible and not r.visible, "active public reference and inactive participation")
+	await test_native_scroll(board,q,r)
+	q.motion.position = 120
+	check(q.motion.position == 120, "quest nonzero scroll established")
 	board._show_journal_tab("recipes")
 	await settle()
-	check(board.ledger == r and r.get_v_scroll_bar().value == 0, "first recipe entry never inherits quest scroll")
-	r.get_v_scroll_bar().value = 240
-	check(r.get_v_scroll_bar().value == 240, "distinct recipe nonzero scroll established")
+	check(board.ledger == rrows and r.motion.position == 0, "first recipe entry never inherits quest scroll")
+	r.motion.position = 240
+	check(r.motion.position == 240, "distinct recipe nonzero scroll established")
 	for i in range(3):
 		board._show_journal_tab("quests")
 		await settle()
-		check(board.ledger == q and q.get_v_scroll_bar().value == 120, "quest identity and scroll restored")
+		check(board.ledger == qrows and q.motion.position == 120, "quest identity and scroll restored")
 		board._show_journal_tab("recipes")
 		await settle()
-		check(board.ledger == r and r.get_v_scroll_bar().value == 240, "recipe identity and scroll restored")
+		check(board.ledger == rrows and r.motion.position == 240, "recipe identity and scroll restored")
 	var hidden_quest: Dictionary = board.session.quest_tracker.active_quests[0]
 	hidden_quest.current_amount = 2
 	board.session.quest_tracker.quest_completed.emit(hidden_quest)
 	await settle()
-	check(not q.visible and q.get_parsed_text().contains("Quest " + hidden_quest.id + " √"), "hidden quest completion updates its own body through event")
-	check(q.get_v_scroll_bar().value == 120 and r.get_v_scroll_bar().value == 240, "hidden quest rebuild preserves independent offsets")
-	r.meta_hover_started.emit("r00")
+	check(not q.visible and qrows.get_parsed_text().contains("Quest " + hidden_quest.id + " √"), "hidden quest completion updates its own body through event")
+	check(q.motion.position == 120 and r.motion.position == 240, "hidden quest rebuild preserves independent offsets")
+	rrows.meta_hover_started.emit("r00")
 	check(board.info_requests.current().get("header", "") == "Recipe: Output", "recipe owns hover descriptor")
-	q.meta_hover_ended.emit("q00")
+	qrows.meta_hover_ended.emit("q00")
 	check(board.info_requests.current().get("header", "") == "Recipe: Output", "hidden quest exit cannot erase recipe request")
-	q.meta_hover_started.emit("q00")
+	qrows.meta_hover_started.emit("q00")
 	check(not board.session.collection.seen_items.has("q00"), "hidden metadata cannot mark quest read")
 	board._show_journal_tab("quests")
-	q.meta_hover_started.emit("q00")
-	r.meta_hover_ended.emit("r00")
+	qrows.meta_hover_started.emit("q00")
+	rrows.meta_hover_ended.emit("r00")
 	check(board.info_requests.current().get("header", "") == "Quest q00", "hidden recipe exit cannot erase quest request")
 	board.ledger_expansion["recipes:1"] = false
 	board.session.discovered_recipes.late = true
 	board._collection_changed()
 	await settle()
 	await settle()
-	check(board.ledger == q and not r.visible, "hidden discovery never switches public active body")
+	check(board.ledger == qrows and not r.visible, "hidden discovery never switches public active body")
 	check(board.journal_body_state.recipes.groups.has("recipes:1"), "hidden discovery creates its category header")
 	check(not board.journal_body_state.recipes.ids.has("late"), "discovery respects collapsed category")
 	board.ledger_expansion["recipes:1"] = true
 	board._refresh_ledger()
 	await settle()
 	check(board.journal_body_state.recipes.ids.has("late"), "hidden expansion retains discovery for later entry")
-	check(r.get_v_scroll_bar().value == 240, "hidden content refresh preserves owned recipe scroll")
+	check(r.motion.position == 240, "hidden content refresh preserves owned recipe scroll")
 	board._show_journal_tab("recipes")
 	await settle()
-	check(board.ledger == r and board.ledger_visible_ids.has("late"), "reentry exposes current hidden content")
+	check(board.ledger == rrows and board.ledger_visible_ids.has("late"), "reentry exposes current hidden content")
 	board.detail_panel.hide()
 	await settle()
 	board.detail_panel.show()
 	await settle()
-	check(r.get_v_scroll_bar().value == 240 and q.get_v_scroll_bar().value == 120, "drawer hide/show preserves both offsets")
+	check(r.motion.position == 240 and q.motion.position == 120, "drawer hide/show preserves both offsets")
 	board.ledger_session_id = 0 # same boundary used by _enter_source_scene/start_new.
 	board._refresh_ledger()
 	await settle()
-	check(q.get_v_scroll_bar().value == 0 and r.get_v_scroll_bar().value == 0, "fresh source view lifecycle resets both scrolls")
+	check(q.motion.position == 0 and r.motion.position == 0, "fresh source view lifecycle resets both scrolls")
 	check(board.ledger_expansion.is_empty() and board.info_requests.requests.is_empty(), "fresh view clears expansion and both hover owners")
 	board._show_journal_tab("invalid")
-	check(board.active_tab == "recipes" and board.ledger == r, "unknown tab cannot corrupt active compatibility reference")
+	check(board.active_tab == "recipes" and board.ledger == rrows, "unknown tab cannot corrupt active compatibility reference")
 	if board.catalog.load_file() == OK:
 		board.data_error = OK
 		board.start_new()
 		board.set_process(false)
 		await settle()
-		check(board.active_tab == "quests" and board.ledger == q, "real start-new source lifecycle restores authored Quests selection")
-		check(q.get_v_scroll_bar().value == 0 and r.get_v_scroll_bar().value == 0, "real start-new clears both native offsets")
+		check(board.active_tab == "quests" and board.ledger == qrows, "real start-new source lifecycle restores authored Quests selection")
+		check(q.motion.position == 0 and r.motion.position == 0, "real start-new clears both native offsets")
 		print("Journal body private lifecycle: verified")
 	else:
 		print("SKIP: private source start-new lifecycle unavailable")

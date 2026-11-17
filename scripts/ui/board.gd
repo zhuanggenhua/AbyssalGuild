@@ -104,6 +104,7 @@ var trade_views: Dictionary = {}
 var trade_activated: Dictionary = {}
 var vendor_unlock = VendorUnlockPresenter.new()
 var journal_bodies: Dictionary = {}
+var journal_rows: Dictionary = {}
 var journal_body_state: Dictionary = {}
 var ledger_visible_ids: Dictionary = {}
 var ledger_key: String = ""
@@ -181,7 +182,7 @@ var source_pause_configured := false
 var market_heading: Label
 var status: Label
 var inspection: Label
-var ledger: RichTextLabel
+var ledger: Control
 var notice: Label
 var day_button: Button
 var pause_button: Button
@@ -447,6 +448,9 @@ func _build_ui() -> void:
 	for entry in [["Sell selected card", _sell_selected], ["Sell selected stack", _sell_selected_stack], ["Withdraw chest coin", _withdraw_selected], ["Unequip character", _unequip_selected], ["Engage enemy", _engage_selected]]:
 		_button(entry[0], right, entry[1])
 	detail_panel = Panel.new()
+	# Unity MenuPanel is a RectTransform, not a Graphic; only its visible children hit.
+	detail_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	detail_panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	source_hud.add_child(detail_panel)
 	var tabs := HBoxContainer.new()
 	detail_panel.add_child(tabs)
@@ -459,15 +463,18 @@ func _build_ui() -> void:
 		tab_button.clip_text = false
 		tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for tab in ["quests", "recipes"]:
-		var body := RichTextLabel.new()
-		body.name = "QuestsBody" if tab == "quests" else "RecipesBody"
-		body.meta_hover_started.connect(_on_ledger_hover.bind(tab))
-		body.meta_hover_ended.connect(_on_ledger_hover_ended.bind(tab))
-		body.meta_clicked.connect(_on_ledger_group_clicked.bind(tab))
-		body.custom_minimum_size = Vector2(210, 260)
-		body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		var body = preload("res://scripts/ui/source_journal_scroll_host.gd").new()
+		body.name = "QuestsView" if tab == "quests" else "RecipesView"
 		detail_panel.add_child(body)
+		var rows = preload("res://scripts/ui/source_journal_rows.gd").new()
+		body.content.add_child(rows)
+		rows.extent_changed.connect(body.set_content_height)
+		rows.meta_hover_started.connect(_on_ledger_hover.bind(tab))
+		rows.meta_hover_ended.connect(_on_ledger_hover_ended.bind(tab))
+		rows.meta_clicked.connect(_on_ledger_group_clicked.bind(tab))
+		rows.can_click = body.can_click
 		journal_bodies[tab] = body
+		journal_rows[tab] = rows
 		journal_body_state[tab] = {"key":"", "info":{}, "ids":{}, "groups":{}}
 	_sync_active_journal_body()
 	# Optional native diagnostics have no source HUD button; F3 reveals them.
@@ -1099,13 +1106,23 @@ func _configure_source_hud() -> void:
 		tab.configure(toggle_metadata)
 	_sync_journal_header()
 	var source_fonts = preload("res://scripts/ui/source_font_registry.gd").shared()
-	# Both source views persist and own separate scroll/content. Keep the existing
-	# renderer/geometry; this change does not claim TMP/ScrollRect pixel parity.
-	for body: RichTextLabel in journal_bodies.values():
-		body.position = Vector2(20, header.size.y+10)
-		body.size = Vector2(menu.size.x-40, menu.size.y-header.size.y-20)
-		body.add_theme_font_size_override("normal_font_size", 30)
-		source_fonts.bind_control(body, {"font_guid": str(source_fonts.manifest.get("tmp_default_font_guid", ""))})
+	for tab in journal_bodies:
+		var body: Control = journal_bodies[tab]
+		var view := "QuestsView" if tab == "quests" else "RecipesView"
+		var viewport_rect: Rect2 = hud_layout.rect(view, menu.size,
+			Rect2(0,header.size.y,menu.size.x,maxf(0,menu.size.y-header.size.y)))
+		body.position = viewport_rect.position
+		body.size = viewport_rect.size
+		body.set_background(hud_layout.color(view, Color(0,0,0,0.9019608)))
+		for fields in hud_layout.components(view):
+			if fields.has("m_Content") and fields.has("m_Elasticity"):
+				body.motion.configure(fields)
+				break
+		body.drag_threshold = float(hud_layout.field("EventSystem","m_DragThreshold",10))
+		body.scroll_delta_per_tick = float(hud_layout.field("EventSystem","m_ScrollDeltaPerTick",6))
+		var rows: Control = journal_rows[tab]
+		rows.configure(source_fonts)
+		rows.set_content_width(viewport_rect.size.x)
 	source_fonts.bind_control(detail_toggle, hud_layout.text_record("MenuPanel/MenuToggle/Label"))
 	var watermark_record: Dictionary = hud_layout.text_record("Watermark")
 	source_fonts.bind_control(watermark, watermark_record)
@@ -1118,9 +1135,6 @@ func _configure_source_hud() -> void:
 	info_action_appearance.reset(info_action)
 	info_action_source_record = hud_layout.text_record("InfoPanel/ActionButton")
 	source_fonts.bind_control(info_action, info_action_source_record)
-	var backdrop := StyleBoxFlat.new()
-	backdrop.bg_color = hud_layout.color("MenuToggle", Color(0, 0, 0, 0.9019608))
-	detail_panel.add_theme_stylebox_override("panel", backdrop)
 	var wm: Rect2 = hud_layout.rect("Watermark", extent, Rect2(extent.x/2-300, extent.y-40, 600, 40))
 	watermark.position = wm.position
 	watermark.size = wm.size
@@ -1720,7 +1734,8 @@ func _refresh_ledger() -> void:
 		ledger_key = ""
 		for tab in journal_body_state:
 			journal_body_state[tab].key = ""
-			journal_bodies[tab].get_v_scroll_bar().value = 0
+			journal_bodies[tab].reset_scroll()
+			journal_rows[tab].reset_rows()
 			info_requests.submit(_journal_request_key(tab), 0, {})
 		quest_journal.bind(session.quest_tracker)
 		info_requests.submit("journal", 0, {})
@@ -1732,12 +1747,14 @@ func _refresh_ledger() -> void:
 	_sync_active_journal_body()
 
 func _refresh_journal_body(tab: String) -> void:
-	var body: RichTextLabel = journal_bodies[tab]
+	var renderer: Control = journal_rows[tab]
 	var state: Dictionary = journal_body_state[tab]
 	var rows: Array = preload("res://scripts/ui/journal_groups.gd").describe(catalog, session, tab, ledger_expansion, ledger_quest_order, quest_journal.captions())
 	# Changing progress must not recreate a source button or renew a hover request.
 	# Keep compatibility descriptors current, but exclude them from display identity.
 	state.info.clear()
+	if hud_layout.source_backed:
+		rows = rows.filter(func(row): return not row.id.is_empty() or not row.group.is_empty())
 	var display_rows: Array = []
 	for row in rows:
 		if not row.id.is_empty(): state.info[row.id] = row.get("info", {})
@@ -1747,31 +1764,12 @@ func _refresh_journal_body(tab: String) -> void:
 	var signature: String = tab + str(display_rows)
 	if signature == state.key: return
 	state.key = signature
-	var scroll: float = body.get_v_scroll_bar().value
-	body.clear()
 	state.ids.clear()
 	state.groups.clear()
 	for row in rows:
-		if not row.group.is_empty():
-			state.groups[row.group] = true
-			# Typed metadata prevents collisions with raw collection IDs.
-			body.push_meta({"journal_group": row.group}, RichTextLabel.META_UNDERLINE_ON_HOVER)
-			body.push_color(preload("res://scripts/ui/journal_groups.gd").header_color(catalog, tab))
-		elif not row.id.is_empty():
-			state.ids[row.id] = true
-			state.info[row.id] = row.get("info", {})
-			body.push_meta(row.id, RichTextLabel.META_UNDERLINE_ON_HOVER)
-		body.push_font_size(35 if not row.group.is_empty() else 30)
-		body.add_text(row.text)
-		if row.unread:
-			body.push_color(Color.RED)
-			body.add_text(" ●")
-			body.pop()
-		body.add_text("\n")
-		body.pop()
-		if not row.group.is_empty(): body.pop()
-		if not row.id.is_empty() or not row.group.is_empty(): body.pop()
-	body.get_v_scroll_bar().value = scroll
+		if not row.group.is_empty(): state.groups[row.group] = true
+		elif not row.id.is_empty(): state.ids[row.id] = true
+	renderer.set_rows(rows,preload("res://scripts/ui/journal_groups.gd").header_color(catalog,tab))
 
 func _journal_request_key(tab: String) -> String:
 	# Retain the existing quest requester key for callers; Recipes owns another.
@@ -1779,14 +1777,13 @@ func _journal_request_key(tab: String) -> String:
 
 func _sync_active_journal_body() -> void:
 	for tab in journal_bodies:
-		var body: RichTextLabel = journal_bodies[tab]
+		var body: Control = journal_bodies[tab]
 		var selected_tab: bool = tab == active_tab
 		if body.visible and not selected_tab:
 			info_requests.submit(_journal_request_key(tab), 0, {})
-		body.visible = selected_tab
-		body.mouse_filter = Control.MOUSE_FILTER_STOP if selected_tab else Control.MOUSE_FILTER_IGNORE
-	# Compatibility references always describe the selected persistent view.
-	ledger = journal_bodies[active_tab]
+		body.set_tab_active(selected_tab)
+	# The compatibility/query reference is the active actual text renderer.
+	ledger = journal_rows[active_tab]
 	var state: Dictionary = journal_body_state[active_tab]
 	ledger_key = state.key
 	ledger_info = state.info
@@ -1813,8 +1810,12 @@ func _on_ledger_group_clicked(meta: Variant, tab: String = "") -> void:
 
 func _on_ledger_hover(meta: Variant, tab: String = "") -> void:
 	if tab.is_empty(): tab = active_tab
-	if tab != active_tab: return
-	if not meta is String or not ledger.is_visible_in_tree() or not ledger_visible_ids.has(meta): return
+	if tab != active_tab or not ledger.is_visible_in_tree(): return
+	# Header CreateItemButton passes null itemData and clears this view's hover.
+	if meta is Dictionary and meta.size() == 1 and ledger_visible_groups.has(meta.get("journal_group")):
+		info_requests.submit(_journal_request_key(tab), 0, {})
+		return
+	if not meta is String or not ledger_visible_ids.has(meta): return
 	# MenuView queries GetItemInfo at pointer entry, not at the previous refresh.
 	var info: Dictionary = quest_journal.info(meta) if active_tab == "quests" else ledger_info.get(meta, {})
 	info_requests.submit(_journal_request_key(tab), 0, info)
