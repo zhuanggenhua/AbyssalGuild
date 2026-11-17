@@ -1,6 +1,7 @@
 extends SceneTree
 ## Container/text bounds and title lifecycle. Rendered acceptance is separate.
 const Board = preload("res://scripts/ui/board.gd")
+const JournalToggle = preload("res://scripts/ui/source_journal_toggle.gd")
 class PointerProbe extends Node:
 	var buttons: Array[int] = []
 	func _unhandled_input(event: InputEvent) -> void:
@@ -19,6 +20,12 @@ func buttons(node: Node) -> Array:
 		if child is Button: result.append(child)
 		result.append_array(buttons(child))
 	return result
+func button_caption(button: Button) -> Dictionary:
+	# Source Journal Buttons route input; their independently tinted Label draws.
+	var caption: Control = button.label if button is JournalToggle and button.label.visible and not button.label.text.is_empty() else button
+	var text: String = caption.text
+	var width := caption.get_theme_font("font").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, caption.get_theme_font_size("font_size")).x
+	return {"text":text, "width":width, "allocated":minf(caption.size.x, button.size.x)}
 func title_state(board) -> Array:
 	return [board.camera.transform, board.camera.projection, board.camera.keep_aspect,
 		board.camera.size, board.camera.fov, board.camera.near, board.camera.far,
@@ -89,11 +96,11 @@ func run() -> void:
 	await test_notice(board)
 	var tab_count := 0
 	for button in buttons(board.detail_panel) + board.speed_buttons.values():
-		var text_width: float = button.get_theme_font("font").get_string_size(button.text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")).x
+		var caption := button_caption(button)
 		var padding: float = button.get_theme_stylebox("normal").get_minimum_size().x
-		check(button.size.x >= text_width + padding, "label fits actual button: " + button.text)
-		check(board.hud.get_global_rect().encloses(button.get_global_rect()), "button fits HUD: " + button.text)
-		if button.text in ["Quests", "Recipes"]:
+		check(caption.allocated >= caption.width + padding, "label fits actual button: " + caption.text)
+		check(board.hud.get_global_rect().encloses(button.get_global_rect()), "button fits HUD: " + caption.text)
+		if caption.text in ["Quests", "Recipes"]:
 			tab_count += 1
 			check(button.size.x >= 90 and not button.clip_text, "journal tab has readable intrinsic and allocated width")
 	check(tab_count == 2, "both journal destinations exposed")
@@ -106,7 +113,8 @@ func run() -> void:
 		await process_frame
 		check_notice_bounds(board, str(size))
 		for button in buttons(board.detail_panel):
-			check(button.size.x >= button.get_theme_font("font").get_string_size(button.text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")).x + button.get_theme_stylebox("normal").get_minimum_size().x, "scaled sidebar text fits: %s %s" % [size, button.text])
+			var caption := button_caption(button)
+			check(caption.allocated >= caption.width + button.get_theme_stylebox("normal").get_minimum_size().x, "scaled sidebar text fits: %s %s" % [size, caption.text])
 	board.camera.projection = Camera3D.PROJECTION_PERSPECTIVE
 	board.camera.fov = 30
 	board.camera.position = Vector3(2, 10, 1)

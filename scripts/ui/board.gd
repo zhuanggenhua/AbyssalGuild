@@ -377,6 +377,7 @@ func _show_journal_tab(tab: String) -> void:
 	if not journal_bodies.has(tab): return
 	if not ledger.is_visible_in_tree() or _ui_pause_active() or _navigation_modal_active(): return
 	active_tab = tab
+	_sync_journal_header(false, true)
 	_refresh_ledger()
 	_play_ui_click()
 
@@ -451,7 +452,10 @@ func _build_ui() -> void:
 	detail_panel.add_child(tabs)
 	journal_tabs = tabs
 	for tab in ["quests", "recipes"]:
-		var tab_button := _button(tab.capitalize(), tabs, _show_journal_tab.bind(tab))
+		var tab_button = preload("res://scripts/ui/source_journal_toggle.gd").new()
+		tabs.add_child(tab_button)
+		tab_button.text = tab.capitalize()
+		tab_button.pressed.connect(_show_journal_tab.bind(tab))
 		tab_button.clip_text = false
 		tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	for tab in ["quests", "recipes"]:
@@ -793,6 +797,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	ledger_key = ""
 	ledger_session_id = 0 # Entering a source scene creates fresh MenuViews.
 	active_tab = "quests" # Authored UIRoot starts on Quests, not the previous scene tab.
+	_sync_journal_header(true)
 	if not session.collection.changed.is_connected(_collection_changed):
 		session.collection.changed.connect(_collection_changed)
 	slots.configure(session.campaign, slot_root)
@@ -1068,11 +1073,31 @@ func _configure_source_hud() -> void:
 	journal_tabs.position = header.position
 	journal_tabs.size = header.size
 	journal_tabs.add_theme_constant_override("separation", 0)
+	# Source Header Image remains visible below each Toggle graphic.
+	if not detail_panel.has_node("HeaderBackdrop"):
+		var background := ColorRect.new()
+		background.name = "HeaderBackdrop"
+		background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		detail_panel.add_child(background)
+		background.position = header.position
+		background.size = header.size
+		background.color = hud_layout.color("Header", Color(.5,.5,.5,.9))
+		detail_panel.move_child(background, 0)
+	var header_background: ColorRect = detail_panel.get_node("HeaderBackdrop")
+	header_background.position = header.position
+	header_background.size = header.size
 	for index in journal_tabs.get_child_count():
 		var tab: Control = journal_tabs.get_child(index)
 		tab.add_theme_font_size_override("font_size", 32)
 		var source_path := "MenuPanel/Header/" + ("QuestsToggle" if index == 0 else "RecipesToggle") + "/Label"
 		preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(tab, hud_layout.text_record(source_path))
+		var toggle_name := "QuestsToggle" if index == 0 else "RecipesToggle"
+		var toggle_metadata: Dictionary = {}
+		for component in hud_layout.components(toggle_name):
+			if component.has("m_IsOn"):
+				toggle_metadata = tab.resolve(hud_layout.documents, component.m_GameObject)
+		tab.configure(toggle_metadata)
+	_sync_journal_header()
 	var source_fonts = preload("res://scripts/ui/source_font_registry.gd").shared()
 	# Both source views persist and own separate scroll/content. Keep the existing
 	# renderer/geometry; this change does not claim TMP/ScrollRect pixel parity.
@@ -1107,13 +1132,14 @@ func _layout_card_hover() -> void:
 	var area: Rect2 = hud_layout.rect("InfoPanel", source_hud.size, Rect2(30, source_hud.size.y-30, 400, 0))
 	card_hover.set_bounds(Rect2(area.position, Vector2(area.size.x, 0)))
 
+func _sync_journal_header(instant := false, replay := false) -> void:
+	if journal_tabs == null: return
+	for index in journal_tabs.get_child_count():
+		journal_tabs.get_child(index).set_selected(index == (0 if active_tab == "quests" else 1), instant, replay and index == (0 if active_tab == "quests" else 1))
+
 func _sync_source_info() -> void:
 	if source_hud == null or not running: return
-	for index in journal_tabs.get_child_count():
-		var tab: Button = journal_tabs.get_child(index)
-		var tab_style := StyleBoxFlat.new()
-		tab_style.bg_color = hud_layout.color("QuestsToggle", Color(0.22, 0.65, 0.88)) if index == (0 if active_tab == "quests" else 1) else hud_layout.color("Header", Color(0.5, 0.5, 0.5, 0.9))
-		for state in ["normal", "hover", "pressed", "focus"]: tab.add_theme_stylebox_override(state, tab_style)
+	_sync_journal_header()
 	stats_background.position = stats_box.position
 	stats_background.size = stats_box.size + Vector2(34, 0)
 	stats_background.visible = stats_box.visible

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_source_journal_header": "Source journal header: 1/1 checks passed",
     "test_journal_body_ownership": "Journal body private lifecycle: verified\nJournal body ownership: 1/1 checks passed",
     "test_combat_ranged_merge_center_board": "Combat ranged merge center Board: 1/1 passed",
     "test_combat_preenter_board": "Combat preenter Board: 52/52 passed",
