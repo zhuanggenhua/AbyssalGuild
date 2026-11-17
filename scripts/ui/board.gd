@@ -79,6 +79,7 @@ var puff_factory: Callable = Callable()
 var camera_motion = CameraMotion.new()
 var card_motion = CardMotion.new()
 # Bounded source terminal departure presentation, retained at ground after tween.
+var _combat_slot_returns: Dictionary = {}
 var _terminal_landings: Dictionary = {}
 var _terminal_landing_receipt: int = -1
 var combat_presentation = CombatPresentation.new()
@@ -768,6 +769,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	session.cycle.pose_sampler = _sample_cycle_pose
 	session.cycle.layout_resolver = _resolve_layout
 	card_motion.reset()
+	_combat_slot_returns.clear()
 	_terminal_landings.clear()
 	_terminal_landing_receipt = -1
 	combat_presentation.reset()
@@ -949,6 +951,8 @@ func _sync_views(real_delta: float = 0.0) -> void:
 			views[id].position = _combat_hold.pose if _combat_hold.get("id", -1) == id and dragging == id else Vector3(combat_position.x, 0.0, -combat_position.y)
 	for landing_id in _terminal_landings.keys():
 		if not _terminal_landing_current(landing_id): _terminal_landings.erase(landing_id)
+	for return_id in _combat_slot_returns.keys():
+		if not _combat_slot_return_current(return_id): _combat_slot_returns.erase(return_id)
 	var motion_records: Array = []
 	var motion_settings: Dictionary = CardDragInput.source_settings(catalog, session.scene_name)
 	var cycle_id: int = int(session.cycle.presentation_state().get("card_id", -1))
@@ -969,8 +973,13 @@ func _sync_views(real_delta: float = 0.0) -> void:
 			if session.combat.membership.has(id) or session.equipment.owners.has(id) or id == cycle_id: mode = "blocked"
 			motion_records.append({"id":id,"identity":"%d:%s" % [card.get_instance_id(),card.definition_guid],"target":target,"current":views[id].position,"mode":mode,"leader":stack.card_ids[index-1] if index > 0 else -1,"step":step})
 			views[id].highlight(id == selected)
+	for id in _combat_slot_returns:
+		var card = session.cards[id]
+		motion_records.append({"id":id,"identity":"%d:%s" % [card.get_instance_id(),card.definition_guid],"target":_combat_slot_returns[id].target,"current":views[id].position,"mode":"animated"})
 	var motion_poses: Dictionary = card_motion.sync(motion_records, real_delta, motion_settings)
 	for id in motion_poses: views[id].position = motion_poses[id]
+	for id in _combat_slot_returns.keys():
+		if views[id].position == _combat_slot_returns[id].target: _combat_slot_returns.erase(id)
 	var durations := {0: 0.3, 1: 0.3, 2: session.combat.projectile_duration(2), 3: session.combat.projectile_duration(3)}
 	combat_presentation.visual_assets = visual_assets
 	combat_presentation.scene_name = session.scene_name
@@ -1298,7 +1307,9 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 		dragging = id # Lock the just-detached stack before placement can move its visible pose.
 		_sync_views()
 	dragging = id if _can_drag_card(id) else -1
-	if dragging == id: _terminal_landings.erase(id)
+	if dragging == id:
+		_terminal_landings.erase(id)
+		_combat_slot_returns.erase(id)
 	if dragging >= 0:
 		drag_start_position = session.card_target_position_3d(id)
 	if dragging >= 0 and not session.combat.membership.has(id):
@@ -1326,6 +1337,9 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 	if dragging >= 0 and _source_combat_hold_allowed(id):
 		var pose: Vector3 = views[id].global_position
 		_combat_hold = {"id":id,"task":session.combat.membership[id],"card":session.cards[id].get_instance_id(),"view":views[id].get_instance_id(),"pose":pose}
+		var slot: Variant = combat_layouts[session.combat.membership[id]].positions.get(id)
+		if slot is Vector2 and session.combat.tasks[session.combat.membership[id]].get("execution", {}).is_empty() and pose == Vector3(slot.x,0,-slot.y):
+			_combat_hold["return_slot"] = pose
 		drag_anchor = Vector2(pose.x,-pose.z)
 	if dragging >= 0: _capture_drag_highlights(dragging)
 	_sync_card_feedback()
@@ -1523,6 +1537,7 @@ func _finish_drag(screen: Vector2) -> void:
 	var id: int = dragging
 	# Pointer-up's event position is not a new UpdateDragPosition sample.
 	var held_pose: Variant = views[id].global_position if _source_combat_hold_current(id) else null
+	var return_slot: Variant = _combat_hold.get("return_slot")
 	_combat_hold = {}
 	var carried_press: bool = id >= 0 and drag_grant == id and running
 	drag_grant = -1
@@ -1553,6 +1568,8 @@ func _finish_drag(screen: Vector2) -> void:
 					_begin_terminal_landing(id, held_pose, result.position)
 				notice.text = "Fled combat."
 			_terminal_landing_receipt = -1
+		elif held_pose is Vector3 and return_slot is Vector3 and task.get("execution", {}).is_empty() and CombatLayout.contains(combat_layouts.get(task_id, {}), released):
+			_begin_combat_slot_return(id, task_id, held_pose, return_slot)
 		session.drag.finish_terminal()
 		drag_delta = Vector2.ZERO
 		_refresh()
@@ -1989,6 +2006,7 @@ func _show_title() -> void:
 	drag_grant = -1
 	drag_delta = Vector2.ZERO
 	card_motion.reset()
+	_combat_slot_returns.clear()
 	_terminal_landings.clear()
 	_terminal_landing_receipt = -1
 	combat_presentation.reset()
@@ -2281,6 +2299,30 @@ func _clamp_stack_position(card_id: int, point: Vector2, placement_rules: bool =
 	var state: Dictionary = BoardLayout.stack_state(-1, point, _card_footprint(card_id), count, false, _stack_step())
 	# Held cards can enter the source trade header; ordinary placement cannot.
 	return BoardLayout.enforce_placement(point, state, session.board_bounds, session.board_top_margin) if placement_rules else BoardLayout.clamp_to_bounds(point, state, session.board_bounds)
+
+# Original RepositionCard animates to the actual grounded pose cached by ArrangeCards.
+# Only a previously observed idle slot is admitted; model geometry alone is not proof.
+func _begin_combat_slot_return(id: int, task_id: int, held: Vector3, target: Vector3) -> void:
+	var card = session.cards[id]
+	var slot: Variant = combat_layouts[task_id].positions.get(id)
+	if not slot is Vector2 or target != Vector3(slot.x,0,-slot.y): return
+	_combat_slot_returns[id] = {"card":card.get_instance_id(),"view":views[id].get_instance_id(),"task":task_id,"target":target,"layout":combat_layouts[task_id].duplicate(true)}
+	if not _combat_slot_return_current(id):
+		_combat_slot_returns.erase(id)
+		return
+	card_motion.states[id] = {"identity":"%d:%s" % [card.get_instance_id(),card.definition_guid],"position":held,"target":held,"mode":"instant","elapsed":0.0}
+	card_motion.set_target_animated(id,target)
+
+func _combat_slot_return_current(id: int) -> bool:
+	if not _combat_slot_returns.has(id) or not session.cards.has(id): return false
+	var owner: Dictionary = _combat_slot_returns[id]
+	if global_transform != Transform3D.IDENTITY or session.combat.membership.get(id,-1) != owner.task: return false
+	if not session.combat.tasks.has(owner.task) or not combat_layouts.has(owner.task): return false
+	if not session.combat.tasks[owner.task].get("execution",{}).is_empty() or combat_layouts[owner.task] != owner.layout: return false
+	if session.cards[id].get_instance_id() != owner.card or session.cards[id].stack_id != -1: return false
+	if dragging == id or session.combat.dragged.has(id) or session.equipment.owners.has(id): return false
+	if int(session.cycle.presentation_state().get("card_id",-1)) == id or combat_presentation.sample_actor(id) != null: return false
+	return views.has(id) and is_instance_valid(views[id]) and not views[id].is_queued_for_deletion() and views[id].get_instance_id() == owner.view and views[id].get_parent() == self
 
 # CardController terminal Flee registers the held singleton, then calls
 # SetTargetPosition -> SetTargetAnimated. EnforcePlacementRules flattens Y=0.
@@ -2748,6 +2790,7 @@ func _combat_resize_native_slots(task_id: int, validate_only: bool = false) -> b
 	# Observe only after writing the native nodes, never relabel model slots as poses.
 	for id in ids:
 		var slot: Vector2 = positions[id]
+		_combat_slot_returns.erase(id)
 		card_motion.states.erase(id)
 		views[id].position = Vector3(slot.x, 0.0, -slot.y)
 	return true

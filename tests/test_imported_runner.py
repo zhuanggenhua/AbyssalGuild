@@ -19,6 +19,7 @@ MARKERS = {
     "test_combat_ranged_merge_center_board": "Combat ranged merge center Board: 1/1 passed",
     "test_combat_preenter_board": "Combat preenter Board: 52/52 passed",
     "test_combat_ranged_flee_board": "Combat ranged flee Board: 142/142 passed",
+    "test_combat_slot_return_board": "PASS combat slot return: 16/16",
     "test_combat_terminal_flee_board": "Combat terminal flee Board: 33/33 passed",
     "test_combat_held_release_board": "Combat held release Board: 27/27 passed",
     "test_combat_ranged_resize_board": "Combat ranged resize Board: 134/134 passed",
