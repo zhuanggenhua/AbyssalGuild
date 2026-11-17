@@ -16,6 +16,9 @@ var start_overlap_selector: Callable = Callable()
 var resize_overlap_selector: Callable = Callable()
 # Flee resizes its own rectangle only; never run AddCombatants merge selection.
 var flee_layout_updater: Callable = Callable()
+# Separately gated terminal native layout observation, not a generic finish hook.
+var terminal_flee_layout_sampler: Callable = Callable()
+var terminal_flee_rect_closer: Callable = Callable()
 # Standalone and merge observations are separate; restored tasks never sample.
 var start_center_sampler: Callable = Callable()
 # Optional standalone native Rect.Initialize stage, before constructor RNG/Enter.
@@ -382,6 +385,14 @@ func _remove_combatant(card_id: int, return_to_board: bool, update_flee_layout: 
 		task.erase("visual_motion") # Safety: cancel dangling attack; never reroll a replacement.
 	membership.erase(card_id)
 	dragged.erase(card_id)
+	# Original terminal Flee updates the remaining row before EndCombat. Only an
+	# idle, native-observed receipt may use the scoped source cleanup ordering.
+	if update_flee_layout and task.attackers.is_empty() and not task.defenders.is_empty() and task.get("execution", {}).is_empty() and terminal_flee_layout_sampler.is_valid() and terminal_flee_rect_closer.is_valid():
+		var receipt: Dictionary = terminal_flee_layout_sampler.call(task_id)
+		if _finish_terminal_flee(task_id, receipt):
+			if return_to_board: Equipment.return_to_board(_session.get_ref(), card_id)
+			_session.get_ref().event_occurred.emit("combat_ended", {"combat_id": task_id})
+			return
 	# Source Flee arranges survivors after LeaveCombat, before HandleCombatDrop
 	# registers the departing stack. Terminal removal ordering is not expanded.
 	if update_flee_layout and not task.attackers.is_empty() and not task.defenders.is_empty() and flee_layout_updater.is_valid():
@@ -390,6 +401,36 @@ func _remove_combatant(card_id: int, return_to_board: bool, update_flee_layout: 
 		Equipment.return_to_board(_session.get_ref(), card_id)
 	if task.attackers.is_empty() or task.defenders.is_empty():
 		_finish(task_id)
+
+# Source order: stop/finish, close Rect, then each survivor's observed singleton;
+# the departing singleton belongs to HandleCombatDrop and is registered later.
+# Presentation tween and per-survivor AI restart are not accepted by this slice.
+func _finish_terminal_flee(task_id: int, receipt: Dictionary) -> bool:
+	var task: Dictionary = tasks[task_id]
+	var ids: Array = task.attackers + task.defenders
+	if not receipt.get("ok", false) or receipt.get("ids", []) != ids: return false
+	var positions: Dictionary = receipt.get("positions", {})
+	var targets: Dictionary = receipt.get("targets", {})
+	for id in ids:
+		if not positions.get(id) is Vector2 or not targets.get(id) is Vector2: return false
+		if not positions[id].is_finite() or not targets[id].is_finite(): return false
+	var session = _session.get_ref()
+	task.erase("execution")
+	task.erase("visual_motion")
+	# Erasing the task is the model's Finished transition. Membership stays until
+	# each individual LeaveCombat, so the close adapter cannot relocate survivors.
+	tasks.erase(task_id)
+	terminal_flee_rect_closer.call(task_id)
+	for id in ids:
+		membership.erase(id)
+		dragged.erase(id)
+		session.cards[id].position = positions[id]
+		Equipment.return_to_board(session, id)
+		# Source assigns a ground placement target after RegisterStack. The model
+		# exposes that target; native interpolation remains explicitly unaccepted.
+		session.stacks[session.cards[id].stack_id].position = targets[id]
+		session.cards[id].position = targets[id]
+	return true
 
 func _finish(task_id: int) -> void:
 	var session = _session.get_ref()

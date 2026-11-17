@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_combat_terminal_flee_board", r"Combat terminal flee Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_preenter_board", r"Combat preenter Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_ranged_flee_board", r"Combat ranged flee Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_held_release_board", r"Combat held release Board: ([1-9]\d*)/\1 passed"),

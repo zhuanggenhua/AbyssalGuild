@@ -788,6 +788,8 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	session.combat.merge_center_sampler = _combat_merge_center
 	session.combat.resize_overlap_selector = _combat_resize_overlaps
 	session.combat.flee_layout_updater = _combat_flee_layout
+	session.combat.terminal_flee_layout_sampler = _combat_terminal_flee_layout
+	session.combat.terminal_flee_rect_closer = _release_combat_layout
 	for rectangle in combat_rectangles.values(): rectangle.queue_free()
 	combat_rectangles.clear()
 	combat_layouts.clear()
@@ -2639,7 +2641,7 @@ func _combat_start_overlaps(attackers: Array, defenders: Array) -> Array:
 # projectile owns an independent captured world endpoint and clock. Only reset
 # complete observed card slots; never alter execution or presentation records.
 # Melee, death-wait, unknown actions and drag retain the conservative fallback.
-func _combat_resize_native_slots(task_id: int) -> bool:
+func _combat_resize_native_slots(task_id: int, validate_only: bool = false) -> bool:
 	if global_transform != Transform3D.IDENTITY or not session.combat.tasks.has(task_id): return false
 	var task: Dictionary = session.combat.tasks[task_id]
 	if not combat_layouts.has(task_id): return false
@@ -2665,6 +2667,7 @@ func _combat_resize_native_slots(task_id: int) -> bool:
 		if combat_presentation.sample_actor(id) != null: return false
 		if card_motion.states.has(id) and card_motion.states[id].get("identity", "") != "%d:%s" % [card.get_instance_id(), card.definition_guid]: return false
 		if not positions[id] is Vector2 or not positions[id].is_finite(): return false
+	if validate_only: return true
 	# The source instant setter cancels ordinary movement before setting position.
 	# Observe only after writing the native nodes, never relabel model slots as poses.
 	for id in ids:
@@ -2681,6 +2684,29 @@ func _combat_flee_layout(task_id: int) -> void:
 	if not config.get("ok", false): return
 	_sync_combat_task_layout(task_id, config)
 	_combat_resize_native_slots(task_id)
+
+# Last-attacker idle Flee only. Observe the real post-UpdateLayout native nodes;
+# do not substitute pre-update model positions for original transform.position.
+func _combat_terminal_flee_layout(task_id: int) -> Dictionary:
+	if global_transform != Transform3D.IDENTITY: return {}
+	if catalog.data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT or session.scene_name not in ["Main", "Island"]: return {}
+	if not session.combat.tasks.has(task_id) or not combat_layouts.has(task_id): return {}
+	var task: Dictionary = session.combat.tasks[task_id]
+	if not task.attackers.is_empty() or task.defenders.is_empty() or not task.get("execution", {}).is_empty(): return {}
+	var config: Dictionary = CombatLayout.imported_config(catalog.data, session.scene_name)
+	if not config.get("ok", false): return {}
+	# Preflight the same atomic native guards before changing model layout.
+	if not _combat_resize_native_slots(task_id, true): return {}
+	_sync_combat_task_layout(task_id, config)
+	if not _combat_resize_native_slots(task_id): return {}
+	var positions: Dictionary = {}
+	var targets: Dictionary = {}
+	for id in task.defenders:
+		var pose: Vector3 = views[id].global_position
+		var point := Vector2(pose.x, -pose.z)
+		positions[id] = point
+		targets[id] = BoardLayout.enforce_placement(point, BoardLayout.stack_state(id, point, _card_footprint(id), 1), session.board_bounds, session.board_top_margin)
+	return {"ok": true, "ids": task.defenders.duplicate(), "positions": positions, "targets": targets}
 
 func _combat_resize_overlaps(task_id: int) -> Array:
 	_ranged_resize_receipt = {}
