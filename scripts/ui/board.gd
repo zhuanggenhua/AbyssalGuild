@@ -1419,22 +1419,39 @@ func _input(event: InputEvent) -> void:
 			# Pointer-up belongs to the original press even over GUI or later locks.
 			_finish_drag(event.position)
 
-# Only a source-backed singleton attacker unrelated to an idle/ranged surviving task.
-# No melee actor, current target, terminal removal, equipment or transformed board.
+# Source-backed unrelated nonterminal attacker, or idle last player attacker.
+# Terminal admission requires the locked no-AI player and native survivor slots.
+# No melee actor, current target, equipment or transformed board.
 func _source_combat_hold_allowed(id: int) -> bool:
 	if global_transform != Transform3D.IDENTITY or not session.combat.membership.has(id): return false
 	if catalog.data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT or session.scene_name not in ["Main","Island"]: return false
 	var task_id: int = session.combat.membership[id]
 	if not session.combat.tasks.has(task_id) or not combat_layouts.has(task_id): return false
 	var task: Dictionary = session.combat.tasks[task_id]
-	if not task.player_is_attacker or id not in task.attackers or task.attackers.size() < 2 or task.defenders.is_empty(): return false
+	if not task.player_is_attacker or id not in task.attackers or task.defenders.is_empty(): return false
 	var execution: Dictionary = task.get("execution", {})
+	if task.attackers.size() == 1:
+		if not execution.is_empty() or session.ai.has_ai(id): return false
+		# The departing hold is excluded from the terminal sampler after Flee.
+		# Validate survivors now without moving either model or native nodes.
+		for survivor in task.defenders:
+			if not _source_terminal_hold_survivor(task_id, survivor): return false
 	if not execution.is_empty():
 		if execution.get("combat_type", -1) not in [2,3] or execution.get("phase","") not in ["travel","return"]: return false
 		if id in [execution.get("actor",-1),execution.get("target",-1)]: return false
 	if session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id",-1)) == id: return false
 	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion() or views[id].get_parent() != self: return false
 	return combat_presentation.sample_actor(id) == null and views[id].global_position.is_finite()
+
+func _source_terminal_hold_survivor(task_id: int, id: int) -> bool:
+	if not session.cards.has(id) or session.combat.membership.get(id,-1) != task_id: return false
+	if session.combat.dragged.has(id) or dragging == id or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id",-1)) == id: return false
+	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion() or views[id].get_parent() != self: return false
+	var card = session.cards[id]
+	if views[id].get_meta("definition_guid", "") != card.definition_guid or combat_presentation.sample_actor(id) != null: return false
+	if card_motion.states.has(id) and card_motion.states[id].get("identity", "") != "%d:%s" % [card.get_instance_id(),card.definition_guid]: return false
+	var point: Variant = combat_layouts[task_id].positions.get(id)
+	return point is Vector2 and point.is_finite()
 
 func _source_flee_unobstructed(id: int, destination: Vector2) -> bool:
 	var task_id: int = session.combat.membership.get(id,-1)
@@ -1447,7 +1464,17 @@ func _source_flee_unobstructed(id: int, destination: Vector2) -> bool:
 	var states: Array = _layout_states()
 	states.append(BoardLayout.stack_state(-999,destination,_card_footprint(id),1,false,_stack_step()))
 	var rectangles: Array = []
-	for key in combat_layouts: rectangles.append(resized.bounds if key == task_id else combat_layouts[key].bounds)
+	for key in combat_layouts:
+		# EndCombat closes this rectangle before ResolveOverlaps. Its defenders
+		# are now separately registered, grounded singleton placement targets.
+		if key == task_id and remaining.is_empty(): continue
+		rectangles.append(resized.bounds if key == task_id else combat_layouts[key].bounds)
+	if remaining.is_empty():
+		for survivor in task.defenders:
+			var point: Vector2 = resized.positions[survivor]
+			var state := BoardLayout.stack_state(survivor,point,_card_footprint(survivor),1,false,_stack_step())
+			state.position = BoardLayout.enforce_placement(point,state,session.board_bounds,session.board_top_margin)
+			states.append(state)
 	for i in states.size():
 		var bounds: Rect2 = BoardLayout.stack_bounds(states[i])
 		for rectangle in rectangles:

@@ -49,7 +49,7 @@ native transforms, close-before-registration, survivor-before-departing stack ID
 placement targets and safe public notification. The authored Chicken producer
 and Crab aggressive survivor are created in reverse of their combat row order,
 so insertion-order public resync cannot accidentally satisfy draw-order checks.
-The 33 checks include stopped AI at close, movement/production/next-survivor draw
+The checks include stopped AI at close, movement/production/next-survivor draw
 order, settled timers at the public event, unchanged next RNG consumer, and
 single initialization when recovering a missing AI agent. Private runner requires a counted
 success marker. These are headless native-node checks, not GPU or screenshot proof.
@@ -68,6 +68,29 @@ success marker. These are headless native-node checks, not GPU or screenshot pro
   equivalence between Unity and Godot RNG implementations.
 - Active actor/target, active coroutines, melee, transformed/invalid views,
   equipment/cycle presentation and complex overlap movement are not expanded.
-- The previous held-input slice excludes terminal held-drag semantics; this
-  test does not turn that exclusion into an acceptance claim.
 - No original assets, screenshots, private input data or source text are included.
+
+## Idle terminal native hold/release
+
+`CardController.OnPointerDown` constructs the combat singleton from the actual
+transform and captures its offset, without calling `UpdateDragPosition` in this
+branch. The next `Update` uses `Board.ClampToBounds`, which preserves authored
+DragHeight (`0.1`) and does not yet enforce the header. `HandleCombatDrop` reads
+the current transform, not the pointer-up event position. The admitted native
+terminal route now uses this same held capture as the nonterminal route. A newer
+motion or release event without a frame does not replace the last actual pose.
+
+Admission remains idle, no departing AI, pinned Main/Island, identity Board and
+valid survivor native nodes. Before using the held position transaction, the
+no-contact preview excludes the rectangle that `EndCombat` closes and includes
+each defender's resized, placement-enforced singleton. Overlapping terminal
+releases retain the prior unaccepted settlement adapter. The actual held X/Z is
+visible to the terminal Flee callback before header placement; final model target
+placement follows Flee. This does not expand visual landing tween acceptance.
+
+The native regression now deliberately sends a new inside motion and inside
+release after an outside/header held frame. It checks pointer offset, delayed
+frame update, `0.1` height, physical clamp versus header placement, consumed hold,
+missing-survivor/active-execution rejection and survivor contact exclusion, along
+with the earlier ordered cleanup and RNG assertions. This is not paired Unity
+runtime or screenshot acceptance.

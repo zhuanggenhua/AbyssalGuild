@@ -42,6 +42,7 @@ func run() -> void:
 	b._refresh()
 	var observation: Dictionary = {}
 	var expected: Dictionary = {}
+	var held_expected: Array = []
 	var sampler: Callable = s.combat.terminal_flee_layout_sampler
 	var closer: Callable = s.combat.terminal_flee_rect_closer
 	expect(sampler.call(task).is_empty(), "nonterminal task excluded")
@@ -57,6 +58,7 @@ func run() -> void:
 	s.combat.terminal_flee_layout_sampler = func(id: int) -> Dictionary:
 		expect(id == task and not s.combat.membership.has(departing), "departing LeaveCombat before terminal layout")
 		expect(s.cards[departing].stack_id == -1, "departing not registered during layout")
+		expect(not held_expected.is_empty() and s.cards[departing].position.is_equal_approx(held_expected[0]), "terminal layout observes held position before header placement")
 		var receipt: Dictionary = sampler.call(id)
 		expect(receipt.get("ok", false), "source-backed native terminal receipt")
 		observation.merge(receipt)
@@ -77,13 +79,37 @@ func run() -> void:
 			expect(is_equal_approx(s.ai.agents[first].move_timer, expected.move_first) and is_equal_approx(s.world.production_timers[first], expected.produce_first) and is_equal_approx(s.ai.agents[second].move_timer, expected.move_second), "ordered timers already settled at public event")
 			expect(not s.combat.membership.has(first) and not s.combat.membership.has(second), "public event after survivors LeaveCombat")
 	s.event_occurred.connect(on_end)
+	s.combat.tasks[task].execution = {"actor":second,"target":departing}
+	expect(not b._source_combat_hold_allowed(departing), "terminal active execution never admitted")
+	s.combat.tasks[task].erase("execution")
+	var missing_view = b.views[first]
+	b.views.erase(first)
+	expect(not b._source_combat_hold_allowed(departing), "terminal missing survivor node never admitted")
+	b.views[first] = missing_view
+	var preview: Dictionary = b.CombatLayout.update_layout(b.combat_layouts[task],[],b._fighter_records([first,second]))
+	var survivor_target: Vector2 = b._clamp_stack_position(first,preview.positions[first],true)
+	expect(not b._source_flee_unobstructed(departing,survivor_target), "terminal contact guard includes newly registered survivor singleton")
 	var held_start: Vector3 = b.views[departing].position
-	var press := b.camera.unproject_position(held_start)
+	var press := b.camera.unproject_position(held_start + Vector3(-.13,0,.09))
 	b._begin_card_press({"card_id":departing},press)
+	expect(b._combat_hold.get("id",-1) == departing, "idle last attacker admitted to source hold")
+	expect(b.views[departing].global_position == held_start, "terminal press preserves actual pose until frame")
 	var ghost := InputEventMouseMotion.new()
 	ghost.position = b.camera.unproject_position(Vector3(s.board_bounds.end.x+5,0,-s.board_bounds.end.y-5))
 	b._input(ghost)
+	expect(b.views[departing].global_position == held_start, "terminal motion only records pending pointer")
 	b._advance_running_frame(0.0)
+	var actual: Vector3 = b.views[departing].global_position
+	var held_point: Vector2 = b._clamp_stack_position(departing,Vector2(held_start.x,-held_start.z) + b._board_point(ghost.position)-b._board_point(press),false)
+	held_expected.append(held_point)
+	expect(Vector2(actual.x,-actual.z).is_equal_approx(held_point) and is_equal_approx(actual.y,.1), "terminal frame uses offset and authored held height with physical clamp")
+	var settled: Vector2 = b._clamp_stack_position(departing,held_point,true)
+	expect(not held_point.is_equal_approx(settled), "held point remains inside restricted header until placement")
+	expect(b._source_flee_unobstructed(departing,settled), "terminal no-contact preview includes survivor singletons and excludes closed rectangle")
+	# No Update follows this new inside pointer: source release reads actual pose.
+	ghost.position = b.camera.unproject_position(held_start)
+	b._input(ghost)
+	expect(b.views[departing].global_position == actual, "pending inside pointer does not overwrite last held pose")
 	var release := InputEventMouseButton.new()
 	release.button_index = MOUSE_BUTTON_LEFT
 	release.position = ghost.position
@@ -95,6 +121,8 @@ func run() -> void:
 	expected.move_second = rng.randf_range(.5,1) + s.ai.move_interval
 	var next := rng.randi()
 	b._input(release)
+	expect(s.card_target_position(departing).is_equal_approx(settled), "terminal release applies header placement after Flee despite inside release point")
+	expect(b._combat_hold.is_empty(), "terminal hold consumed")
 	expect(is_equal_approx(s.ai.agents[first].move_timer, expected.move_first), "producer movement draw first")
 	expect(is_equal_approx(s.world.production_timers[first], expected.produce_first), "producer production draw second")
 	expect(is_equal_approx(s.ai.agents[second].move_timer, expected.move_second), "next survivor movement draw third")
