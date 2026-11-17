@@ -78,6 +78,9 @@ var puff_rng := RandomNumberGenerator.new()
 var puff_factory: Callable = Callable()
 var camera_motion = CameraMotion.new()
 var card_motion = CardMotion.new()
+# Bounded source terminal departure presentation, retained at ground after tween.
+var _terminal_landings: Dictionary = {}
+var _terminal_landing_receipt: int = -1
 var combat_presentation = CombatPresentation.new()
 var equipment_display = EquipmentDisplay.new()
 var pressed_panel: int = -1
@@ -765,6 +768,8 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	session.cycle.pose_sampler = _sample_cycle_pose
 	session.cycle.layout_resolver = _resolve_layout
 	card_motion.reset()
+	_terminal_landings.clear()
+	_terminal_landing_receipt = -1
 	combat_presentation.reset()
 	camera.h_offset = 0
 	camera.v_offset = 0
@@ -942,6 +947,8 @@ func _sync_views(real_delta: float = 0.0) -> void:
 		if session.combat.membership.has(id):
 			var combat_position: Vector2 = session.cards[id].position + (drag_delta if dragging == id else Vector2.ZERO)
 			views[id].position = _combat_hold.pose if _combat_hold.get("id", -1) == id and dragging == id else Vector3(combat_position.x, 0.0, -combat_position.y)
+	for landing_id in _terminal_landings.keys():
+		if not _terminal_landing_current(landing_id): _terminal_landings.erase(landing_id)
 	var motion_records: Array = []
 	var motion_settings: Dictionary = CardDragInput.source_settings(catalog, session.scene_name)
 	var cycle_id: int = int(session.cycle.presentation_state().get("card_id", -1))
@@ -953,6 +960,7 @@ func _sync_views(real_delta: float = 0.0) -> void:
 			var id: int = stack.card_ids[index]
 			var card = session.cards[id]
 			var target := Vector3(stack.position.x, 0.06, -stack.position.y) + step * index
+			if _terminal_landings.has(id): target = _terminal_landings[id].target
 			var mode: String = "animated"
 			if held_index >= 0 and index >= held_index:
 				target += Vector3(drag_delta.x, 0, -drag_delta.y)
@@ -1290,6 +1298,7 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 		dragging = id # Lock the just-detached stack before placement can move its visible pose.
 		_sync_views()
 	dragging = id if _can_drag_card(id) else -1
+	if dragging == id: _terminal_landings.erase(id)
 	if dragging >= 0:
 		drag_start_position = session.card_target_position_3d(id)
 	if dragging >= 0 and not session.combat.membership.has(id):
@@ -1536,9 +1545,14 @@ func _finish_drag(screen: Vector2) -> void:
 			# Complex overlap settlement retains its existing, unaccepted adapter.
 			var source_release: bool = held_pose is Vector3 and _source_flee_unobstructed(id, result.position)
 			session.cards[id].position = released if source_release else result.position
+			var terminal_landing: bool = source_release and task.attackers == [id] and task.get("execution", {}).is_empty()
+			_terminal_landing_receipt = -1
 			if session.combat.flee(id):
 				_set_board_card_position(id, result.position)
+				if terminal_landing and _terminal_landing_receipt == task_id and not session.combat.tasks.has(task_id) and not combat_layouts.has(task_id) and not combat_rectangles.has(task_id):
+					_begin_terminal_landing(id, held_pose, result.position)
 				notice.text = "Fled combat."
+			_terminal_landing_receipt = -1
 		session.drag.finish_terminal()
 		drag_delta = Vector2.ZERO
 		_refresh()
@@ -1975,6 +1989,8 @@ func _show_title() -> void:
 	drag_grant = -1
 	drag_delta = Vector2.ZERO
 	card_motion.reset()
+	_terminal_landings.clear()
+	_terminal_landing_receipt = -1
 	combat_presentation.reset()
 	camera.h_offset = 0
 	camera.v_offset = 0
@@ -2265,6 +2281,37 @@ func _clamp_stack_position(card_id: int, point: Vector2, placement_rules: bool =
 	var state: Dictionary = BoardLayout.stack_state(-1, point, _card_footprint(card_id), count, false, _stack_step())
 	# Held cards can enter the source trade header; ordinary placement cannot.
 	return BoardLayout.enforce_placement(point, state, session.board_bounds, session.board_top_margin) if placement_rules else BoardLayout.clamp_to_bounds(point, state, session.board_bounds)
+
+# CardController terminal Flee registers the held singleton, then calls
+# SetTargetPosition -> SetTargetAnimated. EnforcePlacementRules flattens Y=0.
+# This owner is intentionally not generalized to overlap, survivors or stacks.
+func _begin_terminal_landing(id: int, held: Vector3, point: Vector2) -> void:
+	if not session.cards.has(id) or not views.has(id): return
+	var card = session.cards[id]
+	if not session.stacks.has(card.stack_id): return
+	var stack = session.stacks[card.stack_id]
+	var target := Vector3(point.x, 0, -point.y)
+	_terminal_landings[id] = {"card":card.get_instance_id(), "view":views[id].get_instance_id(), "stack":stack.get_instance_id(), "target":target, "point":point}
+	if not _terminal_landing_current(id):
+		_terminal_landings.erase(id)
+		return
+	var identity := "%d:%s" % [card.get_instance_id(),card.definition_guid]
+	card_motion.states[id] = {"identity":identity,"position":held,"target":held,"mode":"instant","elapsed":0.0}
+	card_motion.set_target_animated(id,target)
+	views[id].position = held
+
+func _terminal_landing_current(id: int) -> bool:
+	if not _terminal_landings.has(id) or not session.cards.has(id): return false
+	var owner: Dictionary = _terminal_landings[id]
+	var card = session.cards[id]
+	if card.get_instance_id() != owner.card or not session.stacks.has(card.stack_id): return false
+	var stack = session.stacks[card.stack_id]
+	if stack.get_instance_id() != owner.stack or stack.card_ids != [id] or stack.position != owner.point: return false
+	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return false
+	if views[id].get_instance_id() != owner.view or views[id].get_parent() != self or global_transform != Transform3D.IDENTITY: return false
+	if dragging == id or session.combat.dragged.has(id) or session.combat.membership.has(id) or session.equipment.owners.has(id): return false
+	if int(session.cycle.presentation_state().get("card_id",-1)) == id or combat_presentation.sample_actor(id) != null: return false
+	return true
 
 # Correct live XZ only where the ordinary source/display height mapping is known.
 # Ordinary roots add +0.06; drag/damped/combat owners do not share that contract.
@@ -2735,6 +2782,7 @@ func _combat_terminal_flee_layout(task_id: int) -> Dictionary:
 		var point := Vector2(pose.x, -pose.z)
 		positions[id] = point
 		targets[id] = BoardLayout.enforce_placement(point, BoardLayout.stack_state(id, point, _card_footprint(id), 1), session.board_bounds, session.board_top_margin)
+	_terminal_landing_receipt = task_id
 	return {"ok": true, "ids": task.defenders.duplicate(), "positions": positions, "targets": targets}
 
 func _combat_resize_overlaps(task_id: int) -> Array:

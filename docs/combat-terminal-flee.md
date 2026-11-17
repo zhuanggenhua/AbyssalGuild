@@ -113,3 +113,27 @@ when terminal Flee layout is called. Cooldown bookkeeping is cleared between
 independent cases so a wrongly sent pick cannot hide behind cooldown rejection.
 No replacement audio assets or production cooldown changes are introduced. This
 proves dispatch and clip routing, not listening/acoustic or paired Unity parity.
+
+## Bounded terminal departure landing
+
+The admitted idle, last-attacker, no-contact held Flee now carries its actual
+held native transform into the newly registered singleton's landing. This is
+not a screenshot-derived offset: original `CardController.HandleCombatDrop`
+calls `Board.EnforcePlacementRules(transform.position, stack)` (flattened Y=0),
+then `CardStack.SetTargetPosition`, then `CardInstance.SetTargetAnimated`.
+Pinned CardSettings uses MoveDuration 0.1 and Ease 6 (OutQuad); the tween's
+`SetUpdate(true)` uses real delta even while the board is paused.
+
+The scoped owner binds card, view and singleton stack identities plus the
+unchanged placement target. It survives animation completion at Y=0 instead
+of snapping to the ordinary adapter's +0.06. New drag, changed stack/target,
+combat, equipment, cycle or combat presentation ownership invalidates it.
+Landing is seeded only after a source terminal layout receipt and observed
+removal of the task and rectangle. No global stack-height change is made.
+
+Native headless checks cover actual release pose, quarter/half OutQuad points,
+zero-delta refresh, paused completion, stable ground, unaffected survivors and
+ownership rejection/ordinary retarget fallback. These checks do not establish
+Unity/Godot rendered screenshot equality, Physics.SyncTransforms equivalence,
+defender landing, inside-rectangle RepositionCard tween, overlap landing,
+nonterminal departure, or arbitrary ownership-transition parity.

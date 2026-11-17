@@ -143,6 +143,25 @@ func run() -> void:
 	expect(b.feedback.next_player == (slot_before+1)%b.feedback.pool.size() and b.feedback.pool[slot_before].stream == b.feedback.stream_for_event("CardDrop"), "combat release allocates only original CardDrop clip")
 	expect(s.card_target_position(departing).is_equal_approx(settled), "terminal release applies header placement after Flee despite inside release point")
 	expect(b._combat_hold.is_empty(), "terminal hold consumed")
+	var landing_target := Vector3(settled.x,0,-settled.y)
+	expect(b.views[departing].position.is_equal_approx(actual), "terminal release seeds actual held pose without snap")
+	expect(b._terminal_landings.has(departing), "terminal departure has bounded presentation owner")
+	var settings: Dictionary = b.CardDragInput.source_settings(b.catalog,s.scene_name)
+	expect(is_equal_approx(settings.moveDuration,.1) and settings.moveEase == 6, "locked source duration and OutQuad")
+	b._sync_views(.025)
+	expect(b.views[departing].position.is_equal_approx(actual.lerp(landing_target,.4375)), "quarter-duration source OutQuad landing")
+	b._refresh()
+	expect(b.views[departing].position.is_equal_approx(actual.lerp(landing_target,.4375)), "zero-delta refresh preserves tween")
+	b._sync_views(.025)
+	expect(b.views[departing].position.is_equal_approx(actual.lerp(landing_target,.75)), "half-duration source OutQuad landing")
+	s.paused = true
+	b._advance_running_frame(.05)
+	expect(b.views[departing].position.is_equal_approx(landing_target), "landing finishes on real delta while board paused")
+	b._refresh(); b._sync_views(.2)
+	expect(b.views[departing].position == landing_target, "completed source landing stays ground zero")
+	expect(is_equal_approx(b.views[first].position.y,.06) and is_equal_approx(b.views[second].position.y,.06), "landing does not globally change ordinary survivor presentation")
+	s.paused = false
+
 	expect(is_equal_approx(s.ai.agents[first].move_timer, expected.move_first), "producer movement draw first")
 	expect(is_equal_approx(s.world.production_timers[first], expected.produce_first), "producer production draw second")
 	expect(is_equal_approx(s.ai.agents[second].move_timer, expected.move_second), "next survivor movement draw third")
@@ -169,6 +188,29 @@ func run() -> void:
 	s.ai.leave_combat(first)
 	expect(is_equal_approx(s.ai.agents[first].move_timer, missing_move) and is_equal_approx(s.world.production_timers[first],missing_produce), "missing agent starts both timers once")
 	expect(s.rng.randi() == missing_next, "missing agent registration no duplicate draw")
+
+	var owner: Dictionary = b._terminal_landings[departing]
+	var old_view: int = owner.view
+	owner.view = -1
+	expect(not b._terminal_landing_current(departing), "replaced view cannot inherit landing ownership")
+	owner.view = old_view
+	var old_stack: int = owner.stack
+	owner.stack = -1
+	expect(not b._terminal_landing_current(departing), "new stack identity cannot inherit landing ownership")
+	owner.stack = old_stack
+	b.dragging = departing
+	expect(not b._terminal_landing_current(departing), "new drag supersedes landing ownership")
+	b.dragging = -1
+	s.equipment.owners[departing] = first
+	expect(not b._terminal_landing_current(departing), "equipment presentation supersedes landing ownership")
+	s.equipment.owners.erase(departing)
+	var retarget: Vector2 = settled + Vector2(-.2,0)
+	b._set_board_card_position(departing,retarget)
+	b._sync_views(0)
+	expect(not b._terminal_landings.has(departing), "new target revokes bounded landing owner")
+	expect(b.card_motion.states[departing].start == landing_target, "retarget starts from actual settled presentation")
+	b._sync_views(.1)
+	expect(b.views[departing].position.is_equal_approx(Vector3(retarget.x,.06,-retarget.y)), "out-of-scope retarget uses ordinary adapter")
 	s.combat.terminal_flee_layout_sampler = sampler
 	s.combat.terminal_flee_rect_closer = closer
 	s.event_occurred.disconnect(on_end)
