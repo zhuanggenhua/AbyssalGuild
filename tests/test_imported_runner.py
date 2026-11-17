@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import run_imported_tests as runner
 
 MARKERS = {
+    "test_journal_body_ownership": "Journal body private lifecycle: verified\nJournal body ownership: 1/1 checks passed",
     "test_combat_ranged_merge_center_board": "Combat ranged merge center Board: 1/1 passed",
     "test_combat_preenter_board": "Combat preenter Board: 52/52 passed",
     "test_combat_ranged_flee_board": "Combat ranged flee Board: 142/142 passed",
@@ -274,6 +275,12 @@ class ImportedRunnerTests(unittest.TestCase):
         self.assertEqual(set(MARKERS), {name for name, _ in runner.SUITES})
         for name, pattern in runner.SUITES:
             self.assertRegex(MARKERS[name], pattern)
+
+    def test_journal_body_requires_private_lifecycle_and_equal_counts(self):
+        pattern = dict(runner.SUITES)["test_journal_body_ownership"]
+        self.assertNotRegex("Journal body ownership: 28/28 checks passed", pattern)
+        self.assertNotRegex("Journal body private lifecycle: verified\nJournal body ownership: 29/30 checks passed", pattern)
+        self.assertRegex(MARKERS["test_journal_body_ownership"], pattern)
 
     def test_travel_expansion_cannot_pass_with_only_uncached_marker(self):
         pattern = dict(runner.SUITES)["test_source_travel_layout_board"]

@@ -103,6 +103,8 @@ var trade_zones: Array = []
 var trade_views: Dictionary = {}
 var trade_activated: Dictionary = {}
 var vendor_unlock = VendorUnlockPresenter.new()
+var journal_bodies: Dictionary = {}
+var journal_body_state: Dictionary = {}
 var ledger_visible_ids: Dictionary = {}
 var ledger_key: String = ""
 var ledger_expansion: Dictionary = {}
@@ -372,6 +374,7 @@ func _friendly_changed(enabled: bool) -> void:
 	_play_ui_click()
 
 func _show_journal_tab(tab: String) -> void:
+	if not journal_bodies.has(tab): return
 	if not ledger.is_visible_in_tree() or _ui_pause_active() or _navigation_modal_active(): return
 	active_tab = tab
 	_refresh_ledger()
@@ -451,12 +454,18 @@ func _build_ui() -> void:
 		var tab_button := _button(tab.capitalize(), tabs, _show_journal_tab.bind(tab))
 		tab_button.clip_text = false
 		tab_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	ledger = RichTextLabel.new()
-	ledger.meta_hover_started.connect(_on_ledger_hover)
-	ledger.meta_hover_ended.connect(func(_meta): info_requests.submit("journal", 0, {}))
-	ledger.custom_minimum_size = Vector2(210, 260)
-	ledger.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	detail_panel.add_child(ledger)
+	for tab in ["quests", "recipes"]:
+		var body := RichTextLabel.new()
+		body.name = "QuestsBody" if tab == "quests" else "RecipesBody"
+		body.meta_hover_started.connect(_on_ledger_hover.bind(tab))
+		body.meta_hover_ended.connect(_on_ledger_hover_ended.bind(tab))
+		body.meta_clicked.connect(_on_ledger_group_clicked.bind(tab))
+		body.custom_minimum_size = Vector2(210, 260)
+		body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		detail_panel.add_child(body)
+		journal_bodies[tab] = body
+		journal_body_state[tab] = {"key":"", "info":{}, "ids":{}, "groups":{}}
+	_sync_active_journal_body()
 	# Optional native diagnostics have no source HUD button; F3 reveals them.
 	detail_toggle = _button(">>", source_hud, func(): journal_slide.toggle())
 	detail_toggle.position = Vector2(1174, 835)
@@ -782,7 +791,8 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	trade_zones.clear()
 	trade_activated.clear()
 	ledger_key = ""
-	ledger_session_id = 0 # Entering a source scene creates a fresh QuestsView.
+	ledger_session_id = 0 # Entering a source scene creates fresh MenuViews.
+	active_tab = "quests" # Authored UIRoot starts on Quests, not the previous scene tab.
 	if not session.collection.changed.is_connected(_collection_changed):
 		session.collection.changed.connect(_collection_changed)
 	slots.configure(session.campaign, slot_root)
@@ -1063,12 +1073,14 @@ func _configure_source_hud() -> void:
 		tab.add_theme_font_size_override("font_size", 32)
 		var source_path := "MenuPanel/Header/" + ("QuestsToggle" if index == 0 else "RecipesToggle") + "/Label"
 		preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(tab, hud_layout.text_record(source_path))
-	ledger.position = Vector2(20, header.size.y+10)
-	ledger.size = Vector2(menu.size.x-40, menu.size.y-header.size.y-20)
-	ledger.add_theme_font_size_override("normal_font_size", 30)
 	var source_fonts = preload("res://scripts/ui/source_font_registry.gd").shared()
-	# Source MenuView adds TMP dynamically; its font is the locked TMP Settings default.
-	source_fonts.bind_control(ledger, {"font_guid": str(source_fonts.manifest.get("tmp_default_font_guid", ""))})
+	# Both source views persist and own separate scroll/content. Keep the existing
+	# renderer/geometry; this change does not claim TMP/ScrollRect pixel parity.
+	for body: RichTextLabel in journal_bodies.values():
+		body.position = Vector2(20, header.size.y+10)
+		body.size = Vector2(menu.size.x-40, menu.size.y-header.size.y-20)
+		body.add_theme_font_size_override("normal_font_size", 30)
+		source_fonts.bind_control(body, {"font_guid": str(source_fonts.manifest.get("tmp_default_font_guid", ""))})
 	source_fonts.bind_control(detail_toggle, hud_layout.text_record("MenuPanel/MenuToggle/Label"))
 	var watermark_record: Dictionary = hud_layout.text_record("Watermark")
 	source_fonts.bind_control(watermark, watermark_record)
@@ -1674,62 +1686,98 @@ func _refresh() -> void:
 func _refresh_ledger() -> void:
 	if not quest_journal.changed.is_connected(_on_quest_journal_changed):
 		quest_journal.changed.connect(_on_quest_journal_changed)
-	if not ledger.meta_clicked.is_connected(_on_ledger_group_clicked):
-		ledger.meta_clicked.connect(_on_ledger_group_clicked)
 	if ledger_session_id != session.get_instance_id() or ledger_scene_name != session.scene_name:
 		ledger_session_id = session.get_instance_id()
 		ledger_scene_name = session.scene_name
 		ledger_expansion.clear()
 		ledger_quest_order.clear()
 		ledger_key = ""
+		for tab in journal_body_state:
+			journal_body_state[tab].key = ""
+			journal_bodies[tab].get_v_scroll_bar().value = 0
+			info_requests.submit(_journal_request_key(tab), 0, {})
 		quest_journal.bind(session.quest_tracker)
 		info_requests.submit("journal", 0, {})
 	ledger_quest_order = preload("res://scripts/ui/journal_groups.gd").reconcile_quest_order(session.quest_tracker, quest_journal.order)
-	var rows: Array = preload("res://scripts/ui/journal_groups.gd").describe(catalog, session, active_tab, ledger_expansion, ledger_quest_order, quest_journal.captions())
+	# MenuView hides through CanvasGroup, not SetActive: both views continue
+	# observing activation/completion/discovery even when their tab is hidden.
+	for tab in journal_bodies:
+		_refresh_journal_body(tab)
+	_sync_active_journal_body()
+
+func _refresh_journal_body(tab: String) -> void:
+	var body: RichTextLabel = journal_bodies[tab]
+	var state: Dictionary = journal_body_state[tab]
+	var rows: Array = preload("res://scripts/ui/journal_groups.gd").describe(catalog, session, tab, ledger_expansion, ledger_quest_order, quest_journal.captions())
 	# Changing progress must not recreate a source button or renew a hover request.
 	# Keep compatibility descriptors current, but exclude them from display identity.
-	ledger_info.clear()
+	state.info.clear()
 	var display_rows: Array = []
 	for row in rows:
-		if not row.id.is_empty(): ledger_info[row.id] = row.get("info", {})
+		if not row.id.is_empty(): state.info[row.id] = row.get("info", {})
 		var display: Dictionary = row.duplicate()
-		if active_tab == "quests": display.erase("info")
+		if tab == "quests": display.erase("info")
 		display_rows.append(display)
-	var signature: String = active_tab + str(display_rows)
-	if signature == ledger_key: return
-	ledger_key = signature
-	var scroll: float = ledger.get_v_scroll_bar().value
-	ledger.clear()
-	ledger_visible_ids.clear()
-	ledger_visible_groups.clear()
+	var signature: String = tab + str(display_rows)
+	if signature == state.key: return
+	state.key = signature
+	var scroll: float = body.get_v_scroll_bar().value
+	body.clear()
+	state.ids.clear()
+	state.groups.clear()
 	for row in rows:
 		if not row.group.is_empty():
-			ledger_visible_groups[row.group] = true
+			state.groups[row.group] = true
 			# Typed metadata prevents collisions with raw collection IDs.
-			ledger.push_meta({"journal_group": row.group}, RichTextLabel.META_UNDERLINE_ON_HOVER)
-			ledger.push_color(preload("res://scripts/ui/journal_groups.gd").header_color(catalog, active_tab))
+			body.push_meta({"journal_group": row.group}, RichTextLabel.META_UNDERLINE_ON_HOVER)
+			body.push_color(preload("res://scripts/ui/journal_groups.gd").header_color(catalog, tab))
 		elif not row.id.is_empty():
-			ledger_visible_ids[row.id] = true
-			ledger_info[row.id] = row.get("info", {})
-			ledger.push_meta(row.id, RichTextLabel.META_UNDERLINE_ON_HOVER)
-		ledger.push_font_size(35 if not row.group.is_empty() else 30)
-		ledger.add_text(row.text)
+			state.ids[row.id] = true
+			state.info[row.id] = row.get("info", {})
+			body.push_meta(row.id, RichTextLabel.META_UNDERLINE_ON_HOVER)
+		body.push_font_size(35 if not row.group.is_empty() else 30)
+		body.add_text(row.text)
 		if row.unread:
-			ledger.push_color(Color.RED)
-			ledger.add_text(" ●")
-			ledger.pop()
-		ledger.add_text("\n")
-		ledger.pop()
-		if not row.group.is_empty(): ledger.pop()
-		if not row.id.is_empty() or not row.group.is_empty(): ledger.pop()
-	ledger.get_v_scroll_bar().value = scroll
+			body.push_color(Color.RED)
+			body.add_text(" ●")
+			body.pop()
+		body.add_text("\n")
+		body.pop()
+		if not row.group.is_empty(): body.pop()
+		if not row.id.is_empty() or not row.group.is_empty(): body.pop()
+	body.get_v_scroll_bar().value = scroll
+
+func _journal_request_key(tab: String) -> String:
+	# Retain the existing quest requester key for callers; Recipes owns another.
+	return "journal" if tab == "quests" else "journal:recipes"
+
+func _sync_active_journal_body() -> void:
+	for tab in journal_bodies:
+		var body: RichTextLabel = journal_bodies[tab]
+		var selected_tab: bool = tab == active_tab
+		if body.visible and not selected_tab:
+			info_requests.submit(_journal_request_key(tab), 0, {})
+		body.visible = selected_tab
+		body.mouse_filter = Control.MOUSE_FILTER_STOP if selected_tab else Control.MOUSE_FILTER_IGNORE
+	# Compatibility references always describe the selected persistent view.
+	ledger = journal_bodies[active_tab]
+	var state: Dictionary = journal_body_state[active_tab]
+	ledger_key = state.key
+	ledger_info = state.info
+	ledger_visible_ids = state.ids
+	ledger_visible_groups = state.groups
+
+func _on_ledger_hover_ended(_meta: Variant, tab: String) -> void:
+	info_requests.submit(_journal_request_key(tab), 0, {})
 
 func _on_quest_journal_changed() -> void:
 	# Source activation/completion updates its buttons synchronously. This path
 	# only updates journal presentation, never geometry, transactions, or saves.
 	if running: _refresh_ledger()
 
-func _on_ledger_group_clicked(meta: Variant) -> void:
+func _on_ledger_group_clicked(meta: Variant, tab: String = "") -> void:
+	if tab.is_empty(): tab = active_tab
+	if tab != active_tab: return
 	if not meta is Dictionary or meta.size() != 1 or not meta.get("journal_group") is String: return
 	if not ledger.is_visible_in_tree() or not ledger_visible_groups.has(meta.journal_group) or _ui_pause_active() or _navigation_modal_active(): return
 	var key: String = meta.journal_group
@@ -1737,11 +1785,13 @@ func _on_ledger_group_clicked(meta: Variant) -> void:
 	_refresh_ledger()
 	_play_ui_click()
 
-func _on_ledger_hover(meta: Variant) -> void:
+func _on_ledger_hover(meta: Variant, tab: String = "") -> void:
+	if tab.is_empty(): tab = active_tab
+	if tab != active_tab: return
 	if not meta is String or not ledger.is_visible_in_tree() or not ledger_visible_ids.has(meta): return
 	# MenuView queries GetItemInfo at pointer entry, not at the previous refresh.
 	var info: Dictionary = quest_journal.info(meta) if active_tab == "quests" else ledger_info.get(meta, {})
-	info_requests.submit("journal", 0, info)
+	info_requests.submit(_journal_request_key(tab), 0, info)
 	session.collection.mark_seen(meta)
 
 func _collection_changed() -> void:
@@ -1992,7 +2042,8 @@ func _show_title() -> void:
 	if running: options_panel.reset_source_lifecycle()
 	quest_journal.clear()
 	ledger_session_id = 0
-	info_requests.submit("journal", 0, {})
+	for tab in journal_bodies:
+		info_requests.submit(_journal_request_key(tab), 0, {})
 	world_post_process.cancel()
 	journal_slide.reset(false)
 	_clear_card_feedback()

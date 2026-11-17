@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Completion evidence is deliberate: exit(0) alone must not turn an early return
 # or a private-resource skip into a successful validation.
 SUITES = (
+    ("test_journal_body_ownership", r"(?s)Journal body private lifecycle: verified.*Journal body ownership: ([1-9]\d*)/\1 checks passed"),
     ("test_combat_slot_return_board", r"PASS combat slot return: ([1-9]\d*)/\1"),
     ("test_combat_terminal_flee_board", r"Combat terminal flee Board: ([1-9]\d*)/\1 passed"),
     ("test_combat_preenter_board", r"Combat preenter Board: ([1-9]\d*)/\1 passed"),

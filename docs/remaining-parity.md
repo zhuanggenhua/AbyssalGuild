@@ -4,6 +4,8 @@ This is a source-audit checklist, not a claim that the game is complete. Referen
 StackCraft `a11a89b04cea8370476f2559b639bb9b4cbc08d8`. The initial static audit did not execute Unity; later diagnostic launch attempts are described below.
 The private StackCraft subtree passes the 1327-file source lock; supplemental external font inputs have their own same-commit hash lock.
 
+Independent Journal body scroll/content/hover ownership now has a bounded [source-backed adapter and native lifecycle fixture](source-journal-body-ownership.md). Header Toggle transitions, exact ScrollRect dynamics and TMP rendering remain outside this slice.
+
 ## Current acceptance boundary (reviewed at 4c9e241, 2026-11-15)
 
 This status reconciliation is pinned to `4c9e2413351cd25e46b123b3500a51a91a8b7e5b`; it introduces no new runtime or visual evidence. Dated sections below preserve historical findings. Later linked source adapters supersede their implementation status only within each documented admission branch, never all cross-engine acceptance.
