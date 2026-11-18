@@ -1,5 +1,11 @@
 extends SceneTree
 const Board = preload("res://scripts/ui/board.gd")
+class DayFeedback extends "res://scripts/ui/audio_feedback.gd":
+	var probes: Array = []
+	var observe: Callable
+	func play_event(name: String) -> bool:
+		if name=="Click" and observe.is_valid(): probes.append(observe.call())
+		return super.play_event(name)
 const Clock = preload("res://scripts/ui/day_clock.gd")
 var checks := 0
 var failures := 0
@@ -9,8 +15,17 @@ func check(ok: bool, label: String) -> void:
 		failures += 1
 		printerr("FAIL: ", label)
 func _init() -> void: call_deferred("run")
+func mouse(index: int, down: bool, pos: Vector2) -> void:
+	var motion := InputEventMouseMotion.new()
+	motion.position=pos; motion.global_position=pos
+	root.push_input(motion,true)
+	var event := InputEventMouseButton.new()
+	event.button_index=index; event.pressed=down; event.position=pos; event.global_position=pos
+	root.push_input(event,true)
+
 func run() -> void:
 	var board = Board.new()
+	board.feedback.free(); board.feedback = DayFeedback.new()
 	var isolated := "user://day-clock-%d" % Time.get_ticks_usec()
 	board.slot_root = isolated + "/slots"
 	board.options_path = isolated + "/options.json"
@@ -19,6 +34,11 @@ func run() -> void:
 	await process_frame
 	board.set_process(false)
 	check(board.data_error == OK, "required actual source loaded")
+	if board.data_error != OK:
+		board.queue_free()
+		await process_frame
+		quit(1)
+		return
 	var has_media := FileAccess.file_exists("res://assets/imported/manifest.json")
 	var resource_failures: int = failures
 	if not has_media: print("SKIP: private day clock artwork (optional manifest absent)")
@@ -47,9 +67,32 @@ func run() -> void:
 	board.session.elapsed = board.session.day_duration * 0.5
 	board._refresh()
 	check(is_equal_approx(board.day_clock.progress.value, 0.5), "live half day fill")
-	for pace in [2, 0, 1]:
-		board.day_clock.pressed.emit()
-		check(board.session.time_pace() == pace, "live clock click pace %d" % pace)
+	var click_probe: DayFeedback = board.feedback
+	click_probe.observe = func(): return [board.session.time_pace(),board.day_clock.icon]
+	await process_frame
+	var pos: Vector2 = board.day_clock.get_global_rect().get_center()
+	check(board.day_clock.button_mask==7,"source DayTimeUI covers all mouse actions from UIRoot")
+	for index in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]:
+		var before: int = board.session.time_pace()
+		var after: int = (before+1)%3
+		var count := click_probe.probes.size()
+		mouse(index,true,pos)
+		check(board.session.time_pace()==before and click_probe.probes.size()==count,"no cycle/sound on button down")
+		mouse(index,false,Vector2(-100,-100))
+		check(board.session.time_pace()==before and click_probe.probes.size()==count,"outside release cancels cycle")
+		mouse(index,true,pos)
+		mouse(index,false,pos)
+		check(board.session.time_pace()==after and click_probe.probes.size()==count+1
+			and click_probe.probes.back()[0]==after,"exactly one pace cycle before Click sound on matching release: %d" % index)
+		if has_media:
+			var icons: Array = board.day_clock.source_config.pace_icons
+			check(icons.size()==3 and click_probe.probes.size()==count+1
+				and click_probe.probes.back()[1]==board.visual_assets.texture(icons[after])
+				and board.day_clock.icon==click_probe.probes.back()[1],"exact private pace image changes before Click request")
+	# Normalize so failures in the sequence don't cascade into unrelated assertions.
+	board.session.set_speed(1.0)
+	board._refresh()
+	click_probe.observe=Callable()
 	var old_icon_disabled: Color = board.day_clock.get_theme_color("icon_disabled_color")
 	var normal_icon: Texture2D = board.day_clock.icon
 	var normal_fill: float = board.day_clock.progress.value
@@ -73,6 +116,9 @@ func run() -> void:
 		check(board.day_clock.icon==normal_icon and board.day_clock.progress.value==normal_fill and board.day_clock.get_rect()==normal_rect,"pause tint does not alter asset fill or rect")
 	print("PACE_PAUSE_LIFECYCLE pause visible=",board.day_clock.visible," disabled=",board.day_clock.disabled," tint=",board.day_clock.get_theme_color("icon_disabled_color"))
 	check(board.day_clock.disabled, "menu external pause disables clock")
+	for index in [1,2,3]:
+		mouse(index,true,pos); mouse(index,false,pos)
+	check(board.session.time_pace()==1,"real Pause overlay prevents all three clock events")
 	check(board.day_clock.get_theme_color("font_disabled_color")==Color.WHITE,"external input lock does not fabricate source Selectable dimming")
 	board._cycle_clock_pace()
 	check(board.session.time_pace() == 1, "menu blocks clock without replacing saved pace")
@@ -96,6 +142,9 @@ func run() -> void:
 	board._refresh()
 	check(board.day_button.visible, "persistent day action survives source status hiding")
 	check(board.day_clock.get_theme_color("icon_disabled_color")==old_icon_disabled,"hidden day end restores icon fallback")
+	for index in [1,2,3]:
+		mouse(index,true,pos); mouse(index,false,pos)
+	check(board.session.phase=="feeding","day-ended clock cannot consume or transition through pointer release")
 	board._cycle_clock_pace()
 	check(board.session.phase == "feeding", "clock cannot advance day-end phase")
 	# Opening the journal during day-end must not be undone on every refresh.
@@ -107,6 +156,25 @@ func run() -> void:
 	board._refresh()
 	check(board.day_clock.visible and board.stats_box.visible and board.session.time_pace() == 1, "new day restores clock stats and normal pace")
 	board.session.scene_name = "Island"
+	board.day_clock.configure(board.catalog.data,"Island",board.visual_assets)
+	board._refresh()
+	check(board.day_clock.button_mask==7,"Island source scene references same live DayTimeUI")
+	pos=board.day_clock.get_global_rect().get_center()
+	mouse(MOUSE_BUTTON_RIGHT,true,pos); mouse(MOUSE_BUTTON_RIGHT,false,pos)
+	check(board.session.time_pace()==2,"Island clock handles actual matching secondary release")
+	var changed: Dictionary = board.catalog.data.duplicate(true)
+	for prefab in changed.get("referenced_prefabs", []):
+		if prefab.get("guid") != "5e2985d7789c5254b831d166e6931134": continue
+		for doc in prefab.get("documents", []):
+			if str(doc.get("file_id"))=="7199047651661109440": doc.fields.m_Enabled=0
+	check(not Clock.resolve(changed,"Island").get("pointer_click",false),"disabled DayTimeUI cannot widen pointer acceptance")
+	var fallback_pace: int = board.session.time_pace()
+	board.day_clock.configure({},"Island",board.visual_assets)
+	check(board.day_clock.button_mask==MOUSE_BUTTON_MASK_LEFT,"source reconfiguration restores fallback primary-only")
+	mouse(MOUSE_BUTTON_RIGHT,true,pos); mouse(MOUSE_BUTTON_RIGHT,false,pos)
+	check(board.session.time_pace()==fallback_pace,"missing source cannot widen fallback pointer admission")
+	board.day_clock.configure(board.catalog.data,"Island",board.visual_assets)
+	board.session.set_speed(1.0)
 	board._refresh()
 	check(board.market_heading.text == "STACKCRAFT / ISLAND", "live scene identity replaces literal Main")
 	# Re-enter the actual pause path then invalidate only its presentation owner.

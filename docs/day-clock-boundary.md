@@ -52,3 +52,19 @@ routing in menu-only and overlapping-vendor cases, ending-cycle Escape rejection
 hidden-repeat rejection and preservation of the day input lock. The pre-fix board
 fails those new close/repeat assertions. Pause input, navigation, source pause
 layout, options UI, vendor and cycle Board regressions also pass.
+
+## DayTimeUI pointer path
+
+The locked Main and Island scenes reference the original UIRoot. Its
+`DayTimeUI` component `7199047651661109440` implements an unfiltered
+`IPointerClickHandler`, not the primary-only Unity Button callback. The
+active owner has a raycastable background and a blocking CanvasGroup.
+The linked Input System UI module supplies left, right and middle click.
+
+The mounted day clock accepts all three matching press/release pairs only
+when those locked records are present. Each release cycles Normal → Fast →
+Paused → Normal, presents the selected source icon, then requests one Click. Release outside cancels; Pause and hidden
+day-end remain governed by their existing input/state owners. Missing or
+disabled source records do not widen the fallback's primary-only mask.
+The board test uses live viewport mouse events and private icon assets;
+it does not establish multi-pointer, other device, or Unity frame parity.

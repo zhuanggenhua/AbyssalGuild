@@ -1957,8 +1957,9 @@ func _refresh_market_labels() -> void:
 func _cycle_clock_pace() -> void:
 	if not running or title_panel.visible or _ui_pause_active() or session.phase != "playing": return
 	session.cycle_time_pace()
-	feedback.play_event("Click")
 	_refresh()
+	# DayTimeUI sets its selected pace sprite before requesting Click.
+	feedback.play_event("Click")
 
 func _toggle_pause() -> void:
 	if _ui_pause_active(): return

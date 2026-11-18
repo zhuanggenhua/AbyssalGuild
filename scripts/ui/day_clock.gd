@@ -89,8 +89,32 @@ static func resolve(source: Dictionary, scene_name: String) -> Dictionary:
 				if not reference is Dictionary or str(reference.get("guid", "")).is_empty(): return fallback
 				guids.append(str(reference.guid))
 			var color: Dictionary = fill.get("m_Color", {})
-			return {"source_backed": true, "text_record": Prefs._fields(documents, fields.get("dayText", {})), "fill_record": fill, "pace_record": Prefs._fields(documents, fields.get("paceImage", {})), "pace_image_id": str(fields.get("paceImage", {}).get("fileID", "")), "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
+			return {"source_backed": true, "pointer_click": _source_pointer_click(source, scene_name, prefab, document), "text_record": Prefs._fields(documents, fields.get("dayText", {})), "fill_record": fill, "pace_record": Prefs._fields(documents, fields.get("paceImage", {})), "pace_image_id": str(fields.get("paceImage", {}).get("fileID", "")), "pace_icons": guids, "color": Color(float(color.get("r", 0.22)), float(color.get("g", 0.65)), float(color.get("b", 0.88)), float(color.get("a", 0.8)))}
 	return fallback
+
+## DayTimeUI is an IPointerClickHandler, not a Unity Button. The locked
+## UIRoot delivers Left/Right/MiddleClick and the callback ignores button type.
+## Widen only this source surface; fallback and all board guards stay intact.
+static func _source_pointer_click(source: Dictionary, scene_name: String, prefab: Dictionary, document: Dictionary) -> bool:
+	if scene_name not in ["Main","Island"] or source.get("provenance", {}).get("source_commit", "") != TEXT_SOURCE_COMMIT: return false
+	if prefab.get("guid", "") != "5e2985d7789c5254b831d166e6931134" or str(document.get("file_id", "")) != "7199047651661109440": return false
+	var fields: Dictionary = document.get("fields", {})
+	var owner := {"fileID":"3516415121596119409"}
+	if fields.get("m_Enabled", 0) != 1 or fields.get("m_GameObject", {}) != owner or fields.get("m_Script", {}).get("guid", "") != "68b1dc8707246474088b42671dd6ecaa": return false
+	var docs: Array = prefab.get("documents", [])
+	var go := Prefs._fields(docs, owner)
+	var background := Prefs._fields(docs, {"fileID":"4170873348797849815"})
+	var group := Prefs._fields(docs, {"fileID":"12492152183905907"})
+	if go.get("m_IsActive", 0) != 1 or background.get("m_GameObject", {}) != owner or group.get("m_GameObject", {}) != owner: return false
+	if background.get("m_Enabled", 0) != 1 or background.get("m_RaycastTarget", 0) != 1 or group.get("m_Enabled", 0) != 1 or group.get("m_BlocksRaycasts", 0) != 1: return false
+	var input := Prefs._fields(docs, {"fileID":"7391794937993142030"})
+	if input.get("m_Enabled", 0) != 1 or input.get("m_Script", {}).get("guid", "") != "01614664b831546d2ae94a42149d80ac": return false
+	var bindings := {"m_LeftClickAction":"3001919216989983466", "m_RightClickAction":"-4090225696740746782",
+		"m_MiddleClickAction":"-2185481485913320682"}
+	for key in bindings:
+		var action: Dictionary = input.get(key, {})
+		if str(action.get("fileID", "")) != bindings[key] or action.get("guid", "") != "052faaac586de48259a63d0c4782560b": return false
+	return true
 
 func _init() -> void:
 	name = "DayClock"
@@ -120,6 +144,9 @@ func _init() -> void:
 
 func configure(source: Dictionary, scene_name: String, visual_assets) -> void:
 	source_config = resolve(source, scene_name)
+	button_mask = MOUSE_BUTTON_MASK_LEFT
+	if source_config.get("pointer_click", false):
+		button_mask |= MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
 	assets = visual_assets
 	_configure_text_tint(source)
 	_configure_progress_precision(source)
