@@ -198,6 +198,51 @@ func test_source_canvas_order(board, q: Control) -> void:
 	board._sync_source_info()
 	await settle()
 
+## Real locked header pointer entry must arbitrate even when its info is blank.
+func test_source_group_hover(board) -> void:
+	board.journal_slide.reset(true)
+	await settle()
+	var seen_before: Dictionary = board.session.collection.seen_items.duplicate(true)
+	var quest_rows: Control = board.journal_rows.quests
+	var key := "quests:Main:0"
+	var group: Control = quest_rows.rows.get("group:" + key)
+	check(group != null and group.is_visible_in_tree(),"actual Introduction header is visible")
+	if group == null: return
+	var hit: Vector2 = group.get_global_transform_with_canvas() * Vector2(24,12)
+	board.info_requests.submit("older_hover",0,{"header":"Older"})
+	point_event(hit)
+	check(board.info_requests.requests.has("journal") and board.info_requests.current().is_empty(),
+		"locked non-null QuestGroup owns a blank request over older hover")
+	board._sync_source_info()
+	check(not board.card_hover.visible and not board.info_action.visible,"blank owner does not draw an empty panel or action")
+	board.info_requests.submit("higher",1,{"header":"Higher"})
+	check(board.info_requests.current().get("header")=="Higher","blank Hover cannot mask higher priority")
+	board.info_requests.submit("higher",1,{})
+	check(board.info_requests.current().is_empty(),"releasing higher request restores the blank owner")
+	point_event(Vector2(8,8))
+	check(not board.info_requests.requests.has("journal") and board.info_requests.current().get("header")=="Older",
+		"exiting the QuestGroup immediately restores its older peer")
+	check(board.session.collection.seen_items==seen_before,"group hover does not mark a quest seen")
+	for record in board.catalog.data.get("recipes", []):
+		var fields: Dictionary = record.fields
+		if board.catalog.fields(board.catalog.ref_guid(fields.get("resultingCard",{}))).is_empty(): continue
+		board.session.discovered_recipes[str(fields.id)] = true
+		break
+	board._show_journal_tab("recipes")
+	board._refresh_ledger()
+	await settle()
+	var recipe_rows: Control = board.journal_rows.recipes
+	check(not board.ledger_visible_groups.is_empty(),"locked recipe category visible")
+	if board.ledger_visible_groups.is_empty(): return
+	var category: String = board.ledger_visible_groups.keys()[0]
+	board.info_requests.submit("journal:recipes",0,{"header":"Own recipe request"})
+	recipe_rows.meta_hover_started.emit({"journal_group":category})
+	check(not board.info_requests.requests.has("journal:recipes") and board.info_requests.current().get("header")=="Older",
+		"null Recipe category hover clears only its own key")
+	quest_rows.meta_hover_started.emit({"journal_group":key})
+	check(not board.info_requests.requests.has("journal"),"hidden QuestGroup cannot claim visible request")
+	board.info_requests.submit("older_hover",0,{})
+
 func run() -> void:
 	# Godot's isolated headless runner otherwise starts with a 64×64 viewport.
 	# Set the real input surface before laying out the test HUD.
@@ -310,6 +355,7 @@ func run() -> void:
 		await settle()
 		check(board.active_tab == "quests" and board.ledger == qrows, "real start-new source lifecycle restores authored Quests selection")
 		check(q.motion.position == 0 and r.motion.position == 0, "real start-new clears both native offsets")
+		await test_source_group_hover(board)
 		print("Journal body private lifecycle: verified")
 	else:
 		print("SKIP: private source start-new lifecycle unavailable")

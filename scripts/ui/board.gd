@@ -1906,9 +1906,14 @@ func _on_ledger_group_clicked(meta: Variant, tab: String = "") -> void:
 func _on_ledger_hover(meta: Variant, tab: String = "") -> void:
 	if tab.is_empty(): tab = active_tab
 	if tab != active_tab or not ledger.is_visible_in_tree(): return
-	# Header CreateItemButton passes null itemData and clears this view's hover.
+	# QuestsView passes its QuestGroup object: the empty result still competes
+	# at Hover priority. Recipes passes null and only clears its own key.
 	if meta is Dictionary and meta.size() == 1 and ledger_visible_groups.has(meta.get("journal_group")):
-		info_requests.submit(_journal_request_key(tab), 0, {})
+		var owner := _journal_request_key(tab)
+		if tab == "quests" and hud_layout.source_backed and catalog.data.get("provenance", {}).get("source_commit", "") == SourceColdCrafting.SOURCE_COMMIT:
+			info_requests.submit_blank(owner, 0)
+		else:
+			info_requests.submit(owner, 0, {})
 		return
 	if not meta is String or not ledger_visible_ids.has(meta): return
 	# MenuView queries GetItemInfo at pointer entry, not at the previous refresh.

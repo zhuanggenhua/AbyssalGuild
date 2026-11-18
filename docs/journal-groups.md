@@ -13,3 +13,14 @@ Static references: source `RecipesView`, `QuestsView`, `MenuView`, and the impor
 Validation: `tests/godot/test_journal_groups.gd` always tests pure ordering/filtering with synthetic data, then explicitly skips private integration when the import is absent. With the private import it also tests headless native signal integration, including collapsed discovery, completed history, tabs, scene replacement, new sessions, header tint, and read-state guards. Regression suites: `test_trade_collection_ui.gd` and `test_card_feedback_board.gd`. The trade fixture deliberately selects a recipe with a resulting card; exploration/null-result recipes do not have source recipe buttons.
 
 No Unity launch, windowed acceptance, or pixel-perfect layout claim is made. Native rows retain inline description/progress/ingredients rather than the source hover-info panel geometry. Locale-specific .NET collation is not emulated; current imported display names use ordinary case-insensitive text ordering.
+
+The original two headers do not have identical hover ownership.
+`QuestsView.PopulateView` gives `MenuView.CreateItemButton` a real QuestGroup;
+`GetItemInfo` returns an empty tuple, but `InfoPanel.RequestInfoDisplay` still
+registers it at Hover priority. On the locked source HUD the blank winner hides
+older equal-priority hover text without hiding a higher-priority request or
+marking anything seen. Pointer exit clears only that view's key and restores
+the next winner. Recipes passes null for its category header and clears only
+its own key instead. The synthetic/fallback HUD keeps its existing behavior.
+The imported test uses the actual Introduction row's viewport input and
+verifies this arbitration, no blank native panel, and both tab owners.
