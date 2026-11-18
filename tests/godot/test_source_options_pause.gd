@@ -20,6 +20,7 @@ func run() -> void:
 	board.set_process(false)
 	if board.options_panel.source_view == null:
 		assert(board.options_panel.close_button.button_mask == MOUSE_BUTTON_MASK_LEFT)
+		for button in board.pause_controls: assert(button.button_mask == MOUSE_BUTTON_MASK_LEFT)
 		print("Source Options/Pause layout: SKIP (licensed source unavailable)")
 	else:
 		var options = board.options_panel
@@ -137,8 +138,107 @@ func run() -> void:
 		assert(options._admit_source_close_pointer(original, view))
 		assert(options.reset_button.button_mask == MOUSE_BUTTON_MASK_LEFT)
 		print("Source Options Close: PASS (actual sequential L/R/M, outside, modal, disabled, save failure, hidden/reopen lifecycle, provenance and serialized graph)")
+		await verify_pause_pointer(board,pause)
 		print("Source Options/Pause layout: PASS (source tree, preferred sizes, control refs, focus, modal guards)")
 	board.queue_free()
 	await process_frame
 	await create_timer(0.5).timeout
 	quit()
+
+func click(index: int, position: Vector2) -> void:
+	click_at(index, true, position)
+	click_at(index, false, position)
+
+func verify_pause_pointer(board, view) -> void:
+	board.start_new()
+	assert(board.running and board.active_slot>0)
+	var options = board.options_panel
+	var played: Array[String] = []
+	board.pause_controls[0].play_click = func(): played.append("continue:" + str(board.pause_overlay.visible))
+	board.pause_controls[1].play_click = func(): played.append("options:" + str(options.visible))
+	board.pause_controls[2].play_click = func(): played.append("title:" + str(board.scene_transition.active()))
+	for index in [MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_LEFT]:
+		var cancel := InputEventKey.new()
+		cancel.keycode = KEY_ESCAPE; cancel.pressed = true
+		root.push_input(cancel)
+		cancel = InputEventKey.new()
+		cancel.keycode = KEY_ESCAPE; cancel.pressed = false
+		root.push_input(cancel)
+		await process_frame
+		assert(board.pause_overlay.visible and not options.visible)
+		var old := played.size()
+		var option_pos: Vector2 = board.pause_controls[1].get_global_rect().get_center()
+		click_at(index,true,option_pos)
+		assert(not options.visible and played.size()==old,"Pause Options does not trigger on mouse down")
+		click_at(index,false,Vector2(-100,-100))
+		assert(not options.visible and played.size()==old,"Pause Options cancels outside release")
+		click(index,option_pos); await process_frame
+		assert(options.visible and board.pause_overlay.visible and played.size()==old+1 and played.back()=="options:true",
+			"Pause Options mouse%d opens actual sibling before its one Click" % index)
+		click(index,option_pos)
+		assert(options.visible and played.size()==old+1,"Options sibling does not pass a click back to Pause")
+		click(index,options.close_button.get_global_rect().get_center()); await process_frame
+		assert(not options.visible and board.pause_overlay.visible,"Options Close returns to existing Pause")
+		var continue_pos: Vector2 = board.pause_controls[0].get_global_rect().get_center()
+		click_at(index,true,continue_pos)
+		assert(board.pause_overlay.visible and played.size()==old+1)
+		click_at(index,false,continue_pos); await process_frame
+		assert(not board.pause_overlay.visible and board.running and played.size()==old+2 and played.back()=="continue:false",
+			"Continue mouse%d resumes current session before its one Click" % index)
+		board._toggle_pause_menu()
+		await process_frame
+		var title_pos: Vector2 = board.pause_controls[2].get_global_rect().get_center()
+		var slot: int = board.active_slot
+		var slot_path: String = board.slots.slot_path(slot)
+		var slot_root: String = board.slot_root
+		var blocker := slot_root.path_join("pointer-test-blocker")
+		var file := FileAccess.open(blocker,FileAccess.WRITE)
+		assert(file!=null); file.store_string("test-owned"); file.close()
+		board.slot_root = blocker.path_join("slots")
+		click(index,title_pos)
+		assert(board.running and board.pause_overlay.visible and not board.scene_transition.active()
+			and "Could not save" in board.notice.text and played.size()==old+3 and played.back()=="title:false",
+			"Save & Title mouse%d retains session when writing fails" % index)
+		board.slot_root = slot_root
+		board.session.elapsed = float(index)+.5
+		click_at(index,true,title_pos)
+		assert(board.running and not board.scene_transition.active() and played.size()==old+3)
+		click_at(index,false,title_pos)
+		assert(board.scene_transition.active() and board.running and played.size()==old+4 and played.back()=="title:true",
+			"Save & Title mouse%d saves before fade then requests one Click" % index)
+		var saved: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(slot_path))
+		assert(is_equal_approx(float(saved.scenes.Main.session.elapsed),float(index)+.5))
+		board._process(1.0); board._process(1.0)
+		assert(not board.running and board.title_panel.visible)
+		board.selected_slot = slot
+		board._request_continue_game(); board._process(1.0)
+		assert(board.running and board.active_slot==slot and is_equal_approx(board.session.elapsed,float(index)+.5),
+			"saved session and clock restored before first resumed gameplay frame")
+		board._process(1.0)
+	for index in 3:
+		var button: Button = board.pause_controls[index]
+		assert(button.button_mask==7)
+		var original: Dictionary = board.catalog.data
+		var mutated: Dictionary = original.duplicate(true)
+		mutated.provenance.source_commit = "wrong"
+		assert(not board._admit_source_pause_pointer(mutated,view,index) and button.button_mask==1)
+		for change in ["controller", "link", "disabled", "owner", "script"]:
+			mutated = original.duplicate(true)
+			var id: String = ["8171884105890585185","2697808248802931809","6850422679154243207"][index]
+			for prefab in mutated.referenced_prefabs:
+				if prefab.name != "UIRoot": continue
+				for doc in prefab.documents:
+					if str(doc.file_id)=="8547574447435325085":
+						if change=="controller": doc.fields.m_Enabled=0
+						if change=="link": doc.fields[["continueButton","optionsButton","titleButton"][index]].fileID="0"
+					if str(doc.file_id)==id:
+						if change=="disabled": doc.fields.m_Enabled=0
+						if change=="owner": doc.fields.m_GameObject.fileID="0"
+						if change=="script": doc.fields.m_Script.guid="wrong"
+			assert(not board._admit_source_pause_pointer(mutated,view,index) and button.button_mask==1,change)
+		var host := button.get_parent()
+		button.reparent(board.pause_overlay)
+		assert(not board._admit_source_pause_pointer(original,view,index) and button.button_mask==1)
+		button.reparent(host)
+		assert(board._admit_source_pause_pointer(original,view,index) and button.button_mask==7)
+	print("Source Pause pointers: PASS (L/R/M through Options, Continue and Save/Title; source/fallback guards)")

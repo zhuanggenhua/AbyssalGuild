@@ -3612,8 +3612,38 @@ func _configure_source_pause() -> void:
 		if child is Control and child != candidate: child.hide()
 	for i in pause_controls.size():
 		var path: String = ["MainPanel/ContinueButton","MainPanel/OptionsButton","MainPanel/TitleButton"][i]
-		candidate.mount_path(path,pause_controls[i])
-		pause_controls[i].text = str(candidate.layout.field(candidate.layout.resolve(path),"m_text",pause_controls[i].text))
+		var button: Button = pause_controls[i]
+		if candidate.mount_path(path,button):
+			button.text = str(candidate.layout.field(candidate.layout.resolve(path),"m_text",button.text))
+			_admit_source_pause_pointer(catalog.data, candidate, i)
+
+## PauseMenu.Awake wires its three own TextButtons; no filtering by mouse
+## button in the original PointerClick. Do not widen fallback/safety targets.
+func _admit_source_pause_pointer(data: Dictionary, view, index: int) -> bool:
+	if index < 0 or index >= pause_controls.size() or index >= 3: return false
+	var button: Button = pause_controls[index]
+	button.button_mask = MOUSE_BUTTON_MASK_LEFT
+	if data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT: return false
+	if not is_instance_valid(view) or not view.source_backed or view.get_parent() != pause_overlay or view.layout.root_id != "8532370488951995501": return false
+	var path: String = ["MainPanel/ContinueButton","MainPanel/OptionsButton","MainPanel/TitleButton"][index]
+	var link: String = ["continueButton","optionsButton","titleButton"][index]
+	var button_id: String = ["8171884105890585185","2697808248802931809","6850422679154243207"][index]
+	var host: String = view.layout.resolve(path)
+	if not view.nodes.has(host) or button.get_parent() != view.nodes[host]: return false
+	var controller: Dictionary = {}
+	var text_button: Dictionary = {}
+	for prefab in data.get("referenced_prefabs", []):
+		if prefab.get("name") != "UIRoot" or prefab.get("guid") != "5e2985d7789c5254b831d166e6931134": continue
+		for doc in preload("res://scripts/ui/source_prefab_documents.gd").resolve(data, "UIRoot"):
+			if str(doc.get("file_id")) == "8547574447435325085" and doc.get("script_class") == "PauseMenu": controller = doc.get("fields", {})
+			elif str(doc.get("file_id")) == button_id and doc.get("script_class") == "TextButton": text_button = doc.get("fields", {})
+	if controller.get("m_Enabled") != 1 or controller.get("m_Script", {}).get("guid") != "c9da4713f45d2a3408a718a9d946f117": return false
+	if controller.get("m_GameObject", {}) != view.layout.records[view.layout.root_id].rect.get("m_GameObject", {}): return false
+	if str(controller.get(link, {}).get("fileID")) != button_id: return false
+	if text_button.get("m_Enabled") != 1 or text_button.get("m_Script", {}).get("guid") != "ef98d84a856977b44bbf49a1bab2060a": return false
+	if text_button.get("m_GameObject", {}) != view.layout.records[host].rect.get("m_GameObject", {}): return false
+	button.button_mask = MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
+	return true
 
 func _install_saved_rows() -> void:
 	if source_title == null: return

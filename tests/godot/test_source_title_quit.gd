@@ -40,14 +40,17 @@ func run():
 	root.gui_embed_subwindows=true
 	root.size=Vector2i(1440,900)
 	var b=await make_board()
+	var drain = preload("res://tests/godot/source_test_audio_drain.gd").new()
+	drain.observe_music(b.feedback.music)
 	var source=b.get("source_title_quit")
 	if source==null:
 		b._request_title_quit()
 		check(b.quit_dialog.visible and b.pending_quit=="title","no source keeps native confirmation")
 		key(KEY_ESCAPE);await process_frame
 		check(not b.quit_dialog.visible and quits==0,"source-free native Escape decline preserved")
+		b.free()
+		check(await drain.wait_after_teardown(self), "test-owned audio references drained")
 		print("Source Title Quit: SKIP (locked catalog absent); fallback checks: %d"%checks)
-		b.queue_free();await process_frame
 		quit(1 if failures else 0)
 		return
 	check(not source.visible and not b.quit_dialog.visible,"source modal starts inactive")
@@ -107,6 +110,7 @@ func run():
 	check(quits==1 and b.quit_dispatched and not source.visible and b.pending_quit.is_empty(),"Yes invokes safe injected quit exactly once")
 	b._confirm_quit();source.yes_button.pressed.emit();b._request_title_quit()
 	check(quits==1 and not source.visible,"stale or duplicate confirmation never replays")
-	b.queue_free();await process_frame
+	b.free()
+	check(await drain.wait_after_teardown(self), "test-owned audio references drained")
 	print("Source Title Quit: %d/%d checks passed (native geometry, not pixel parity)"%[checks-failures,checks])
 	quit(1 if failures else 0)

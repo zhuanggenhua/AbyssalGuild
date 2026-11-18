@@ -36,3 +36,21 @@ Regression: actual Main/Island Board test includes fresh/echo/release,
 reacquisition, source audio and gameplay progression, vendor lock overlap,
 reset/transition ownership, explicit Close failure, day-end and blocked Feed,
 title/fallback, unknown data replacement, and direct programmatic opening.
+
+## Pause buttons: original mouse release ownership
+
+In the locked UIRoot, `PauseMenu.Awake` wires its Continue, Options and Title
+`TextButton` records. The original `TextButton.OnPointerClick` does not inspect
+the mouse button, and the UI input module binds left, right and middle clicks.
+The three mounted Godot source buttons formerly accepted only left click.
+Enable all three buttons only when the pinned PauseMenu controller, its matching
+enabled serialized TextButton, and the actual mounted host agree. Do not
+broaden source-free controls or safety/recovery dialogs. Existing callback and
+Click sound order is unchanged.
+
+The actual Board viewport test follows Pause → Options → Close → Continue
+and Pause → Save & Title → load the same slot, for each of the three mouse
+buttons. It checks press versus release, outside release, Options input
+ownership, callback-before-sound, saved clock restoration and failed-save
+retention. It also rejects altered source/controller/button references and an
+incorrect mounted host. This is not a platform/device or Unity visual acceptance.
