@@ -47,6 +47,8 @@ func _init() -> void:
 	test_other_releases()
 	test_terminals_and_changes()
 	test_checkpoint()
+	test_concurrent_card_roots()
+	test_concurrent_checkpoint()
 	print("Held stack checks: %d passed / %d total" % [checks - failures, checks])
 	quit(0 if failures == 0 else 1)
 
@@ -259,3 +261,65 @@ func test_checkpoint() -> void:
 	check(Codec.restore(loaded, Codec.capture(s)).ok and loaded.cards.has(ids[1]) and not loaded.drag.active(), "held save handles disappeared original without orphan references")
 	s.kill_card(ids[1])
 	check(Codec.restore(loaded, Codec.capture(s)).ok and loaded.cards.is_empty(), "held save handles disappeared original and entire tail")
+
+func test_concurrent_card_roots() -> void:
+	var s = make_session()
+	var a := pair(s, 3)
+	var b := pair(s, 7)
+	var a_first: Dictionary = s.drag.begin_for(a[1], Vector2(5, 7))
+	var b_first: Dictionary = s.drag.begin_for(b[1], Vector2(8, 9))
+	check(a_first.ok and b_first.ok and s.drag.held_ids() == [a[1], b[1]], "distinct accepted roots own simultaneous tails")
+	check(a[2].paused and b[2].paused and s.card_target_position(a[1]) == Vector2(5, 7) and s.card_target_position(b[1]) == Vector2(8, 9), "independent positions and original work pauses")
+	check(s.drag.begin_for(a[1]).repeated and s.drag.held_ids() == [a[1], b[1]], "one logical transaction survives a repeated root down")
+	check(not s.drag.can_begin_for(a[0]) and not s.drag.begin_for(b[0]).ok, "unverified second pickup on a captured paused base is guarded")
+	check(s.drag.original_stack_id_for(a[1], b[1]) == -1 and s.drag.original_stack_id_for(b[1], a[1]) == -1, "the other tail cannot borrow the captured return bypass")
+	var original: int = s.drag.original_stack_id_for(b[1], b[1])
+	check(original == b[2].id and s.move_to_stack(b[1], original, original), "release can return to its own original")
+	s.drag.finish_standard_for(b[1], original)
+	check(b[2].progress == 7 and not b[2].paused and a[2].paused and s.drag.held_ids() == [a[1]], "reverse release order does not settle the first root")
+	s.drag.finish_terminal_for(a[1])
+	s.drag.finish_terminal_for(a[1])
+	check(not s.drag.active() and a[2].recipe_guid.is_empty() and b[2].recipe_guid == "pair", "only the released root stops its original job")
+
+	s = make_session()
+	var root_a: int = s.spawn_card("wood", Vector2(3, 4))
+	var old_stack: int = s.cards[root_a].stack_id
+	var child: int = s.spawn_card("wood", Vector2.ZERO, old_stack)
+	check(s.drag.begin(root_a).ok and s.drag.can_begin_for(child), "explicit child can split behind a legacy root")
+	var child_hold: Dictionary = s.drag.begin_for(child, Vector2(9, 10))
+	check(child_hold.ok and child_hold.split and s.drag.stack_id == old_stack and child_hold.stack_id != old_stack, "child split keeps legacy base identity")
+	check(s.stacks[old_stack].card_ids == [root_a] and s.drag.owns_stack(old_stack) and s.drag.owns_stack(child_hold.stack_id), "disjoint stack ownership follows logical roots")
+	check(not s.drag.begin(child).ok, "legacy wrapper does not steal explicit child hold")
+	check(s.move_to_stack(child, old_stack), "ordinary child release can attach onto another held root")
+	s.drag.finish_standard_for(child, old_stack)
+	check(s.drag.held_ids() == [root_a] and s.stacks[old_stack].card_ids == [root_a, child], "attachment retains the other root and merged stack")
+	s.drag.finish_standard()
+	check(not s.drag.active() and not s.drag.owns_stack(old_stack), "legacy release clears only its final ownership")
+
+func test_concurrent_checkpoint() -> void:
+	var tail_recipes := [recipe("tail_a", [ingredient("b")]), recipe("tail_b", [ingredient("b")])]
+	var s = make_session(tail_recipes)
+	var a := pair(s, 3)
+	var b := pair(s, 7)
+	s.drag.begin_for(b[1]); s.drag.begin(a[1])
+	var b_hold: int = s.drag.held_stack_id_for(b[1])
+	var a_hold: int = s.drag.held_stack_id_for(a[1])
+	var initial_state: int = s.rng.state
+	var references := [s.cards[b[1]], s.cards[a[1]], s.stacks[b_hold], s.stacks[a_hold]]
+	s.changed.connect(func(): signals_seen += 1)
+	s.event_occurred.connect(func(_kind, _payload): signals_seen += 1)
+	signals_seen = 0
+	var snapshot: Dictionary = Codec.capture(s)
+	check(not snapshot.has("capture_error") and s.drag.held_ids() == [b[1], a[1]], "snapshot captures all roots in mixed admission order without consuming")
+	check(a[2].paused and b[2].paused and symbols_unchanged(s, references, b[1], a[1], b_hold, a_hold), "snapshot leaves both live references and paused originals untouched")
+	check(s.rng.state == initial_state and signals_seen == 0, "checkpoint emits no live events or RNG draws")
+	check(JSON.stringify(snapshot, "", true, true) == encoded(s), "compound capture is deterministic")
+	var loaded = make_session(tail_recipes)
+	check(Codec.restore(loaded, snapshot).ok and not loaded.drag.active(), "checkpoint restores both splits without serializing contacts")
+	check(loaded.stacks[b_hold].recipe_guid in ["tail_a", "tail_b"] and loaded.stacks[a_hold].recipe_guid in ["tail_a", "tail_b"], "checkpoint settles both ordinary detached tails")
+	s.drag.finish_standard_for(b[1])
+	s.drag.finish_standard()
+	check(encoded(s) == encoded(loaded), "snapshot equals explicit admission-order release, including RNG and recipe discoveries")
+
+func symbols_unchanged(s, refs: Array, b: int, a: int, b_hold: int, a_hold: int) -> bool:
+	return [s.cards[b], s.cards[a], s.stacks[b_hold], s.stacks[a_hold]] == refs

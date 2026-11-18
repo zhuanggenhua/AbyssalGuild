@@ -15,7 +15,8 @@ static func capture(session) -> Dictionary:
 	var snapshot := _capture_unsettled(session)
 	if not session.drag.active():
 		return snapshot
-	# Native policy: save the physical split as an ordinary unattached release.
+	# Native policy: save each physical split as an ordinary unattached release,
+	# in admission order. No held-pointer identity is serialized.
 	# Settle only an isolated model, including recipe RNG/discovery/quest effects.
 	# No live pointer, model object, RNG state, signal or geometry callback changes.
 	var catalog = Catalog.new()
@@ -26,7 +27,8 @@ static func capture(session) -> Dictionary:
 	if not restored.ok:
 		return {"capture_error": "Cannot normalize held checkpoint: " + str(restored.error)}
 	settled.drag.copy_hold_from(session.drag)
-	settled.drag.finish_standard()
+	for root_id in settled.drag.held_ids():
+		settled.drag.finish_standard_for(root_id)
 	return _capture_unsettled(settled)
 
 static func _capture_unsettled(session) -> Dictionary:

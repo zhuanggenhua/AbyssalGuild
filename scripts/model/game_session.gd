@@ -12,7 +12,7 @@ const WorldRules = preload("res://scripts/model/world_rules.gd")
 const CombatSystem = preload("res://scripts/model/combat_system.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 const CycleController = preload("res://scripts/model/cycle_controller.gd")
-const HeldStack = preload("res://scripts/model/held_stack.gd")
+const HeldStack = preload("res://scripts/model/held_stack_registry.gd")
 const CraftingOrder = preload("res://scripts/model/crafting_order.gd")
 signal changed
 signal event_occurred(kind: String, payload: Dictionary)

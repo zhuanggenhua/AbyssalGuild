@@ -42,22 +42,28 @@ func run()->void:
 	board._sync_views();await physics_frame
 	check(board._pick_target(start).card_id<0 and board._pick_target(start).panel_owner<0 and board._pick_target(start).trade_zone_index<0,"actual blank-board ray has no card, panel or trade hit")
 	var initial:Vector3=board.camera_motion.target
+	# CameraController.HandlePan scales by current height/10. The locked
+	# imported Main scene supplies 10; the no-private-media shell is at 24.
+	var camera_config: Dictionary = board.visual_assets.camera_configuration("Main")
+	var expected_height := 24.0 if camera_config.is_empty() else 10.0
+	check(is_equal_approx(board.camera.position.y,expected_height),"Main uses camera height for this verified media mode")
+	var ten_pixel_pan := Vector3(-10.0,0,0) * .01 * (expected_height / 10.0)
 	board.input_types.clear()
 	await touch(3,true,start)
 	check(board.input_types.slice(0,2)==[["InputEventMouseButton",-1],["InputEventScreenTouch",0]],"installed Godot delivers emulated mouse before touch")
 	check(board.panning and board.dragging==-1,"first blank touch admits camera only")
 	await drag(3,start+Vector2(10,0))
-	check(board.camera_motion.target.is_equal_approx(initial+Vector3(-.1,0,0)),"primary drag changes target once with source pan speed")
+	check(board.camera_motion.target.is_equal_approx(initial+ten_pixel_pan),"primary drag changes target once with source pan speed")
 	await touch(5,true,start+Vector2(50,0));await drag(5,start+Vector2(70,0))
-	check(board.camera_motion.target.is_equal_approx(initial+Vector3(-.1,0,0)),"secondary contact movement does not move shared primary")
+	check(board.camera_motion.target.is_equal_approx(initial+ten_pixel_pan),"secondary contact movement does not move shared primary")
 	await touch(3,false,start+Vector2(20,0))
 	check(board.panning,"first-up with secondary retained keeps source camera drag active")
-	check(board.camera_motion.target.is_equal_approx(initial+Vector3(-.2,0,0)),"orphan-forming end applies primary final delta exactly once")
+	check(board.camera_motion.target.is_equal_approx(initial+2.0*ten_pixel_pan),"orphan-forming end applies primary final delta exactly once")
 	var frozen:Vector3=board.camera_motion.target
 	await drag(5,start+Vector2(80,0))
 	check(board.panning and board.camera_motion.target==frozen,"secondary movement cannot move orphan")
 	await touch(7,true,start+Vector2(90,0));await drag(7,start+Vector2(100,0))
-	check(board.panning and board.camera_motion.target==frozen and board.camera_drag_origin==start+Vector2(20,0),"new third touch and its emulated mouse cannot restart orphan pan")
+	check(board.panning and board.camera_motion.target==frozen and board.camera_drag_origin.is_equal_approx(start+Vector2(20,0)),"new third touch and its emulated mouse cannot restart orphan pan")
 	await touch(5,false,start+Vector2(80,0))
 	check(board.panning and board.camera_motion.target==frozen,"non-final secondary release retains orphan")
 	await touch(7,false,start+Vector2(100,0),true)
@@ -83,7 +89,7 @@ func run()->void:
 	await touch(1,false,start+Vector2(10,0));await touch(2,false,start+Vector2(40,0))
 	check(board.panning and board.camera_motion.target==frozen,"InputManager lock skips release and movement without resetting held pan")
 	board.session.phase="playing";board._update_camera_motion(1.0/60)
-	check(board.panning and board.camera_drag_origin==start+Vector2(10,0),"unlock samples retained primary position without replaying locked release")
+	check(board.panning and board.camera_drag_origin.is_equal_approx(start+Vector2(10,0)),"unlock samples retained primary position without replaying locked release")
 	await mouse(MOUSE_BUTTON_LEFT,false,start)
 	check(not board.panning,"new unlocked real release ends retained lock-time pan")
 	# Preserve existing native GUI admission. Do not invent a touch raycaster.

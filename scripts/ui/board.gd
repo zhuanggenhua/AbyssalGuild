@@ -144,16 +144,49 @@ var camera_pointer = preload("res://scripts/ui/source_camera_pointer.gd").new()
 var views: Dictionary = {}
 var running: bool = false
 var selected: int = -1
-var dragging: int = -1
-# Scoped source combat hold; ordinary drag and unsupported combat owners retain their paths.
-var _combat_hold: Dictionary = {}
-var press_position := Vector2.ZERO
-var drag_grant: int = -1
-var drag_origin := Vector2.ZERO
-var drag_anchor := Vector2.ZERO
-var drag_delta := Vector2.ZERO
-var drag_moved: bool = false
-var drag_start_position := Vector3.ZERO
+# A CardController owns the held pose; the EventSystem separately owns receiver slots.
+class BoardDrag extends RefCounted:
+	var receiver: WeakRef
+	var id: int = -1
+	var combat: Dictionary = {}
+	var screen: Vector2 = Vector2.ZERO
+	var grant: int = -1
+	var origin: Vector2 = Vector2.ZERO
+	var anchor: Vector2 = Vector2.ZERO
+	var delta: Vector2 = Vector2.ZERO
+	var moved: bool = false
+	var start: Vector3 = Vector3.ZERO
+var _mouse_drag := BoardDrag.new()
+var _touch_drags: Dictionary = {}
+var touch_card_receivers = preload("res://scripts/ui/source_touch_card_receivers.gd").new()
+# Preserve the existing mouse adapter and direct Board API.
+var dragging: int:
+	get: return _mouse_drag.id
+	set(value): _mouse_drag.id = value
+var _combat_hold: Dictionary:
+	get: return _mouse_drag.combat
+	set(value): _mouse_drag.combat = value
+var press_position: Vector2:
+	get: return _mouse_drag.screen
+	set(value): _mouse_drag.screen = value
+var drag_grant: int:
+	get: return _mouse_drag.grant
+	set(value): _mouse_drag.grant = value
+var drag_origin: Vector2:
+	get: return _mouse_drag.origin
+	set(value): _mouse_drag.origin = value
+var drag_anchor: Vector2:
+	get: return _mouse_drag.anchor
+	set(value): _mouse_drag.anchor = value
+var drag_delta: Vector2:
+	get: return _mouse_drag.delta
+	set(value): _mouse_drag.delta = value
+var drag_moved: bool:
+	get: return _mouse_drag.moved
+	set(value): _mouse_drag.moved = value
+var drag_start_position: Vector3:
+	get: return _mouse_drag.start
+	set(value): _mouse_drag.start = value
 var hud: Control
 var world_post_process = WorldPostProcess.new()
 var scene_transition = SceneTransition.new()
@@ -857,10 +890,10 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	archive_dialog.hide()
 	_clear_puffs()
 	session.drag.reset()
+	_touch_drags.clear()
+	touch_card_receivers.reset()
 	session.combat.dragged.clear()
-	dragging = -1
-	drag_grant = -1
-	drag_delta = Vector2.ZERO
+	_mouse_drag = BoardDrag.new()
 	session.cycle.pose_sampler = _sample_cycle_pose
 	session.cycle.layout_resolver = _resolve_layout
 	card_motion.reset()
@@ -983,7 +1016,11 @@ func _advance_running_frame(delta: float) -> void:
 	_advance_puffs(delta, scaled_delta)
 	_update_camera_motion(delta)
 	# Source recomputes the held target each frame, including camera-only motion.
-	if dragging >= 0 and _card_pointer_known: _update_drag_position(_card_pointer)
+	if _card_pointer_known:
+		var pointer := _card_pointer
+		if camera_pointer.primary_active and camera_pointer.known:
+			pointer = get_viewport().get_final_transform().affine_inverse() * camera_pointer.position
+		for state in _active_card_drags(): _update_card_drag(state,pointer)
 	vendor_unlock.advance(delta)
 	combat_presentation.advance(delta)
 	if external_pause:
@@ -1006,13 +1043,9 @@ func _name(guid: String) -> String:
 	return str(fields.get("displayName", fields.get("id", guid)))
 
 func _sync_views(real_delta: float = 0.0) -> void:
-	if not _combat_hold.is_empty() and not _source_combat_hold_current(dragging): _combat_hold = {}
-	if dragging >= 0 and not session.cards.has(dragging):
-		session.drag.finish_standard()
-		session.combat.dragged.erase(dragging)
-		dragging = -1
-		drag_grant = -1
-		drag_delta = Vector2.ZERO
+	for state in _active_card_drags():
+		if not state.combat.is_empty() and not _source_combat_hold_current(state.id,state): state.combat.clear()
+		if not _held_receiver_current(state): _discard_vanished_hold(state)
 	_sync_combat_layouts()
 	_ensure_layout()
 	for id in views.keys():
@@ -1044,8 +1077,9 @@ func _sync_views(real_delta: float = 0.0) -> void:
 		views[id].update_state(display_state)
 		views[id].highlight(id == selected)
 		if session.combat.membership.has(id):
-			var combat_position: Vector2 = session.cards[id].position + (drag_delta if dragging == id else Vector2.ZERO)
-			views[id].position = _combat_hold.pose if _combat_hold.get("id", -1) == id and dragging == id else Vector3(combat_position.x, 0.0, -combat_position.y)
+			var held := _card_drag_for(id)
+			var combat_position: Vector2 = session.cards[id].position + (held.delta if held != null else Vector2.ZERO)
+			views[id].position = held.combat.pose if held != null and held.combat.get("id", -1) == id else Vector3(combat_position.x, 0.0, -combat_position.y)
 	for landing_id in _terminal_landings.keys():
 		if not _terminal_landing_current(landing_id): _terminal_landings.erase(landing_id)
 	for return_id in _combat_slot_returns.keys():
@@ -1056,7 +1090,13 @@ func _sync_views(real_delta: float = 0.0) -> void:
 	var step_fields: Dictionary = motion_settings.get("stackStep", {})
 	var step := Vector3(float(step_fields.get("x", 0)), float(step_fields.get("y", 0.002)), -float(step_fields.get("z", -0.18)))
 	for stack in session.stacks.values():
-		var held_index: int = stack.card_ids.find(dragging)
+		var held_index := -1
+		var held: BoardDrag
+		for index in range(stack.card_ids.size()):
+			held = _card_drag_for(stack.card_ids[index])
+			if held != null:
+				held_index = index
+				break
 		for index in range(stack.card_ids.size()):
 			var id: int = stack.card_ids[index]
 			var card = session.cards[id]
@@ -1064,7 +1104,7 @@ func _sync_views(real_delta: float = 0.0) -> void:
 			if _terminal_landings.has(id): target = _terminal_landings[id].target
 			var mode: String = "animated"
 			if held_index >= 0 and index >= held_index:
-				target += Vector3(drag_delta.x, 0, -drag_delta.y)
+				target += Vector3(held.delta.x, 0, -held.delta.y)
 				target.y = float(motion_settings.get("dragHeight", 0.1)) + (index-held_index)*step.y
 				mode = "instant" if index == held_index else "damped"
 			if session.combat.membership.has(id) or session.equipment.owners.has(id) or id == cycle_id: mode = "blocked"
@@ -1407,22 +1447,26 @@ func _sync_card_feedback() -> void:
 
 # Pointer routing is separate from ray casting for deterministic adapter tests.
 func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
-	# Ignore repeated/replacement presses until the captured pointer is released.
-	if dragging >= 0: return
+	if _mouse_drag.id >= 0: return
+	if _touch_drags.has(int(hit.get("card_id",-1))): return
 	_record_card_pointer(screen)
-	drag_grant = -1
-	_combat_hold = {}
-	var id: int = int(hit.get("card_id", -1))
-	var panel: int = int(hit.get("panel_owner", -1))
-	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) == 5
-	equipment_display.pointer_down(panel, is_gear)
+	var id: int = int(hit.get("card_id",-1))
+	var panel: int = int(hit.get("panel_owner",-1))
+	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
+	equipment_display.pointer_down(panel,is_gear)
 	selected = id
+	pressed_panel = panel if panel >= 0 and _allows_equipment_panel_input() else -1
 	if panel >= 0:
-		pressed_panel = panel if _allows_equipment_panel_input() else -1
-		dragging = -1
 		_sync_card_feedback()
 		return
-	pressed_panel = -1
+	_begin_card_drag(_mouse_drag,id,screen)
+
+func _begin_card_drag(state: BoardDrag, id: int, pointer: Vector2) -> void:
+	if state != _mouse_drag and not session.combat.membership.has(id) and not session.equipment.owners.has(id) and not session.drag.can_begin_for(id):
+		return
+	state.grant = -1
+	state.combat.clear()
+	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
 	if is_gear and session.equipment.owners.has(id) and _allows_card_actions():
 		var wearer: int = session.equipment.owners[id]
 		var old_position: Vector3 = views[id].global_position
@@ -1431,45 +1475,126 @@ func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
 				session.equipment.unequip(wearer, slot)
 				_set_board_card_position(id, Vector2(old_position.x, -old_position.z))
 				break
-		dragging = id # Lock the just-detached stack before placement can move its visible pose.
+		state.id = id # Lock the just-detached stack before placement can move its visible pose.
 		_sync_views()
-	dragging = id if _can_drag_card(id) else -1
-	if dragging == id:
+	state.id = id if _can_drag_card(id) else -1
+	if state.id == id:
 		_terminal_landings.erase(id)
 		_combat_slot_returns.erase(id)
-	if dragging >= 0:
-		drag_start_position = session.card_target_position_3d(id)
-	if dragging >= 0 and not session.combat.membership.has(id):
+	if state.id >= 0:
+		state.start = session.card_target_position_3d(id)
+	if state.id >= 0 and not session.combat.membership.has(id):
 		var lifted: Vector2 = session.card_target_position(id)
 		if views.has(id): lifted = Vector2(views[id].global_position.x, -views[id].global_position.z)
-		drag_start_position.x = lifted.x
-		drag_start_position.z = lifted.y
-		if not session.drag.begin(id, lifted).ok:
-			dragging = -1
+		state.start.x = lifted.x
+		state.start.z = lifted.y
+		if not _begin_model_drag(state,id,lifted).ok:
+			state.id = -1
 		else:
 			# Source immediately updates the held root from its current visible
 			# pose, including whole stacks that begin() does not split.
 			_set_board_card_position(id, lifted)
-	drag_grant = dragging
-	if dragging >= 0:
-		session.combat.dragged[dragging] = true
+	state.grant = state.id
+	if state.id >= 0:
+		session.combat.dragged[state.id] = true
 		# Source combat PointerDown returns before the standard CardPick call.
 		# Do not suppress CardDrop: accepted PointerUp dispatches it before drop classification.
-		if not session.combat.membership.has(dragging): feedback.play_event("CardPick")
-	press_position = screen
-	drag_origin = _board_point(screen)
-	drag_anchor = session.card_target_position(dragging) if session.cards.has(dragging) else Vector2.ZERO
-	drag_delta = Vector2.ZERO
-	drag_moved = false
-	if dragging >= 0 and _source_combat_hold_allowed(id):
+		if not session.combat.membership.has(state.id): feedback.play_event("CardPick")
+	state.screen = pointer
+	state.origin = _board_point(pointer)
+	state.anchor = session.card_target_position(state.id) if session.cards.has(state.id) else Vector2.ZERO
+	state.delta = Vector2.ZERO
+	state.moved = false
+	if state.id >= 0 and _source_combat_hold_allowed(id):
 		var pose: Vector3 = views[id].global_position
-		_combat_hold = {"id":id,"task":session.combat.membership[id],"card":session.cards[id].get_instance_id(),"view":views[id].get_instance_id(),"pose":pose}
+		state.combat = {"id":id,"task":session.combat.membership[id],"card":session.cards[id].get_instance_id(),"view":views[id].get_instance_id(),"pose":pose}
 		var slot: Variant = combat_layouts[session.combat.membership[id]].positions.get(id)
 		if slot is Vector2 and session.combat.tasks[session.combat.membership[id]].get("execution", {}).is_empty() and pose == Vector3(slot.x,0,-slot.y):
-			_combat_hold["return_slot"] = pose
-		drag_anchor = Vector2(pose.x,-pose.z)
-	if dragging >= 0: _capture_drag_highlights(dragging)
+			state.combat["return_slot"] = pose
+		state.anchor = Vector2(pose.x,-pose.z)
+	if state.id >= 0: _capture_drag_highlights(state.id)
 	_sync_card_feedback()
+
+func _active_card_drags() -> Array[BoardDrag]:
+	var result: Array[BoardDrag] = []
+	if _mouse_drag.id >= 0: result.append(_mouse_drag)
+	for state: BoardDrag in _touch_drags.values():
+		if state.id >= 0: result.append(state)
+	return result
+
+func _card_drag_for(id: int) -> BoardDrag:
+	if id < 0: return null
+	if _mouse_drag.id == id: return _mouse_drag
+	var state: BoardDrag = _touch_drags.get(id)
+	return state if state != null and state.id == id else null
+
+func _has_card_drag() -> bool:
+	return _mouse_drag.id >= 0 or not _touch_drags.is_empty()
+
+func _held_receiver_current(state: BoardDrag) -> bool:
+	if not session.cards.has(state.id): return false
+	if state.receiver == null: return true
+	var view = state.receiver.get_ref()
+	return is_instance_valid(view) and not view.is_queued_for_deletion() and views.get(state.id) == view and view.get_meta("definition_guid","") == session.cards[state.id].definition_guid
+
+func _discard_vanished_hold(state: BoardDrag) -> void:
+	var vanished: int = state.id
+	state.id = -1
+	state.grant = -1
+	state.delta = Vector2.ZERO
+	_touch_drags.erase(vanished)
+	session.combat.dragged.erase(vanished)
+	session.drag.finish_standard_for(vanished)
+
+func _drag_locks_stack(id: int) -> bool:
+	for state in _active_card_drags():
+		if session.cards.has(state.id) and session.cards[state.id].stack_id == id: return true
+	return false
+
+func _begin_model_drag(state: BoardDrag, id: int, lifted: Variant) -> Dictionary:
+	return session.drag.begin(id,lifted) if state == _mouse_drag else session.drag.begin_for(id,lifted)
+
+# Run only after native GUI has had its chance to consume the actual contact.
+# Receiver location is per contact; CardController projects the shared Pointer.
+func _touch_card_down(index: int, screen: Vector2) -> bool:
+	if not running or not camera_pointer.contacts.has(index) or not screen.is_finite(): return false
+	var hit := _pick_target(screen)
+	var id: int = int(hit.card_id)
+	if id < 0 or int(hit.panel_owner) >= 0 or not _hover_source_visible(id): return false
+	var view: Node3D = views[id]
+	if not touch_card_receivers.capture(index,view): return false
+	if not _allows_card_actions() or _mouse_drag.id == id: return true
+	var state: BoardDrag = _touch_drags.get(id)
+	if state != null and not _held_receiver_current(state):
+		_discard_vanished_hold(state)
+		state = null
+	if state == null:
+		state = BoardDrag.new()
+		state.receiver = weakref(view)
+		_touch_drags[id] = state
+	var is_gear: bool = int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
+	equipment_display.pointer_down(-1,is_gear)
+	selected = id
+	var pointer := _card_pointer if _card_pointer_known else screen
+	var ordinary: bool = not session.combat.membership.has(id) and not session.equipment.owners.has(id)
+	_begin_card_drag(state,id,pointer)
+	if state.id >= 0 and ordinary: _update_card_drag(state,pointer)
+	if state.id < 0: _touch_drags.erase(id)
+	return true
+
+func _touch_card_up(index: int) -> bool:
+	if not touch_card_receivers.owns(index): return false
+	var view = touch_card_receivers.release(index)
+	if not running or not is_instance_valid(view): return true
+	var id: int = view.card_id
+	var state: BoardDrag = _touch_drags.get(id)
+	if state == null or state.id != id or state.receiver.get_ref() != view: return true
+	if _held_receiver_current(state):
+		_touch_drags.erase(id)
+		_finish_card_drag(state)
+	else:
+		_discard_vanished_hold(state)
+	return true
 
 func _board_point(screen: Vector2) -> Vector2:
 	var point = Plane(Vector3.UP, 0).intersects_ray(camera.project_ray_origin(screen), camera.project_ray_normal(screen))
@@ -1483,6 +1608,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if NavigationInput.is_cancel_press(event):
 		_handle_escape()
 		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventScreenTouch:
+		if event.pressed and not event.canceled and _touch_card_down(event.index,event.position):
+			get_viewport().set_input_as_handled()
 		return
 	if not running or _ui_pause_active(): return
 	if event is InputEventMouseButton:
@@ -1501,16 +1630,20 @@ func _unhandled_input(event: InputEvent) -> void:
 				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event) and int(hit.card_id) < 0:
 					panning = true
 					camera_drag_origin = get_viewport().get_final_transform() * event.position
-				_begin_card_press(hit, event.position)
+				# Native touch remains authoritative for card receivers. Keep
+				# touch-emulated mouse on the existing panel/blank/camera path.
+				if event.device != InputEvent.DEVICE_ID_EMULATION or int(hit.card_id) < 0:
+					_begin_card_press(hit, event.position)
 			else:
 				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event): panning = false
-				_finish_drag(event.position)
+				if event.device != InputEvent.DEVICE_ID_EMULATION or pressed_panel >= 0:
+					_finish_drag(event.position)
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 var _fade_wheel_owner: int = 0
 var _fade_wheel_generation: int = -1
 func _source_fade_wheel_allowed() -> bool:
-	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and dragging < 0 and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
+	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and not _has_card_drag() and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
 
 func _input(event: InputEvent) -> void:
 	if NavigationInput.is_cancel_press(event) and (_source_title_overlay_cancel() or _source_title_options_cancel() or _source_options_cancel()):
@@ -1521,6 +1654,11 @@ func _input(event: InputEvent) -> void:
 	# GUI events retain viewport coordinates. Store physical samples/origins so
 	# a resize during a held pan cannot reinterpret an old logical pointer.
 	var camera_event: Dictionary = camera_pointer.observe(event.xformed_by(get_viewport().get_final_transform()))
+	if running and camera_event.sample and (event is InputEventScreenTouch or event is InputEventScreenDrag):
+		_record_card_pointer(get_viewport().get_final_transform().affine_inverse() * camera_pointer.position)
+	# A captured receiver gets up even if the up ray now hits GUI or a lock
+	# arrived during the hold. The edge's position is not a new drag sample.
+	var touch_up: bool = event is InputEventScreenTouch and (not event.pressed or event.canceled) and _touch_card_up(event.index)
 	if OS.is_debug_build() and running and event is InputEventKey and event.keycode == KEY_F3 and event.pressed and not event.echo and not _ui_pause_active():
 		market_panel.visible = not market_panel.visible
 		get_viewport().set_input_as_handled()
@@ -1541,7 +1679,7 @@ func _input(event: InputEvent) -> void:
 		# Consume release and autorepeat too, without toggling or pressing a HUD control.
 		get_viewport().set_input_as_handled()
 		return
-	if running and (event is InputEventMouseMotion or event is InputEventMouseButton):
+	if running and (event is InputEventMouseMotion or event is InputEventMouseButton) and not camera_pointer.suppress_emulated_camera_event(event):
 		_record_card_pointer(event.position)
 	# Source HandleZoom never checks EventSystem: observe wheel before GUI, but
 	# do not consume it (the same event can also scroll a source-style panel).
@@ -1557,13 +1695,16 @@ func _input(event: InputEvent) -> void:
 		if camera_event.sample and panning:
 			camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
 			camera_drag_origin = camera_pointer.position
+	if touch_up:
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventMouseButton and not event.pressed and get_viewport().gui_get_hovered_control() != null:
 		pressed_panel = -1
 		right_pressed_panel = -1
 	if running and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var hovered := get_viewport().gui_get_hovered_control()
 		if hovered != null and hovered != hud: equipment_display.pointer_down()
-	if running and dragging >= 0:
+	if running and dragging >= 0 and event.device != InputEvent.DEVICE_ID_EMULATION:
 		if event is InputEventMouseMotion:
 			if _source_combat_hold_current(dragging): _record_card_pointer(event.position)
 			else: _update_drag_position(event.position)
@@ -1597,7 +1738,7 @@ func _source_combat_hold_allowed(id: int) -> bool:
 
 func _source_terminal_hold_survivor(task_id: int, id: int) -> bool:
 	if not session.cards.has(id) or session.combat.membership.get(id,-1) != task_id: return false
-	if session.combat.dragged.has(id) or dragging == id or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id",-1)) == id: return false
+	if session.combat.dragged.has(id) or _card_drag_for(id) != null or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id",-1)) == id: return false
 	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion() or views[id].get_parent() != self: return false
 	var card = session.cards[id]
 	if views[id].get_meta("definition_guid", "") != card.definition_guid or combat_presentation.sample_actor(id) != null: return false
@@ -1635,52 +1776,60 @@ func _source_flee_unobstructed(id: int, destination: Vector2) -> bool:
 			if BoardLayout.separation(bounds,BoardLayout.stack_bounds(states[j])) != Vector2.ZERO: return false
 	return true
 
-func _source_combat_hold_current(id: int) -> bool:
-	return _combat_hold.get("id",-1) == id and _source_combat_hold_allowed(id) and _combat_hold.task == session.combat.membership[id] and _combat_hold.card == session.cards[id].get_instance_id() and _combat_hold.view == views[id].get_instance_id()
+func _source_combat_hold_current(id: int, state: BoardDrag = null) -> bool:
+	if state == null: state = _mouse_drag
+	return state.combat.get("id",-1) == id and _source_combat_hold_allowed(id) and state.combat.task == session.combat.membership[id] and state.combat.card == session.cards[id].get_instance_id() and state.combat.view == views[id].get_instance_id()
 
 func _update_drag_position(screen: Vector2) -> void:
-	if not session.cards.has(dragging) or not screen.is_finite(): return
 	_record_card_pointer(screen)
+	_update_card_drag(_mouse_drag,screen)
+
+func _update_card_drag(state: BoardDrag, screen: Vector2) -> void:
+	if not _held_receiver_current(state) or not screen.is_finite(): return
 	var point := _board_point(screen)
-	drag_delta = point - drag_origin
-	if _source_combat_hold_current(dragging):
-		var held := _clamp_stack_position(dragging, drag_anchor + drag_delta, false)
+	state.delta = point - state.origin
+	if _source_combat_hold_current(state.id,state):
+		var held := _clamp_stack_position(state.id, state.anchor + state.delta, false)
 		var height := float(CardDragInput.source_settings(catalog,session.scene_name).get("dragHeight",0.1))
-		_combat_hold.pose = Vector3(held.x,height,-held.y)
-		views[dragging].global_position = _combat_hold.pose
-		drag_delta = held - session.cards[dragging].position
-	if session.drag.active() and not session.combat.membership.has(dragging):
+		state.combat.pose = Vector3(held.x,height,-held.y)
+		views[state.id].global_position = state.combat.pose
+		state.delta = held - session.cards[state.id].position
+	if session.drag.active_for(state.id) and not session.combat.membership.has(state.id):
 		# Move the registered split, not only its drawing: saves/other systems
 		# observe the real held position. Combat keeps its separate drag offset.
-		_set_board_card_position(dragging, _clamp_stack_position(dragging, drag_anchor + drag_delta, false))
-		drag_delta = Vector2.ZERO
-	drag_moved = not CardDragInput.is_click(drag_start_position, session.card_target_position(dragging) + drag_delta, CardDragInput.source_settings(catalog, session.scene_name))
+		_set_board_card_position(state.id, _clamp_stack_position(state.id, state.anchor + state.delta, false))
+		state.delta = Vector2.ZERO
+	state.moved = not CardDragInput.is_click(state.start, session.card_target_position(state.id) + state.delta, CardDragInput.source_settings(catalog, session.scene_name))
 
 func _finish_drag(screen: Vector2) -> void:
 	if pressed_panel >= 0:
 		if _allows_equipment_panel_input() and int(_pick_target(screen).panel_owner) == pressed_panel: equipment_display.click_panel(pressed_panel)
 		pressed_panel = -1
 		return
-	var id: int = dragging
+	_finish_card_drag(_mouse_drag)
+
+func _finish_card_drag(state: BoardDrag) -> void:
+	var id: int = state.id
+	var held_root := id
 	# Pointer-up's event position is not a new UpdateDragPosition sample.
-	var held_pose: Variant = views[id].global_position if _source_combat_hold_current(id) else null
-	var return_slot: Variant = _combat_hold.get("return_slot")
-	_combat_hold = {}
-	var carried_press: bool = id >= 0 and drag_grant == id and running
-	drag_grant = -1
-	session.combat.dragged.clear()
-	dragging = -1
+	var held_pose: Variant = views[id].global_position if _source_combat_hold_current(id,state) else null
+	var return_slot: Variant = state.combat.get("return_slot")
+	state.combat = {}
+	var carried_press: bool = id >= 0 and state.grant == id and running
+	state.grant = -1
+	session.combat.dragged.erase(id)
+	state.id = -1
 	if id >= 0 and session.cards.has(id): _clear_drag_target_feedback()
 	if (not _allows_card_actions() and not carried_press) or not session.cards.has(id):
-		session.drag.finish_standard()
-		drag_delta = Vector2.ZERO
+		session.drag.finish_standard_for(held_root)
+		state.delta = Vector2.ZERO
 		return
 	feedback.play_event("CardDrop")
 	if session.combat.membership.has(id):
 		_sync_combat_layouts()
 		var task_id: int = session.combat.membership[id]
 		var task: Dictionary = session.combat.tasks[task_id]
-		var released: Vector2 = Vector2(held_pose.x,-held_pose.z) if held_pose is Vector3 else session.cards[id].position + drag_delta
+		var released: Vector2 = Vector2(held_pose.x,-held_pose.z) if held_pose is Vector3 else session.cards[id].position + state.delta
 		var result: Dictionary = CombatLayout.drop_result(id, released, combat_layouts.get(task_id, {}), task.player_is_attacker, _card_footprint(id), session.board_bounds, session.board_top_margin)
 		if result.flee:
 			# Only no-separation releases enter the source held-position transaction.
@@ -1697,21 +1846,21 @@ func _finish_drag(screen: Vector2) -> void:
 			_terminal_landing_receipt = -1
 		elif held_pose is Vector3 and return_slot is Vector3 and task.get("execution", {}).is_empty() and CombatLayout.contains(combat_layouts.get(task_id, {}), released):
 			_begin_combat_slot_return(id, task_id, held_pose, return_slot)
-		session.drag.finish_terminal()
-		drag_delta = Vector2.ZERO
+		session.drag.finish_terminal_for(held_root)
+		state.delta = Vector2.ZERO
 		_refresh()
 		return
 	# Programmatic/native adapter callers may submit a release directly. Actual
 	# pointer input already split at press; this fallback never re-splits a hold.
-	if not session.drag.active() and not session.drag.begin(id).ok:
-		drag_delta = Vector2.ZERO
+	if not session.drag.active_for(held_root) and not _begin_model_drag(state,id,null).ok:
+		state.delta = Vector2.ZERO
 		return
-	var destination: Vector2 = session.card_target_position(id) + drag_delta
+	var destination: Vector2 = session.card_target_position(id) + state.delta
 	_set_board_card_position(id, destination)
 	var click_handled := false
 	# Captured presses use the final world displacement, not whether the pointer
 	# ever crossed a pixel threshold. Returning to the origin can be a click.
-	var is_click: bool = CardDragInput.is_click(drag_start_position, destination, CardDragInput.source_settings(catalog, session.scene_name)) if carried_press else not drag_moved
+	var is_click: bool = CardDragInput.is_click(state.start, destination, CardDragInput.source_settings(catalog, session.scene_name)) if carried_press else not state.moved
 	if is_click:
 		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
 			var pack_stack: int = session.cards[id].stack_id
@@ -1720,40 +1869,40 @@ func _finish_drag(screen: Vector2) -> void:
 			layout_locks.erase(pack_stack)
 			click_handled = true
 		elif session.world._is_chest(id):
-			click_handled = _withdraw_chest(id, carried_press, Vector2(drag_start_position.x, drag_start_position.z) if carried_press else destination)
+			click_handled = _withdraw_chest(id, carried_press, Vector2(state.start.x, state.start.z) if carried_press else destination)
 	if click_handled:
 		# Native safety cleanup for source HandleClick's early-return pause leak.
-		session.drag.finish_standard()
+		session.drag.finish_standard_for(held_root)
 	else:
 		var trade: Dictionary = _try_trade_drop(id, destination, carried_press)
 		if trade.terminal:
-			session.drag.finish_terminal()
+			session.drag.finish_terminal_for(held_root)
 		else:
 			id = int(trade.card_id)
 			if not session.cards.has(id):
-				session.drag.finish_standard()
+				session.drag.finish_standard_for(held_root)
 			else:
-				var equipment_target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true)
+				var equipment_target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true, held_root)
 				if _try_equip_drop(id, destination):
-					if session.equipment.owners.has(id): session.drag.finish_terminal()
-					else: session.drag.finish_standard() # Existing native equipment-tail guard.
+					if session.equipment.owners.has(id): session.drag.finish_terminal_for(held_root)
+					else: session.drag.finish_standard_for(held_root) # Existing native equipment-tail guard.
 				elif _try_combat_drop(id, destination, equipment_target):
-					session.drag.finish_terminal()
+					session.drag.finish_terminal_for(held_root)
 				else:
 					destination = _clamp_stack_position(id, destination)
 					_set_board_card_position(id, destination)
-					var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
+					var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, false, held_root)
 					var attached := -1
 					if target >= 0:
 						var target_card: int = session.stacks[target].card_ids.back()
 						var stored_before: int = session.cards[target_card].stored_coins
-						if session.move_to_stack(id, target, session.drag.original_stack_id(id)):
+						if session.move_to_stack(id, target, session.drag.original_stack_id_for(held_root,id)):
 							attached = target
 							if session.world._is_chest(target_card): notice.text = "Stored %d coins." % (session.cards[target_card].stored_coins - stored_before)
 						else:
 							notice.text = "These cards cannot stack, or the current recipe rejects extra ingredients."
-					session.drag.finish_standard(attached)
-	drag_delta = Vector2.ZERO
+					session.drag.finish_standard_for(held_root,attached)
+	state.delta = Vector2.ZERO
 	_refresh()
 
 func _refresh() -> void:
@@ -2180,10 +2329,10 @@ func _show_title() -> void:
 	archive_dialog.hide()
 	_clear_puffs()
 	session.drag.reset()
+	_touch_drags.clear()
+	touch_card_receivers.reset()
 	session.combat.dragged.clear()
-	dragging = -1
-	drag_grant = -1
-	drag_delta = Vector2.ZERO
+	_mouse_drag = BoardDrag.new()
 	card_motion.reset()
 	_combat_slot_returns.clear()
 	_terminal_landings.clear()
@@ -2507,7 +2656,7 @@ func _combat_slot_return_current(id: int) -> bool:
 	if not session.combat.tasks.has(owner.task) or not combat_layouts.has(owner.task): return false
 	if not session.combat.tasks[owner.task].get("execution",{}).is_empty() or combat_layouts[owner.task] != owner.layout: return false
 	if session.cards[id].get_instance_id() != owner.card or session.cards[id].stack_id != -1: return false
-	if dragging == id or session.combat.dragged.has(id) or session.equipment.owners.has(id): return false
+	if _card_drag_for(id) != null or session.combat.dragged.has(id) or session.equipment.owners.has(id): return false
 	if int(session.cycle.presentation_state().get("card_id",-1)) == id or combat_presentation.sample_actor(id) != null: return false
 	return views.has(id) and is_instance_valid(views[id]) and not views[id].is_queued_for_deletion() and views[id].get_instance_id() == owner.view and views[id].get_parent() == self
 
@@ -2538,7 +2687,7 @@ func _terminal_landing_current(id: int) -> bool:
 	if stack.get_instance_id() != owner.stack or stack.card_ids != [id] or stack.position != owner.point: return false
 	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return false
 	if views[id].get_instance_id() != owner.view or views[id].get_parent() != self or global_transform != Transform3D.IDENTITY: return false
-	if dragging == id or session.combat.dragged.has(id) or session.combat.membership.has(id) or session.equipment.owners.has(id): return false
+	if _card_drag_for(id) != null or session.combat.dragged.has(id) or session.combat.membership.has(id) or session.equipment.owners.has(id): return false
 	if int(session.cycle.presentation_state().get("card_id",-1)) == id or combat_presentation.sample_actor(id) != null: return false
 	return true
 
@@ -2605,7 +2754,7 @@ func _layout_states() -> Array:
 	var result: Array = []
 	for stack in session.stacks.values():
 		if stack.card_ids.is_empty(): continue
-		var locked: bool = layout_locks.has(stack.id) or (session.cards.has(dragging) and session.cards[dragging].stack_id == stack.id)
+		var locked: bool = layout_locks.has(stack.id) or _drag_locks_stack(stack.id)
 		result.append(BoardLayout.stack_state(stack.id, stack.position, _card_footprint(stack.card_ids[0]), stack.card_ids.size(), locked, _stack_step()))
 	return result
 
@@ -2636,7 +2785,7 @@ func _ensure_layout() -> void:
 	if session.catalog != null and _layout_signature() != layout_key:
 		_resolve_layout()
 
-func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -1, equipment_drop: bool = false) -> int:
+func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -1, equipment_drop: bool = false, held_root: int = -1) -> int:
 	if not session.cards.has(card_id): return -1
 	var candidates: Array = []
 	for stack in session.stacks.values():
@@ -2649,7 +2798,7 @@ func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -
 			var raw: Vector3 = _card_collider_size(stack.card_ids[index])
 			intersects = intersects or BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - raw * 0.5, raw))
 		if intersects:
-			var eligible: bool = session.can_move_to_stack(card_id, stack.id, session.drag.original_stack_id(card_id))
+			var eligible: bool = session.can_move_to_stack(card_id, stack.id, session.drag.original_stack_id_for(held_root if held_root >= 0 else card_id,card_id))
 			# Equipment drops are a separate source action ahead of ordinary attachment.
 			var incoming: Dictionary = catalog.fields(session.cards[card_id].definition_guid)
 			var receiver: Dictionary = catalog.fields(session.cards[stack.card_ids.back()].definition_guid)
@@ -2840,7 +2989,7 @@ func _combat_start_layout(attackers: Array, defenders: Array, center: Variant) -
 	var ids: Array = attackers + defenders
 	if global_transform != Transform3D.IDENTITY or not center is Vector2 or not center.is_finite(): return {}
 	if not session.combat.tasks.is_empty() or not combat_layouts.is_empty() or not layout_locks.is_empty(): return {}
-	if session.drag.active() or dragging >= 0: return {}
+	if session.drag.active() or _has_card_drag(): return {}
 	var fresh_center := Vector2.ZERO
 	for id in ids:
 		if not session.cards.has(id) or int(session.cycle.presentation_state().get("card_id", -1)) == id: return {}
@@ -2887,7 +3036,7 @@ func _combat_merge_center(attackers: Array, defenders: Array, old_members: Dicti
 		var pose: Variant
 		if int(session.cycle.presentation_state().get("card_id", -1)) == id: return null
 		if old_members.has(id):
-			if (not old_members[id] and not resized.has(id)) or dragging == id or session.equipment.owners.has(id): return null
+			if (not old_members[id] and not resized.has(id)) or _card_drag_for(id) != null or session.equipment.owners.has(id): return null
 			if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return null
 			var card = session.cards[id]
 			if views[id].get_meta("definition_guid", "") != card.definition_guid: return null
@@ -2964,7 +3113,7 @@ func _combat_resize_native_slots(task_id: int, validate_only: bool = false) -> b
 	for id in ids:
 		if not session.cards.has(id) or not positions.has(id): return false
 		if session.combat.membership.get(id, -1) != task_id or session.combat.dragged.has(id): return false
-		if dragging == id or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id", -1)) == id: return false
+		if _card_drag_for(id) != null or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id", -1)) == id: return false
 		if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return false
 		if views[id].get_parent() != self: return false
 		var card = session.cards[id]
