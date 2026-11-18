@@ -59,7 +59,8 @@ func run() -> void:
 	check(not board.quit_callback.is_valid() and board.feedback.music.playing, "live main scene has music and no quit interception")
 
 	board.title_quit_button.pressed.emit()
-	board.quit_dialog.canceled.emit()
+	if board.source_title_quit != null: board.source_title_quit.no_button.pressed.emit()
+	else: board.quit_dialog.canceled.emit()
 	board.quit_dialog.confirmed.emit()
 	board._confirm_quit()
 	check(not board.quit_dispatched and not board.feedback.shutting_down and board.feedback.music.playing, "canceled/stale title quit leaves audio and scene alive")
@@ -102,12 +103,13 @@ func run() -> void:
 	for stream in board.feedback.stream_cache.values():
 		if stream.resource_path.is_empty(): cached_audio = false
 	board.title_quit_button.pressed.emit()
-	check(board.quit_dialog.visible, "real title confirmation is visible")
+	check(board.quit_dialog.visible or (board.source_title_quit != null and board.source_title_quit.visible), "real title confirmation is visible")
 	quit_started_usec = Time.get_ticks_usec()
 	# Shutdown must progress even when gameplay/engine time has stopped.
 	Engine.time_scale = 0.0
 	paused = true
-	board.quit_dialog.confirmed.emit()
+	if board.source_title_quit != null: board.source_title_quit.yes_button.pressed.emit()
+	else: board.quit_dialog.confirmed.emit()
 	check(board.quit_dispatched and board.process_mode == Node.PROCESS_MODE_DISABLED and board.feedback.shutting_down, "confirmed production quit closes audio admission and freezes the board")
 	check(board.feedback.stream_cache.is_empty() and board.feedback.last_played.is_empty(), "quit releases cached streams before engine teardown, including post-action Click")
 	check(not board.feedback.play_event("Click") and not board.feedback.play_music(), "late SFX/music requests cannot restart shutdown audio")

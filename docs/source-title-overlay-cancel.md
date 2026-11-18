@@ -39,8 +39,9 @@ they do not restrict PointerEventData.button to left.
 
 The Title adapter admits left/right/middle only for these five mounted roles,
 after verifying the locked source graph, exact component ID and script GUID,
-enabled state, owner GameObject and mounted node. Confirm, Quit, archive,
-recovery, native fallback and shared feedback defaults remain primary-only.
+enabled state, owner GameObject and mounted node. Confirm, archive, recovery,
+native fallback and shared feedback defaults remain primary-only. The
+separately admitted [Quit flow](source-title-quit.md) uses its own linked records.
 The Options panel's own Close is not widened by this change. Sequential release,
 not press, executes the existing guarded callbacks and sound. Tests include
 outside cancellation and modal ownership; simultaneous-button ownership and

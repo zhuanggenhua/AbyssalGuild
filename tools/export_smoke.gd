@@ -141,7 +141,8 @@ func run() -> void:
 	completed = true
 	# Production quit owns cleanup and the real-time audio drain; no forced quit.
 	board.title_quit_button.pressed.emit()
-	board.quit_dialog.confirmed.emit()
+	if board.source_title_quit != null: board.source_title_quit.yes_button.pressed.emit()
+	else: board.quit_dialog.confirmed.emit()
 
 func _finalize() -> void:
 	if completed and failures == 0:

@@ -60,20 +60,22 @@ func run() -> void:
 	board.title_cancel_button.pressed.emit(); spy.event_requests.clear()
 	board.friendly_choice.toggled.emit(false)
 	check(spy.event_requests.is_empty(), "hidden friendly stale signal silent")
-	for gamepad in [false, true]:
-		board._request_title_quit()
-		await process_frame
-		spy.event_requests.clear()
-		var event: InputEvent
-		if gamepad:
-			var joy := InputEventJoypadButton.new()
-			joy.button_index = JOY_BUTTON_B; joy.pressed = true; event = joy
-		else:
-			var key := InputEventKey.new()
-			key.keycode = KEY_ESCAPE; key.pressed = true; event = key
-		root.push_input(event)
-		await process_frame
-		check(not board.quit_dialog.visible and board.pending_quit.is_empty() and spy.event_requests == ["Click"], "viewport cancel clears pending intent and clicks once: %s" % gamepad)
+	# Source Title modal is separately exercised with native viewport pointer input.
+	if board.source_title_quit == null:
+		for gamepad in [false, true]:
+			board._request_title_quit()
+			await process_frame
+			spy.event_requests.clear()
+			var event: InputEvent
+			if gamepad:
+				var joy := InputEventJoypadButton.new()
+				joy.button_index = JOY_BUTTON_B; joy.pressed = true; event = joy
+			else:
+				var key := InputEventKey.new()
+				key.keycode = KEY_ESCAPE; key.pressed = true; event = key
+			root.push_input(event)
+			await process_frame
+			check(not board.quit_dialog.visible and board.pending_quit.is_empty() and spy.event_requests == ["Click"], "viewport cancel clears pending intent and clicks once: %s" % gamepad)
 	board._open_options(); spy.event_requests.clear()
 	board.title_new_button.pressed.emit()
 	check(spy.event_requests.is_empty(), "options overlay blocks title")

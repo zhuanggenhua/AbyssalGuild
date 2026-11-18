@@ -170,6 +170,8 @@ var title_cancel_button: Button
 var title_back_button: Button
 var title_panel: Control
 var source_title
+var source_title_quit: Control
+var _source_title_quit_catalog: Dictionary = {}
 var source_saved_rows
 var recovery_window: Window
 var recovery_button: Button
@@ -623,6 +625,7 @@ func _configure_source_title() -> void:
 	for pair in [["new", title_new_button], ["load", title_load_button], ["options", title_options_button], ["quit", title_quit_button], ["duration_label", duration_label], ["duration", duration], ["friendly", friendly_choice], ["confirm", title_confirm_button], ["cancel", title_cancel_button], ["saves_close", title_back_button], ["saves_clear", archive_all_button]]:
 		if candidate.mount(pair[0], pair[1]) and pair[0] in ["new", "load", "options", "cancel", "saves_close"]:
 			candidate.admit_navigation_pointer(catalog.data, pair[0], pair[1])
+	_configure_source_title_quit()
 	var source_controls: Dictionary = candidate.bind_source_controls(catalog.data)
 	if not source_controls.get("duration", {}).is_empty():
 		duration_adapter = preload("res://scripts/ui/source_slider_adapter.gd").new()
@@ -666,6 +669,71 @@ func _configure_source_title() -> void:
 	_sync_title_destination()
 	board_mesh.hide() # Source Title is Canvas artwork, not a generated 3D board.
 
+## The live TitleScreen Quit TextButton opens the linked ModalWindow instance.
+## Missing/unsupported data retains the native confirmation rather than guessing.
+func _configure_source_title_quit() -> void:
+	if not is_instance_valid(source_title) or not source_title.source_backed or source_title_quit != null: return
+	var button_id: String = source_title.layout.resolve("MenuPanel/QuitGame")
+	if button_id.is_empty() or title_quit_button.get_parent() != source_title.nodes.get(button_id): return
+	if catalog.data.get("provenance", {}).get("source_commit", "") != SourceColdCrafting.SOURCE_COMMIT: return
+	var title_fields: Dictionary = {}
+	var opener: Dictionary = {}
+	var modal_fields: Dictionary = {}
+	var instance: Dictionary = {}
+	for scene in catalog.data.get("scenes", []):
+		if scene.get("name", "") != "Title": continue
+		for doc in scene.get("documents", []):
+			var fields: Dictionary = doc.get("fields", {})
+			var class_name_hint: String = doc.get("script_class", "")
+			match str(doc.get("file_id", "")):
+				"1960366055":
+					if class_name_hint == "TitleScreen": title_fields = fields
+				"242642538":
+					if class_name_hint == "TextButton": opener = fields
+				"274622151":
+					if class_name_hint == "ModalWindow": modal_fields = fields
+				"803427066985004391": instance = fields
+	if title_fields.get("m_Enabled", 0) != 1 or title_fields.get("m_Script", {}).get("guid", "") != "7ceb2876a137ca34e88ae1d005e367d8": return
+	if str(title_fields.get("quitGameButton", {}).get("fileID", "")) != "242642538" or str(title_fields.get("modalWindow", {}).get("fileID", "")) != "274622151": return
+	if opener.get("m_Enabled", 0) != 1 or opener.get("m_Script", {}).get("guid", "") != "ef98d84a856977b44bbf49a1bab2060a" or opener.get("m_GameObject", {}) != source_title.layout.records[button_id].rect.get("m_GameObject", {}): return
+	var prefab_guid := "a38dce0e37fdae5448eeb8ed7a3e8cdc"
+	var link: Dictionary = modal_fields.get("m_CorrespondingSourceObject", {})
+	if modal_fields.get("m_Enabled", 0) != 1 or modal_fields.get("m_Script", {}).get("guid", "") != "fde05c8a41ce4ff43b52e31f82f5e337" or link.get("guid", "") != prefab_guid or str(link.get("fileID", "")) != "8391004423961831919": return
+	if str(modal_fields.get("m_PrefabInstance", {}).get("fileID", "")) != "803427066985004391" or instance.get("m_SourcePrefab", {}).get("guid", "") != prefab_guid: return
+	if str(instance.get("m_Modification", {}).get("m_TransformParent", {}).get("fileID", "")) != source_title.layout.root_id: return
+	var dialog = preload("res://scripts/ui/source_title_quit_view.gd").new()
+	dialog.name = "SourceTitleQuit"
+	source_title.add_child(dialog)
+	dialog.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	if not dialog.configure(catalog.data, _decline_source_title_quit, _accept_source_title_quit, _source_title_quit_can_act, _play_ui_click):
+		dialog.queue_free()
+		return
+	source_title_quit = dialog
+	_source_title_quit_catalog = catalog.data
+	dialog.visibility_changed.connect(_sync_card_feedback)
+	source_title.visibility_changed.connect(func():
+		if not source_title.is_visible_in_tree():
+			dialog.close_dialog()
+			if pending_quit == "source_title": pending_quit = "")
+	title_quit_button.button_mask = MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
+	title_quit_button.focus_mode = Control.FOCUS_NONE
+
+func _source_title_quit_home() -> bool:
+	return is_instance_valid(source_title_quit) and is_instance_valid(source_title) and source_title.is_visible_in_tree() \
+		and data_error == OK and is_same(catalog.data, _source_title_quit_catalog) and title_navigation.destination == TitleNavigation.HOME \
+		and not running and not quit_dispatched and not scene_transition.active() and not options_panel.visible \
+		and (not is_instance_valid(recovery_window) or not recovery_window.visible)
+
+func _source_title_quit_can_act() -> bool:
+	return _source_title_quit_home() and source_title_quit.is_visible_in_tree() and pending_quit == "source_title"
+
+func _decline_source_title_quit() -> void:
+	pending_quit = ""
+
+func _accept_source_title_quit() -> void:
+	pending_quit = ""
+	_execute_quit()
+
 func _title_navigation_allowed() -> bool:
 	return not scene_transition.active() and not running and not quit_dispatched and not options_panel.visible and not _navigation_modal_active()
 
@@ -676,7 +744,7 @@ func _sync_title_destination() -> void:
 	title_saves.visible = title_navigation.destination == TitleNavigation.SAVES
 	if source_title != null:
 		for button in [title_new_button, title_load_button, title_options_button, title_quit_button]:
-			button.focus_mode = Control.FOCUS_ALL if title_navigation.destination == TitleNavigation.HOME else Control.FOCUS_NONE
+			button.focus_mode = Control.FOCUS_ALL if title_navigation.destination == TitleNavigation.HOME and (button != title_quit_button or source_title_quit == null) else Control.FOCUS_NONE
 
 var _title_overlay_open_owner: Dictionary = {}
 func _source_title_overlay_visibility_changed(overlay: Control) -> void:
@@ -2181,6 +2249,7 @@ func _notification(what: int) -> void:
 		_execute_quit()
 
 func _navigation_modal_active() -> bool:
+	if is_instance_valid(source_title_quit) and source_title_quit.visible: return true
 	for dialog in [archive_dialog, game_over_dialog, quit_dialog]:
 		if dialog != null and dialog.visible: return true
 	return options_panel != null and options_panel.reset_dialog != null and options_panel.reset_dialog.visible
@@ -2188,16 +2257,23 @@ func _navigation_modal_active() -> bool:
 func _request_title_quit() -> void:
 	if scene_transition.active(): return
 	if running or quit_dispatched or options_panel.visible or _navigation_modal_active(): return
+	if data_error == OK and is_instance_valid(source_title_quit):
+		if not _source_title_quit_home(): return
+		var focus: Control = get_viewport().gui_get_focus_owner()
+		if is_instance_valid(focus): focus.release_focus()
+		pending_quit = "source_title"
+		source_title_quit.show_dialog()
+		return
 	pending_quit = "title"
 	quit_dialog.title = "Quit Game"
 	quit_dialog.dialog_text = "Are you sure you want to quit the game?"
 	quit_dialog.popup_centered()
 
 func _cancel_quit() -> void:
-	pending_quit = ""
+	if pending_quit != "source_title": pending_quit = ""
 
 func _confirm_quit() -> void:
-	if scene_transition.active(): return
+	if scene_transition.active() or pending_quit == "source_title": return
 	var requested: String = pending_quit
 	pending_quit = "" # Consume a confirmation once, including a stale request.
 	quit_dialog.hide()
@@ -3388,7 +3464,7 @@ func _sync_scene_fader() -> void:
 	scene_shade.mouse_filter = Control.MOUSE_FILTER_STOP if scene_transition.blocks_input() else Control.MOUSE_FILTER_IGNORE
 
 func _request_scene_change(action: Callable) -> bool:
-	if quit_dispatched or not scene_transition.begin(action): return false
+	if quit_dispatched or (is_instance_valid(source_title_quit) and source_title_quit.visible) or not scene_transition.begin(action): return false
 	_source_inbound_close_receipt = {}
 	panning = false
 	pending_quit = ""

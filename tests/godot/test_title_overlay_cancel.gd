@@ -16,6 +16,7 @@ func click_at(index:int, down:bool, position:Vector2):
 func _init():call_deferred("run")
 func run():
  root.gui_embed_subwindows=true
+ root.size=Vector2i(1440,900)
  var b=Board.new();var path="user://title-overlay-%d"%Time.get_ticks_usec();DirAccess.make_dir_recursive_absolute(path)
  b.slot_root=path+"/slots";b.options_path=path+"/options.json";b.legacy_paths.clear()
  b.options_apply_adapter=func(_plan):return {"ok":true,"capabilities":{},"warnings":[]}
@@ -24,7 +25,7 @@ func run():
  for role in ["new","load","options","cancel","saves_close"]:
   var controls={"new":b.title_new_button,"load":b.title_load_button,"options":b.title_options_button,"cancel":b.title_cancel_button,"saves_close":b.title_back_button}
   check(controls[role].button_mask==(7 if sourced else MOUSE_BUTTON_MASK_LEFT),role+" pointer admission is source only")
- for button in [b.title_quit_button,b.title_confirm_button,b.archive_all_button,b.continue_button]:
+ for button in [b.title_confirm_button,b.archive_all_button,b.continue_button]:
   check(button.button_mask==MOUSE_BUTTON_MASK_LEFT,"transaction scope unchanged")
  if sourced:
   for role in ["new","load"]:
@@ -65,7 +66,7 @@ func run():
      if str(doc.file_id)=="2057193291":doc.fields.m_Enabled=0
   check(not b.source_title.admit_navigation_pointer(bad,"new",b.title_new_button),"disabled TextButton rejected")
   b.title_new_button.button_mask=mask
-  check(not b.source_title.admit_navigation_pointer(original,"quit",b.title_quit_button),"quit cannot be admitted")
+  check(not b.source_title.admit_navigation_pointer(original,"quit",b.title_quit_button),"generic Title overlay adapter cannot admit quit")
   check(not b.source_title.admit_navigation_pointer(original,"new",b.title_load_button),"wrong mounted node rejected")
  for dest in ["preferences","saves"]:
   var opener=b.title_new_button if dest=="preferences" else b.title_load_button
