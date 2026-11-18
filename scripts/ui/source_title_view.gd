@@ -148,8 +148,11 @@ func bind_source_controls(data: Dictionary) -> Dictionary:
 
 func install_saved_rows(data: Dictionary, selector: OptionButton, load_action: Callable, archive_action: Callable, guard: Callable, sound: Callable):
 	var documents: Array = []
+	var slot_prefab: Dictionary = {}
 	for prefab in data.get("referenced_prefabs",[]):
-		if prefab.get("name") == "SavedGameSlot": documents = prefab.get("documents",[])
+		if prefab.get("name") == "SavedGameSlot":
+			documents = prefab.get("documents",[])
+			slot_prefab = prefab
 	var host_id := layout.resolve("SavedGamesUI/MainPanel/ScrollView")
 	var content_id := layout.resolve("SavedGamesUI/MainPanel/ScrollView/Viewport/Content")
 	if not nodes.has(host_id): return null
@@ -171,7 +174,8 @@ func install_saved_rows(data: Dictionary, selector: OptionButton, load_action: C
 					fields["scroll_delta_per_tick"]=input_fields.m_ScrollDeltaPerTick
 					fields.scrollbar["repeat_delay"]=input_fields.m_MoveRepeatDelay
 					fields.scrollbar["repeat_rate"]=input_fields.m_MoveRepeatRate
-	if not host.configure(documents,fields,selector,load_action,archive_action,guard):
+	var source_pointer: bool = source_backed and preload("res://scripts/ui/source_saved_slot.gd").source_pointer_admitted(data,slot_prefab)
+	if not host.configure(documents,fields,selector,load_action,archive_action,guard,source_pointer):
 		host.free()
 		return null
 	for child in nodes[host_id].get_children(): child.hide()

@@ -24,10 +24,12 @@ var transaction_guard: Callable
 var last_tick := 0
 var drag_threshold := 10.0
 var scroll_delta_per_tick := 1.0
+var source_pointer := false
 func get_v_scroll_bar() -> Control: return bar
 func _admitted() -> bool:
 	return is_visible_in_tree() and not suppress_click and (not transaction_guard.is_valid() or transaction_guard.call())
-func configure(documents: Array, content_fields: Dictionary, selector: OptionButton, load_action: Callable, archive_action: Callable, guard: Callable) -> bool:
+func configure(documents: Array, content_fields: Dictionary, selector: OptionButton, load_action: Callable, archive_action: Callable, guard: Callable, admit_source_pointer: bool = false) -> bool:
+	source_pointer = admit_source_pointer
 	source = Slot.metadata(documents)
 	if source.is_empty(): return false
 	var p: Dictionary = content_fields.get("m_Padding",{})
@@ -68,7 +70,7 @@ func sync(entries: Array) -> void:
 		row.play_click = play_click
 		row.font_resolver = font_resolver
 		content.add_child(row)
-		if not row.configure(entry,source,func(id): bridge.request(id,false),func(id): bridge.request(id,true),bridge.allowed):
+		if not row.configure(entry,source,func(id): bridge.request(id,false),func(id): bridge.request(id,true),bridge.allowed,source_pointer):
 			row.queue_free()
 			continue
 		rows.append(row)

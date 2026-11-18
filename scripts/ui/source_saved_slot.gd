@@ -35,7 +35,41 @@ static func metadata(documents: Array) -> Dictionary:
 	if result.background.is_empty() or str(result.background.m_Sprite.get("fileID","0")) != "0": return {}
 	return result
 
-func configure(entry: Dictionary, source: Dictionary, on_load: Callable, on_archive: Callable, guard: Callable = Callable()) -> bool:
+## Only the locked Title SavedGamesUI and its exact active prefab's
+## TextButtons use the source unfiltered IPointerClickHandler path.
+static func source_pointer_admitted(data: Dictionary, prefab: Dictionary) -> bool:
+	if data.get("provenance", {}).get("source_commit", "") != "a11a89b04cea8370476f2559b639bb9b4cbc08d8": return false
+	var prefab_guid := "220d7905ebde81945a397e8b25eb555d"
+	if prefab.get("name", "") != "SavedGameSlot" or prefab.get("guid", "") != prefab_guid: return false
+	var title_documents: Array = []
+	for scene in data.get("scenes", []):
+		if scene.get("name", "") == "Title": title_documents = scene.get("documents", [])
+	var saved_games := Geometry.fields(title_documents,{"fileID":"2090943499"})
+	var slot_link: Dictionary = saved_games.get("slotPrefab",{})
+	if saved_games.get("m_Enabled",0)!=1 or saved_games.get("m_Script",{}).get("guid","")!="a00b831b243a80d44ba40405f3d262e3": return false
+	if slot_link.get("guid","")!=prefab_guid or str(slot_link.get("fileID",""))!="3996515929796262294": return false
+	var input := Geometry.fields(title_documents,{"fileID":"842543404"})
+	if input.get("m_Enabled",0)!=1 or input.get("m_Script",{}).get("guid","")!="01614664b831546d2ae94a42149d80ac": return false
+	var actions := {"m_LeftClickAction":"3001919216989983466","m_RightClickAction":"-4090225696740746782",
+		"m_MiddleClickAction":"-2185481485913320682"}
+	for key in actions:
+		var action_ref: Dictionary = input.get(key,{})
+		if str(action_ref.get("fileID",""))!=actions[key] or action_ref.get("guid","")!="052faaac586de48259a63d0c4782560b": return false
+	var documents: Array = prefab.get("documents",[])
+	var controller := Geometry.fields(documents,{"fileID":"3996515929796262294"})
+	if controller.get("m_Enabled",0)!=1 or controller.get("m_Script",{}).get("guid","")!="12a33e41ff8ac2b40a2ec5077f79c9a2": return false
+	if str(controller.get("m_GameObject",{}).get("fileID",""))!="2051950238423359092": return false
+	for pair in [["loadButton","257077926697314197","2837032872773734185"],
+			["deleteButton","1671686374944474514","2679109457480332390"]]:
+		var reference: Dictionary = controller.get(pair[0],{})
+		if str(reference.get("fileID",""))!=pair[1]: return false
+		var button := Geometry.fields(documents,reference)
+		if button.get("m_Enabled",0)!=1 or button.get("m_Script",{}).get("guid","")!="ef98d84a856977b44bbf49a1bab2060a": return false
+		if str(button.get("m_GameObject",{}).get("fileID",""))!=pair[2]: return false
+	return true
+
+func configure(entry: Dictionary, source: Dictionary, on_load: Callable, on_archive: Callable,
+		guard: Callable = Callable(), source_pointer: bool = false) -> bool:
 	if source.is_empty() or not records.is_empty(): return false
 	records = source
 	slot_id = int(entry.get("slot",0))
@@ -67,6 +101,9 @@ func configure(entry: Dictionary, source: Dictionary, on_load: Callable, on_arch
 	archive_button.tooltip_text = "Request recoverable archiving; files are not permanently deleted."
 	load_button.disabled = not valid
 	archive_button.disabled = not archive_action.is_valid()
+	if source_pointer:
+		load_button.button_mask = MOUSE_BUTTON_MASK_LEFT | MOUSE_BUTTON_MASK_RIGHT | MOUSE_BUTTON_MASK_MIDDLE
+		archive_button.button_mask = load_button.button_mask
 	load_button.configure(func():
 		if valid and load_action.is_valid(): load_action.call(slot_id),play_click,_admitted)
 	archive_button.configure(func():

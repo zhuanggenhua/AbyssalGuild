@@ -16,6 +16,7 @@ func run() -> void:
 	root.add_child(slot)
 	slot.size = Vector2(500,80)
 	assert(slot.configure(entry,fixture(),func(id): counts[0] += id,func(id): counts[1] += id))
+	assert(slot.load_button.button_mask == MOUSE_BUTTON_MASK_LEFT and slot.archive_button.button_mask == MOUSE_BUTTON_MASK_LEFT)
 	assert(slot.info.get_meta("source_rect") == Rect2(8,8,350,64))
 	assert(slot.load_button.position == Vector2(372,8))
 	assert(slot.archive_button.position == Vector2(372,40))

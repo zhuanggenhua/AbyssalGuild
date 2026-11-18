@@ -85,3 +85,22 @@ saves persist the save operation's local wall-clock timestamp, while legacy
 saves with no field remain unknown and may show clearly labeled file mtime; see
 [save time](source-save-time.md). Earlier unavailable/not-yet-implemented notes
 above describe the initial audit, not these follow-up implementations.
+
+## Original slot pointer releases
+
+The enabled Title `SavedGamesUI` points to the locked SavedGameSlot prefab
+and its exact Load and Delete `TextButton` components. Their
+`IPointerClickHandler` is not limited to the left button; Title's authored
+Input System UI actions include left, right and middle. Only a row mounted
+through those exact records accepts all three matching releases. The fallback,
+footer and native safety modal retain their existing input.
+
+The Label/Load/Archive surface was exercised from the real Title entry with
+viewport events: outside release, left scroll drag (including mixed secondary
+press/release), rebuilt row, disabled load and modal guards remain inert. Each
+matching release opens confirmation or starts the exact slot load before its
+single Click request. The original Delete already requested confirmation; the
+Godot port keeps that sequence but uses recoverable Archive instead of
+permanent removal. A row click never archives a file. Cancelling preserves
+the save, and a confirmed test archive remains restorable. This does not claim
+full multi-pointer Input System, TMP or Unity rendering parity.
