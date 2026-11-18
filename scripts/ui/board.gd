@@ -473,6 +473,7 @@ func _build_ui() -> void:
 		rows.meta_hover_ended.connect(_on_ledger_hover_ended.bind(tab))
 		rows.meta_clicked.connect(_on_ledger_group_clicked.bind(tab))
 		rows.can_click = body.can_click
+		rows.release_uncovered = _journal_release_uncovered.bind(tab)
 		journal_bodies[tab] = body
 		journal_rows[tab] = rows
 		journal_body_state[tab] = {"key":"", "info":{}, "ids":{}, "groups":{}}
@@ -511,6 +512,12 @@ func _build_ui() -> void:
 	watermark = _label("", source_hud, 24)
 	watermark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	watermark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# UIRoot UICanvas puts Watermark below the HUD, then InfoPanel
+	# (including its ActionButton) before MenuPanel. Restore sibling
+	# order for both rendering and native GUI hit priority.
+	source_hud.move_child(watermark, 0)
+	source_hud.move_child(card_hover, detail_panel.get_index())
+	source_hud.move_child(info_action, detail_panel.get_index())
 	hud.resized.connect(_configure_source_hud)
 	_layout_card_hover()
 	title_panel = PanelContainer.new()
@@ -1770,6 +1777,26 @@ func _refresh_journal_body(tab: String) -> void:
 		if not row.group.is_empty(): state.groups[row.group] = true
 		elif not row.id.is_empty(): state.ids[row.id] = true
 	renderer.set_rows(rows,preload("res://scripts/ui/journal_groups.gd").header_color(catalog,tab))
+
+## Unity TextButton click requires the release raycast to still resolve to the
+## row. Native GUI capture can deliver the release after the mask or a later
+## sibling changed. Do not consult the cached hover owner for that decision.
+func _journal_release_uncovered(point: Vector2, tab: String) -> bool:
+	if tab != active_tab or not journal_bodies.has(tab) or quit_dispatched: return false
+	var body: Control = journal_bodies[tab]
+	if not body.tab_active or not _journal_rect_contains(body,point): return false
+	if _navigation_modal_active() or (recovery_window != null and recovery_window.visible): return false
+	# These later source layers own pointer hits only in their current geometry.
+	# Inbound ScreenFader is IGNORE even at opaque alpha; outbound is STOP.
+	for blocker in [detail_toggle, pause_overlay, options_panel, scene_shade]:
+		if is_instance_valid(blocker) and blocker.mouse_filter == Control.MOUSE_FILTER_STOP \
+				and _journal_rect_contains(blocker,point):
+			return false
+	return true
+
+func _journal_rect_contains(control: Control, point: Vector2) -> bool:
+	return control.is_visible_in_tree() and Rect2(Vector2.ZERO,control.size).has_point(
+		control.get_global_transform_with_canvas().affine_inverse() * point)
 
 func _journal_request_key(tab: String) -> String:
 	# Retain the existing quest requester key for callers; Recipes owns another.

@@ -18,6 +18,19 @@ height 50 with content-preferred width. MenuPanel is right-anchored, full-height
 InfoPanel is 400 wide at bottom-left (30,30), using preferred text height.
 Watermark is bottom-centred 600×40. These are extracted, not screenshot guesses.
 
+The original single UICanvas orders Watermark, DayTimeUI, CardStatsUI,
+InfoPanel and MenuPanel before the covering overlays. The InfoPanel's
+ActionButton stays below MenuPanel with the rest of InfoPanel. A narrow
+height-matched viewport overlaps the actual action and active journal
+viewport; the GUI hit must reach the journal, not the covered action.
+This is sibling order, not a claim of complete Unity GraphicRaycaster parity.
+Journal pointer release rechecks the active full-stretch viewport mask and the
+current covering layers, even after native pointer capture. The original Masks
+also filter raycasts, not just drawing. The ScreenFader blocks from outbound
+start through commit, but ignores input throughout the fade back in, even while
+still opaque. Left-button drag suppression remains separate from right and
+middle click admission.
+
 ## Behavior
 
 Day progress fills the complete background, not a native bottom progress strip.

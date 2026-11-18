@@ -7,6 +7,7 @@ signal meta_hover_started(meta: Variant)
 signal meta_hover_ended(meta: Variant)
 signal meta_clicked(meta: Variant)
 var can_click: Callable
+var release_uncovered: Callable
 var preferred_height := 20.0
 var rows: Dictionary = {}
 var ordered_keys: Array[String] = []
@@ -64,6 +65,9 @@ class Item extends Control:
 			return
 		var admitted: bool = pressed_button == event.button_index and Rect2(Vector2.ZERO, size).has_point(event.position)
 		pressed_button = 0
+		if admitted and owner_rows.release_uncovered.is_valid():
+			var viewport_point: Vector2 = get_global_transform_with_canvas() * event.position
+			admitted = bool(owner_rows.release_uncovered.call(viewport_point))
 		if admitted and event.button_index == MOUSE_BUTTON_LEFT and owner_rows.can_click.is_valid(): admitted = bool(owner_rows.can_click.call())
 		if admitted and not str(descriptor.get("group", "")).is_empty(): owner_rows.meta_clicked.emit(meta())
 

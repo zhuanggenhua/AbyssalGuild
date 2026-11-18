@@ -97,7 +97,111 @@ func test_native_scroll(board, q, r) -> void:
 	point_event(where-Vector2(10,40))
 	await settle()
 
+func test_captured_release(board, q: Control, rows: Control) -> void:
+	var group: String = board.ledger_visible_groups.keys()[0]
+	var row: Control = rows.rows["group:" + group]
+	var local := Vector2(24, 4)
+	q.motion.position = row.position.y + 8
+	q._apply_motion()
+	await settle()
+	var hit: Vector2 = q.get_global_transform_with_canvas() * local
+	var behind_mask: Vector2 = q.get_global_transform_with_canvas() * Vector2(local.x, -3)
+	var mask_release_local: Vector2 = row.get_global_transform_with_canvas().affine_inverse() * behind_mask
+	var mask_clicks := {"n":0}
+	var note_mask := func(_meta): mask_clicks.n += 1
+	rows.meta_clicked.connect(note_mask)
+	check(row.get_global_rect().has_point(behind_mask) and not q.get_global_rect().has_point(behind_mask),
+		"part of the same header is outside the viewport mask")
+	for button in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_RIGHT,MOUSE_BUTTON_MIDDLE]:
+		point_event(hit,button)
+		point_event(behind_mask,button,false)
+		check(board.ledger_expansion.get(group,true),"captured release outside the mask does not toggle: %s" % button)
+		if not board.ledger_expansion.get(group,true):
+			board.ledger_expansion[group] = true
+			board._refresh_ledger()
+		await settle()
+		var prior: int = mask_clicks.n
+		point_event(hit,button)
+		check(row.pressed_button==button,"press acquired by the partly masked header: %s" % button)
+		var captured_mask := InputEventMouseButton.new()
+		captured_mask.button_index = button
+		captured_mask.position = mask_release_local
+		captured_mask.pressed = false
+		row._gui_input(captured_mask)
+		check(mask_clicks.n==prior,"even an explicitly captured release must recheck the mask: %s" % button)
+		point_event(hit,button,false)
+		if not board.ledger_expansion.get(group,true):
+			board.ledger_expansion[group] = true
+			board._refresh_ledger()
+		await settle()
+	rows.meta_clicked.disconnect(note_mask)
+	q.reset_scroll()
+	await settle()
+	var on_row: Vector2 = row.get_global_transform_with_canvas() * Vector2(4,4)
+	point_event(on_row,MOUSE_BUTTON_MIDDLE)
+	check(board.scene_transition.begin(func(): pass),"real outbound fader acquires raycasts")
+	board._sync_scene_fader()
+	var captured := InputEventMouseButton.new()
+	captured.button_index = MOUSE_BUTTON_MIDDLE
+	captured.position = Vector2(4,4)
+	captured.pressed = false
+	var received := {"n":0}
+	var note_click := func(_meta): received.n += 1
+	rows.meta_clicked.connect(note_click)
+	check(row.pressed_button == MOUSE_BUTTON_MIDDLE, "middle press actually captured by source row")
+	row._gui_input(captured)
+	check(received.n == 0 and board.scene_shade.mouse_filter == Control.MOUSE_FILTER_STOP,
+		"captured release is not emitted through the visible outbound fader")
+	board.scene_transition.advance(1.0)
+	board._sync_scene_fader()
+	point_event(on_row,MOUSE_BUTTON_MIDDLE)
+	point_event(on_row,MOUSE_BUTTON_MIDDLE,false)
+	check(received.n == 1 and not board.ledger_expansion.get(group,true) and board.scene_shade.color.a == 1.0,
+		"opaque inbound fader ignores pointer and permits ordinary Journal release")
+	rows.meta_clicked.disconnect(note_click)
+	board.scene_transition.cancel()
+	board._sync_scene_fader()
+	board.ledger_expansion[group] = true
+	board._refresh_ledger()
+	q.reset_scroll()
+	await settle()
+
+# The original height-matched layout brings the two real controls
+# into overlap at a portrait-like logical width; no fake blocker.
+func test_source_canvas_order(board, q: Control) -> void:
+	var size_before: Vector2 = board.hud.size
+	var phase_before: String = board.session.phase
+	board.hud.size = Vector2(620,900)
+	board._configure_source_hud()
+	board.journal_slide.reset(true)
+	board.session.phase = "ready"
+	board._sync_source_info()
+	await settle()
+	var overlap: Rect2 = board.info_action.get_global_rect().intersection(q.get_global_rect())
+	check(overlap.has_area() and board.info_action.visible and root.get_visible_rect().has_point(overlap.get_center()),
+		"narrow source canvas overlaps action and journal inside real input surface")
+	if overlap.has_area():
+		point_event(Vector2(-12,-12))
+		point_event(overlap.get_center())
+		var hovered: Control = root.gui_get_hovered_control()
+		check(hovered != null and (hovered == q or q.is_ancestor_of(hovered)),
+			"actual GUI prioritizes later source MenuPanel over the covered InfoPanel action")
+	check(board.watermark.get_index() < board.day_clock.get_index()
+		and board.card_hover.get_index() < board.info_action.get_index()
+		and board.info_action.get_index() < board.detail_panel.get_index(),
+		"single Canvas preserves original relative draw and pointer order")
+	point_event(Vector2(-12,-12))
+	board.session.phase = phase_before
+	board.hud.size = size_before
+	board._configure_source_hud()
+	board.journal_slide.reset(true)
+	board._sync_source_info()
+	await settle()
+
 func run() -> void:
+	# Godot's isolated headless runner otherwise starts with a 64×64 viewport.
+	# Set the real input surface before laying out the test HUD.
+	root.size = Vector2i(1440,900)
 	var drain = preload("res://tests/godot/source_test_audio_drain.gd").new()
 	var board = Board.new()
 	board.slot_root = "user://journal-bodies"
@@ -139,6 +243,8 @@ func run() -> void:
 	check(q != r and q.motion != r.motion, "two real persistent native motion owners")
 	check(board.ledger == qrows and q.visible and not r.visible, "active public reference and inactive participation")
 	await test_native_scroll(board,q,r)
+	await test_captured_release(board,q,qrows)
+	await test_source_canvas_order(board,q)
 	q.motion.position = 120
 	check(q.motion.position == 120, "quest nonzero scroll established")
 	board._show_journal_tab("recipes")
