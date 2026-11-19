@@ -1,7 +1,9 @@
 extends Button
 ## Source-backed day clock. Native controls/font; private textures are optional.
 const Prefs = preload("res://scripts/ui/title_gameplay_prefs.gd")
+const SourceProgressFill = preload("res://scripts/ui/source_day_progress_fill.gd")
 var progress: ProgressBar
+var source_fill: SourceProgressFill
 var native_progress_step := 0.01
 var source_config: Dictionary = {}
 var assets
@@ -131,6 +133,9 @@ func _init() -> void:
 	add_child(progress)
 	progress.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	progress.show_behind_parent = true
+	source_fill = SourceProgressFill.new()
+	progress.add_child(source_fill)
+	source_fill.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_theme_font_size_override("font_size", 30)
 	alignment = HORIZONTAL_ALIGNMENT_LEFT
 	icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -154,7 +159,12 @@ func configure(source: Dictionary, scene_name: String, visual_assets) -> void:
 	preload("res://scripts/ui/source_font_registry.gd").shared().bind_control(self, source_config.get("text_record", {}))
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = source_config.color
-	progress.add_theme_stylebox_override("fill", fill)
+	if progress.step == 0 and source_fill.configure(visual_assets,source_config.get("fill_record",{}),source_config.color):
+		progress.add_theme_stylebox_override("fill", StyleBoxEmpty.new())
+	else:
+		source_fill.configure(null,{},Color.WHITE)
+		progress.add_theme_stylebox_override("fill", fill)
+	source_fill.set_ratio(progress.value)
 
 func _configure_progress_precision(source: Dictionary) -> void:
 	var provenance = source.get("provenance", {})
@@ -170,6 +180,7 @@ func sync(session, is_running: bool, blocked: bool, ordinary_source_pause: bool 
 	var pace: int = session.time_pace()
 	text = "Day %d" % session.day
 	progress.value = clampf(session.elapsed / maxf(session.day_duration, 0.001), 0.0, 1.0)
+	if source_fill.visible: source_fill.set_ratio(progress.value)
 	icon = null
 	if source_config.get("source_backed", false) and assets != null:
 		icon = assets.texture(str(source_config.pace_icons[pace]))

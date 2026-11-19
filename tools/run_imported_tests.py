@@ -59,6 +59,7 @@ SUITES = (
     ("test_render_pipeline_imported", r"Private source render pipeline: PASS"),
     ("test_pause_ending_actions", r"Pause ending actions: 27/27 passed"),
     ("test_day_clock_boundary", r"Day clock boundary: 44/44 passed"),
+    ("test_source_day_progress_fill", r"Source day progress fill: 9/9 passed"),
     ("test_day_clock_boundary_board", r"Day clock boundary board: 34/34 passed"),
     ("test_tmp_baselines_imported", r"Imported source TMP title baselines: PASS"),
     ("test_tmp_titles_imported", r"Imported source TMP titles: PASS"),

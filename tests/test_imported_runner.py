@@ -57,6 +57,7 @@ MARKERS = {
     "test_pause_ending_actions": "Pause ending actions: 27/27 passed",
     "test_day_clock_boundary": "Day clock boundary: 44/44 passed",
     "test_day_clock_boundary_board": "Day clock boundary board: 34/34 passed",
+    "test_source_day_progress_fill": "Source day progress fill: 9/9 passed (headless)",
     "test_tmp_baselines_imported": "Imported source TMP title baselines: PASS",
     "test_tmp_titles_imported": "Imported source TMP titles: PASS",
     "test_source_scrollbar": "Source scrollbar: PASS",
