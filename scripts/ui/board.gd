@@ -162,6 +162,8 @@ var _touch_drags: Dictionary = {}
 var _touch_panel_presses: Dictionary = {}
 var _touch_panel_serial := 0
 var touch_card_receivers = preload("res://scripts/ui/source_touch_card_receivers.gd").new()
+const SourceEquipmentOutsidePress = preload("res://scripts/ui/source_equipment_outside_press.gd")
+var _source_equipment_outside: SourceEquipmentOutsidePress
 # Preserve the existing mouse adapter and direct Board API.
 var dragging: int:
 	get: return _mouse_drag.id
@@ -878,6 +880,9 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {}) -> void:
+	_source_equipment_outside = SourceEquipmentOutsidePress.new() if (
+		session.scene_name in ["Main","Island"]
+		and catalog.data.get("provenance",{}).get("source_commit")==SourceColdCrafting.SOURCE_COMMIT) else null
 	_title_overlay_open_owner.clear()
 	_title_options_open_owner.clear()
 	source_crafting_report = cold_crafting
@@ -1031,11 +1036,13 @@ func _advance_running_frame(delta: float) -> void:
 		# Combat travel/return and cycle waits remain real-time under external
 		# menu/reveal pauses. Their scaled death waits and action clocks stop.
 		session.tick_paused(delta)
+		_advance_source_outside_equipment_press()
 		_sync_views(delta)
 		return
 	session.tick(delta)
 	day_clock.sync(session, running, _ui_pause_active(), _ordinary_source_pause_icon())
 	equipment_display.advance(scaled_delta)
+	_advance_source_outside_equipment_press()
 	_sync_views(delta)
 	refresh_clock += delta
 	if refresh_clock >= 0.2:
@@ -1132,6 +1139,18 @@ func _sync_views(real_delta: float = 0.0) -> void:
 	CyclePresentation.apply(session.cycle.presentation_state(), views)
 	_sync_equipment_display()
 	_sync_card_feedback()
+
+# EquipmentPanel.Update 独立于 GUI，按本帧最新共享坐标发射实体射线。
+func _advance_source_outside_equipment_press() -> void:
+	if _source_equipment_outside == null: return
+	var window_position: Variant = _source_equipment_outside.take_press()
+	if window_position == null: return
+	var screen: Vector2 = get_viewport().get_final_transform().affine_inverse() * window_position
+	var hit := _pick_target(screen)
+	var id: int = int(hit.card_id)
+	var gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category",0))==5
+	equipment_display.pointer_down(int(hit.panel_owner),gear)
+
 
 func _pick_target(screen: Vector2) -> Dictionary:
 	var origin := camera.project_ray_origin(screen)
@@ -1451,14 +1470,14 @@ func _sync_card_feedback() -> void:
 	_sync_card_hover(gui)
 
 # Pointer routing is separate from ray casting for deterministic adapter tests.
-func _begin_card_press(hit: Dictionary, screen: Vector2) -> void:
+func _begin_card_press(hit: Dictionary, screen: Vector2, raw_observed: bool = false) -> void:
 	if _mouse_drag.id >= 0: return
 	if _touch_drags.has(int(hit.get("card_id",-1))): return
 	_record_card_pointer(screen)
 	var id: int = int(hit.get("card_id",-1))
 	var panel: int = int(hit.get("panel_owner",-1))
 	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
-	equipment_display.pointer_down(panel,is_gear)
+	if not raw_observed: equipment_display.pointer_down(panel,is_gear)
 	selected = id
 	pressed_panel = panel if panel >= 0 and _allows_equipment_panel_input() else -1
 	if panel >= 0:
@@ -1588,7 +1607,7 @@ func _touch_card_down(index: int, screen: Vector2) -> bool:
 		state.receiver = weakref(view)
 		_touch_drags[id] = state
 	var is_gear: bool = int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
-	if camera_pointer.primary_index == index and not camera_pointer.orphan:
+	if _source_equipment_outside == null and camera_pointer.primary_index == index and not camera_pointer.orphan:
 		equipment_display.pointer_down(-1,is_gear)
 	selected = id
 	var pointer := _card_pointer if _card_pointer_known else screen
@@ -1603,7 +1622,7 @@ func _touch_card_down(index: int, screen: Vector2) -> bool:
 func _touch_panel_down(index: int, wearer: int) -> bool:
 	var collider = equipment_display.records.get(wearer,{}).get("collider")
 	if not is_instance_valid(collider) or collider.is_queued_for_deletion(): return false
-	if camera_pointer.primary_index == index and not camera_pointer.orphan:
+	if _source_equipment_outside == null and camera_pointer.primary_index == index and not camera_pointer.orphan:
 		equipment_display.pointer_down(wearer,false)
 	selected = wearer
 	_touch_panel_serial += 1
@@ -1694,7 +1713,7 @@ func _unhandled_input(event: InputEvent) -> void:
 				# Native touch remains authoritative for card receivers. Keep
 				# touch-emulated mouse on the existing panel/blank/camera path.
 				if event.device != InputEvent.DEVICE_ID_EMULATION or int(hit.card_id) < 0:
-					_begin_card_press(hit, event.position)
+					_begin_card_press(hit, event.position, _source_equipment_outside!=null)
 			else:
 				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event): panning = false
 				if event.device != InputEvent.DEVICE_ID_EMULATION or pressed_panel >= 0:
@@ -1715,6 +1734,8 @@ func _input(event: InputEvent) -> void:
 	# GUI events retain viewport coordinates. Store physical samples/origins so
 	# a resize during a held pan cannot reinterpret an old logical pointer.
 	var camera_event: Dictionary = camera_pointer.observe(event.xformed_by(get_viewport().get_final_transform()))
+	if _source_equipment_outside != null and running:
+		_source_equipment_outside.observe(event,camera_event,camera_pointer.position)
 	if running and camera_event.sample and (event is InputEventScreenTouch or event is InputEventScreenDrag):
 		_record_card_pointer(get_viewport().get_final_transform().affine_inverse() * camera_pointer.position)
 	# A captured receiver gets up even if the up ray now hits GUI or a lock
@@ -1768,7 +1789,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and not event.pressed and get_viewport().gui_get_hovered_control() != null:
 		pressed_panel = -1
 		right_pressed_panel = -1
-	if running and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+	if _source_equipment_outside == null and running and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var hovered := get_viewport().gui_get_hovered_control()
 		if hovered != null and hovered != hud: equipment_display.pointer_down()
 	if running and dragging >= 0 and event.device != InputEvent.DEVICE_ID_EMULATION:
@@ -2384,6 +2405,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_source_equipment_outside = null
 	_title_overlay_open_owner.clear()
 	_title_options_open_owner.clear()
 	_source_options_open_owner.clear()

@@ -17,7 +17,7 @@ func suppress_emulated_camera_event(event: InputEvent) -> bool:
 	return primary_active and event.device == -1 and (event is InputEventMouseButton or event is InputEventMouseMotion)
 
 func observe(event: InputEvent) -> Dictionary:
-	var result := {"sample": false, "released": false}
+	var result := {"sample": false, "released": false, "primary_pressed": false}
 	if event is InputEventMouseButton or event is InputEventMouseMotion:
 		if not suppress_emulated_camera_event(event) and event.position.is_finite():
 			position = event.position
@@ -36,6 +36,7 @@ func observe(event: InputEvent) -> Dictionary:
 				primary_active = true
 				orphan = false
 				primary_position = event.position
+				result.primary_pressed = true
 		else:
 			if not contacts.has(index): return result
 			contacts.erase(index)
