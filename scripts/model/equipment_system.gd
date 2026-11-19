@@ -70,7 +70,7 @@ func equip(wearer_id: int, item_id: int) -> bool:
 	session.changed.emit()
 	return true
 
-func unequip(wearer_id: int, slot: int) -> int:
+func unequip(wearer_id: int, slot: int, detached_position: Variant = null) -> int:
 	var session = _session.get_ref()
 	if not equipped.get(wearer_id, {}).has(slot):
 		return -1
@@ -83,7 +83,9 @@ func unequip(wearer_id: int, slot: int) -> int:
 	equipped[wearer_id].erase(slot)
 	owners.erase(item_id)
 	if session.cards.has(item_id):
-		if session.cards.has(wearer_id):
+		if detached_position is Vector2 and detached_position.is_finite():
+			session.cards[item_id].position = detached_position
+		elif session.cards.has(wearer_id):
 			session.cards[item_id].position = session.card_target_position(wearer_id)
 		return_to_board(session, item_id)
 		# Only equipment follows source CardManager.ReturnCardToBoard. Combat

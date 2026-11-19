@@ -156,8 +156,11 @@ class BoardDrag extends RefCounted:
 	var delta: Vector2 = Vector2.ZERO
 	var moved: bool = false
 	var start: Vector3 = Vector3.ZERO
+	var deferred_gear_pose: bool = false
 var _mouse_drag := BoardDrag.new()
 var _touch_drags: Dictionary = {}
+var _touch_panel_presses: Dictionary = {}
+var _touch_panel_serial := 0
 var touch_card_receivers = preload("res://scripts/ui/source_touch_card_receivers.gd").new()
 # Preserve the existing mouse adapter and direct Board API.
 var dragging: int:
@@ -891,6 +894,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	_clear_puffs()
 	session.drag.reset()
 	_touch_drags.clear()
+	_touch_panel_presses.clear()
 	touch_card_receivers.reset()
 	session.combat.dragged.clear()
 	_mouse_drag = BoardDrag.new()
@@ -1107,7 +1111,8 @@ func _sync_views(real_delta: float = 0.0) -> void:
 				target += Vector3(held.delta.x, 0, -held.delta.y)
 				target.y = float(motion_settings.get("dragHeight", 0.1)) + (index-held_index)*step.y
 				mode = "instant" if index == held_index else "damped"
-			if session.combat.membership.has(id) or session.equipment.owners.has(id) or id == cycle_id: mode = "blocked"
+			if session.combat.membership.has(id) or session.equipment.owners.has(id) or id == cycle_id \
+					or (held != null and held.id == id and held.deferred_gear_pose): mode = "blocked"
 			motion_records.append({"id":id,"identity":"%d:%s" % [card.get_instance_id(),card.definition_guid],"target":target,"current":views[id].position,"mode":mode,"leader":stack.card_ids[index-1] if index > 0 else -1,"step":step})
 			views[id].highlight(id == selected)
 	for id in _combat_slot_returns:
@@ -1466,43 +1471,52 @@ func _begin_card_drag(state: BoardDrag, id: int, pointer: Vector2) -> void:
 		return
 	state.grant = -1
 	state.combat.clear()
+	state.deferred_gear_pose = false
+	var detached_pose: Variant = null
 	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
 	if is_gear and session.equipment.owners.has(id) and _allows_card_actions():
 		var wearer: int = session.equipment.owners[id]
 		var old_position: Vector3 = views[id].global_position
 		for slot in session.equipment.equipped.get(wearer, {}):
-			if session.equipment.equipped[wearer][slot] == id:
-				session.equipment.unequip(wearer, slot)
-				_set_board_card_position(id, Vector2(old_position.x, -old_position.z))
+			if session.equipment.equipped[wearer][slot] == id and session.equipment.unequip(wearer,slot,Vector2(old_position.x,-old_position.z)) == id:
+				detached_pose = Vector3(old_position.x,0,old_position.z)
 				break
+		if detached_pose == null: return
 		state.id = id # Lock the just-detached stack before placement can move its visible pose.
+		state.deferred_gear_pose = true
 		_sync_views()
+		views[id].global_position = detached_pose
 	state.id = id if _can_drag_card(id) else -1
 	if state.id == id:
 		_terminal_landings.erase(id)
 		_combat_slot_returns.erase(id)
-	if state.id >= 0:
-		state.start = session.card_target_position_3d(id)
+	if state.id >= 0 and session.combat.membership.has(id):
+		state.start = session.card_target_position_3d(id) # Existing unrelated combat drop adapter.
 	if state.id >= 0 and not session.combat.membership.has(id):
-		var lifted: Vector2 = session.card_target_position(id)
-		if views.has(id): lifted = Vector2(views[id].global_position.x, -views[id].global_position.z)
-		state.start.x = lifted.x
-		state.start.z = lifted.y
+		var pose: Vector3 = views[id].global_position
+		var lifted := Vector2(pose.x,-pose.z)
+		if detached_pose == null:
+			state.start = session.card_target_position_3d(id)
+			state.start.x = lifted.x
+			state.start.z = lifted.y
+			views[id].standard_drag_start = state.start
+		else:
+			state.start = views[id].standard_drag_start
 		if not _begin_model_drag(state,id,lifted).ok:
 			state.id = -1
-		else:
-			# Source immediately updates the held root from its current visible
-			# pose, including whole stacks that begin() does not split.
+			state.deferred_gear_pose = false
+		elif detached_pose == null:
 			_set_board_card_position(id, lifted)
 	state.grant = state.id
 	if state.id >= 0:
 		session.combat.dragged[state.id] = true
 		# Source combat PointerDown returns before the standard CardPick call.
 		# Do not suppress CardDrop: accepted PointerUp dispatches it before drop classification.
-		if not session.combat.membership.has(state.id): feedback.play_event("CardPick")
+		if detached_pose == null and not session.combat.membership.has(state.id): feedback.play_event("CardPick")
 	state.screen = pointer
 	state.origin = _board_point(pointer)
 	state.anchor = session.card_target_position(state.id) if session.cards.has(state.id) else Vector2.ZERO
+	if detached_pose is Vector3: state.anchor = Vector2(detached_pose.x,-detached_pose.z)
 	state.delta = Vector2.ZERO
 	state.moved = false
 	if state.id >= 0 and _source_combat_hold_allowed(id):
@@ -1560,7 +1574,8 @@ func _touch_card_down(index: int, screen: Vector2) -> bool:
 	if not running or not camera_pointer.contacts.has(index) or not screen.is_finite(): return false
 	var hit := _pick_target(screen)
 	var id: int = int(hit.card_id)
-	if id < 0 or int(hit.panel_owner) >= 0 or not _hover_source_visible(id): return false
+	if int(hit.panel_owner) >= 0: return _touch_panel_down(index,int(hit.panel_owner))
+	if id < 0 or not _hover_source_visible(id): return false
 	var view: Node3D = views[id]
 	if not touch_card_receivers.capture(index,view): return false
 	if not _allows_card_actions() or _mouse_drag.id == id: return true
@@ -1573,7 +1588,8 @@ func _touch_card_down(index: int, screen: Vector2) -> bool:
 		state.receiver = weakref(view)
 		_touch_drags[id] = state
 	var is_gear: bool = int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
-	equipment_display.pointer_down(-1,is_gear)
+	if camera_pointer.primary_index == index and not camera_pointer.orphan:
+		equipment_display.pointer_down(-1,is_gear)
 	selected = id
 	var pointer := _card_pointer if _card_pointer_known else screen
 	var ordinary: bool = not session.combat.membership.has(id) and not session.equipment.owners.has(id)
@@ -1581,6 +1597,49 @@ func _touch_card_down(index: int, screen: Vector2) -> bool:
 	if state.id >= 0 and ordinary: _update_card_drag(state,pointer)
 	if state.id < 0: _touch_drags.erase(id)
 	return true
+
+# EquipmentPanel is an IPointerClick rather than CardController's captured UP.
+# GUI admits both edges; a canceled/occluded release cannot click the panel.
+func _touch_panel_down(index: int, wearer: int) -> bool:
+	var collider = equipment_display.records.get(wearer,{}).get("collider")
+	if not is_instance_valid(collider) or collider.is_queued_for_deletion(): return false
+	if camera_pointer.primary_index == index and not camera_pointer.orphan:
+		equipment_display.pointer_down(wearer,false)
+	selected = wearer
+	_touch_panel_serial += 1
+	_touch_panel_presses[index] = {"receiver":weakref(collider),"wearer":wearer,"serial":_touch_panel_serial}
+	_sync_card_feedback()
+	return true
+
+func _expire_touch_panel_press(index: int, serial: int) -> void:
+	if _touch_panel_presses.get(index,{}).get("serial",-1) == serial:
+		_touch_panel_presses.erase(index)
+
+func _touch_panel_up(index: int, position: Vector2) -> bool:
+	if not _touch_panel_presses.has(index): return false
+	var receipt: Dictionary = _touch_panel_presses[index]
+	_touch_panel_presses.erase(index)
+	if not _allows_equipment_panel_input() or not position.is_finite() or _hud_blocks_panel_click(hud,position): return true
+	var collider = receipt.receiver.get_ref()
+	var wearer: int = receipt.wearer
+	if (is_instance_valid(collider) and not collider.is_queued_for_deletion()
+			and equipment_display.records.get(wearer,{}).get("collider") == collider
+			and int(_pick_target(position).panel_owner) == wearer):
+		equipment_display.click_panel(wearer)
+		_sync_card_feedback()
+	return true
+
+# Godot cannot deliver a new GUI target a release that started on the Board.
+# Source IPointerClick still checks the current event-position ray. Test the
+# visible, unclipped HUD hit boxes here; never reuse cached mouse hover for a finger.
+func _hud_blocks_panel_click(control: Control, point: Vector2) -> bool:
+	if not is_instance_valid(control) or not control.is_visible_in_tree(): return false
+	var inside := _journal_rect_contains(control,point)
+	if control.clip_contents and not inside: return false
+	if inside and control.mouse_filter == Control.MOUSE_FILTER_STOP: return true
+	for child in control.get_children():
+		if child is Control and _hud_blocks_panel_click(child,point): return true
+	return false
 
 func _touch_card_up(index: int) -> bool:
 	if not touch_card_receivers.owns(index): return false
@@ -1610,8 +1669,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if event is InputEventScreenTouch:
-		if event.pressed and not event.canceled and _touch_card_down(event.index,event.position):
-			get_viewport().set_input_as_handled()
+		var accepted := false
+		if not event.canceled:
+			accepted = _touch_card_down(event.index,event.position) if event.pressed else _touch_panel_up(event.index,event.position)
+		if accepted: get_viewport().set_input_as_handled()
 		return
 	if not running or _ui_pause_active(): return
 	if event is InputEventMouseButton:
@@ -1658,6 +1719,12 @@ func _input(event: InputEvent) -> void:
 		_record_card_pointer(get_viewport().get_final_transform().affine_inverse() * camera_pointer.position)
 	# A captured receiver gets up even if the up ray now hits GUI or a lock
 	# arrived during the hold. The edge's position is not a new drag sample.
+	if event is InputEventScreenTouch and (not event.pressed or event.canceled) and _touch_panel_presses.has(event.index):
+		if event.canceled:
+			_touch_panel_presses.erase(event.index)
+		else:
+			# If GUI consumes this release there is no world click, but the contact still expires.
+			call_deferred("_expire_touch_panel_press",event.index,_touch_panel_presses[event.index].serial)
 	var touch_up: bool = event is InputEventScreenTouch and (not event.pressed or event.canceled) and _touch_card_up(event.index)
 	if OS.is_debug_build() and running and event is InputEventKey and event.keycode == KEY_F3 and event.pressed and not event.echo and not _ui_pause_active():
 		market_panel.visible = not market_panel.visible
@@ -1786,6 +1853,7 @@ func _update_drag_position(screen: Vector2) -> void:
 
 func _update_card_drag(state: BoardDrag, screen: Vector2) -> void:
 	if not _held_receiver_current(state) or not screen.is_finite(): return
+	state.deferred_gear_pose = false
 	var point := _board_point(screen)
 	state.delta = point - state.origin
 	if _source_combat_hold_current(state.id,state):
@@ -1811,6 +1879,8 @@ func _finish_drag(screen: Vector2) -> void:
 func _finish_card_drag(state: BoardDrag) -> void:
 	var id: int = state.id
 	var held_root := id
+	var deferred_gear := state.deferred_gear_pose
+	state.deferred_gear_pose = false
 	# Pointer-up's event position is not a new UpdateDragPosition sample.
 	var held_pose: Variant = views[id].global_position if _source_combat_hold_current(id,state) else null
 	var return_slot: Variant = state.combat.get("return_slot")
@@ -1856,6 +1926,9 @@ func _finish_card_drag(state: BoardDrag) -> void:
 		state.delta = Vector2.ZERO
 		return
 	var destination: Vector2 = session.card_target_position(id) + state.delta
+	if deferred_gear and views.has(id):
+		var pose: Vector3 = views[id].global_position
+		destination = Vector2(pose.x,-pose.z)
 	_set_board_card_position(id, destination)
 	var click_handled := false
 	# Captured presses use the final world displacement, not whether the pointer
@@ -2330,6 +2403,7 @@ func _show_title() -> void:
 	_clear_puffs()
 	session.drag.reset()
 	_touch_drags.clear()
+	_touch_panel_presses.clear()
 	touch_card_receivers.reset()
 	session.combat.dragged.clear()
 	_mouse_drag = BoardDrag.new()

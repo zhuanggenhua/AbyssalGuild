@@ -1,6 +1,8 @@
 extends Node3D
 ## Source mesh/material adapter when complete; generated geometry otherwise.
 var card_id: int
+# 原 CardController 仅普通按下写入；装备分支保留同一卡牌的旧值。
+var standard_drag_start := Vector3.ZERO
 var caption: Label3D
 var body: MeshInstance3D
 var material: StandardMaterial3D
