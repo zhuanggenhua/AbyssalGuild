@@ -546,8 +546,8 @@ func _build_ui() -> void:
 	notice.add_theme_stylebox_override("normal", notice_background)
 	card_hover = CardHoverView.new()
 	card_hover.name = "CardHoverInfo"
-	# Its whole rectangle owns GUI input, including header/background. Scrolling
-	# must not zoom the camera or start a card drag through the information panel.
+	# Header and background prevent card clicks/drags through the information
+	# panel. The independent source camera wheel observes input before GUI.
 	card_hover.mouse_filter = Control.MOUSE_FILTER_STOP
 	source_hud.add_child(card_hover)
 	info_action = _button("", source_hud, _advance_day, true)
@@ -2902,11 +2902,14 @@ func _focus_camera_position(source_position: Vector3, duration: float = 0.5) -> 
 	camera_drag_origin = camera_pointer.position
 	camera_motion.move_to(camera.position, Vector3(source_position.x,source_position.y,-source_position.z), -camera.global_basis.z, duration)
 
-# Source EventSystem can report both GUI and physics hits. Only use the
-# admitted Godot HUD and card pickers here; this is not a PhysX/cache replay.
+# The source camera's PhysicsRaycaster includes trade zone colliders, even
+# before the vendor starts accepting payment. Hover text or transaction
+# eligibility is not the pointer-blocking test.
 func _camera_left_blocked() -> bool:
 	var screen: Vector2 = get_viewport().get_final_transform().affine_inverse() * camera_pointer.position
-	return _hud_blocks_panel_click(hud,screen) or int(_pick_target(screen).card_id)>=0
+	if _hud_blocks_panel_click(hud,screen): return true
+	var hit := _pick_target(screen)
+	return int(hit.get("card_id",-1))>=0 or int(hit.get("panel_owner",-1))>=0 or int(hit.get("trade_zone_index",-1))>=0
 
 func _update_camera_motion(delta: float) -> void:
 	_clamp_camera()

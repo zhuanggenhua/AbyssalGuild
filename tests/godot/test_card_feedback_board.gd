@@ -1,5 +1,5 @@
 extends SceneTree
-## Live board/model integration with source data. Headless input/structure, not GPU QA.
+## Live board/model integration with source data. Injected viewport input, not manual input.
 const Session = preload("res://scripts/model/game_session.gd")
 const Codec = preload("res://scripts/model/save_codec.gd")
 class BoardAdapter extends "res://scripts/ui/board.gd":
@@ -51,12 +51,16 @@ func fruit(board) -> Array:
 	return [apple, berry, stack]
 
 func run() -> void:
-	root.size = Vector2i(1440, 900)
+	var initial_client := Vector2i(1280, 800)
+	root.size = initial_client
 	root.gui_embed_subwindows = true
 	var board := BoardAdapter.new()
 	board.feedback.free(); board.feedback = SilentFeedback.new()
 	var path := "user://card-feedback-board-%d" % Time.get_ticks_usec()
 	board.slot_root = path + "/slots"; board.options_path = path + "/options.json"; board.legacy_paths.clear()
+	# The default game requests fullscreen. This fixture owns a resizable
+	# window; options presentation and fullscreen have separate tests.
+	board.options_apply_adapter = func(_plan): return {"ok": true, "capabilities": {}, "warnings": []}
 	root.add_child(board); await process_frame
 	check(not board.card_hover.visible and board.craft_progress.bars.is_empty(), "title starts with no hover or task bars")
 	check(board.data_error == OK, "licensed source catalog required")
@@ -85,8 +89,8 @@ func run() -> void:
 	board.session.cards[fighter].definition_guid = board.catalog.find_by_name("Mage")
 	board._sync_views()
 	check(board.views[fighter] != old_view and board.card_hover.descriptor.header == "Mage", "class-change rebuild replaces stale view and tooltip")
-	# Bounded panel cannot cover the fixed day action or ordinary notice.
-	check(not board.day_button.visible and not board.card_hover.get_global_rect().intersects(board.notice.get_global_rect()), "source hover has no simultaneous modal action and leaves diagnostic notice unobscured")
+	check(not board.day_button.is_visible_in_tree(), "source hover has no simultaneous modal action")
+	check(not board.notice.is_visible_in_tree(), "ordinary play does not render the market diagnostic despite retaining its text")
 	var fields: Dictionary = board.catalog.fields(board.session.cards[fighter].definition_guid)
 	var original_description: String = fields.description
 	fields.description = "Readable long description. ".repeat(100)
@@ -99,33 +103,61 @@ func run() -> void:
 	check(board.card_hover.mouse_filter == Control.MOUSE_FILTER_STOP, "hover header/background block clicks through to board")
 	var panel_point: Vector2 = board.card_hover.body.get_global_rect().get_center()
 	var over_panel := InputEventMouseMotion.new(); over_panel.position = panel_point
-	root.push_input(over_panel); await process_frame
+	root.push_input(over_panel, true); await process_frame
 	board._sync_card_feedback()
-	check(board._own_hover_control(root.gui_get_hovered_control()) and board.hovered_card_id == fighter, "native GUI pointer route retains tooltip over its own scrolling body")
+	check(board._card_pointer.is_equal_approx(panel_point) and board._own_hover_control(root.gui_get_hovered_control()) and board.hovered_card_id == fighter, "viewport-local GUI pointer route retains tooltip over its own scrolling body")
 	var camera_target: Vector3 = board.camera_motion.target
 	var wheel := InputEventMouseButton.new(); wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN; wheel.pressed = true; wheel.position = panel_point
-	root.push_input(wheel); await process_frame
+	root.push_input(wheel, true); await process_frame
 	board._update_camera_motion(.016) # This fixture disables automatic Board processing.
 	check(board.camera_motion.target != camera_target and board.hovered_card_id == fighter, "source wheel over information also zooms without dismissing tooltip")
 	var panel_click := InputEventMouseButton.new(); panel_click.button_index = MOUSE_BUTTON_LEFT; panel_click.pressed = true; panel_click.position = panel_point
-	root.push_input(panel_click); await process_frame
+	root.push_input(panel_click, true); await process_frame
 	check(board.dragging == -1 and board.selected == -1, "actual information-panel click never selects or drags a card behind it")
-	panel_click.pressed = false; root.push_input(panel_click)
-	over_panel.position = Vector2(950, 350); root.push_input(over_panel); await process_frame
+	panel_click.pressed = false; root.push_input(panel_click, true)
+	over_panel.position = Vector2(950, 350); root.push_input(over_panel, true); await process_frame
 	board._sync_card_hover(board.day_button)
 	check(not board.card_hover.visible and board.hovered_card_id == -1, "unrelated GUI clears hover")
 	fields.description = original_description
+	var narrow_client := Vector2i(560, 360)
+	root.size = narrow_client
+	await settle_client(narrow_client, board)
+	check(root.size == narrow_client and (DisplayServer.get_name() == "headless" or root.mode == Window.MODE_WINDOWED),
+		"small client installed; native window is actually windowed")
+	# Resizing may send an actual Window mouse-exit or lose focus if its frame
+	# moves under the hardware cursor. Exercise a fresh hover in both cases.
 	point(board, fighter)
-	root.size = Vector2i(560, 360); await process_frame
-	# The private runner keeps project.godot's canvas_items stretch: physical
-	# Window.size can shrink while the logical canvas remains 1440 x 900.
-	check(root.get_visible_rect().encloses(board.card_hover.get_global_rect()), "hover bounds fit logical canvas after physical window resize")
+	check(visible_in_viewport(board), "visible hover fits measured logical canvas after physical resize")
 	var previous_scale: Vector2i = root.content_scale_size
-	root.content_scale_size = Vector2i(560, 360); await process_frame
-	check(board.hud.size == Vector2(560, 360), "narrow fixture actually resizes the logical HUD")
-	check(Rect2(Vector2.ZERO, Vector2(560, 360)).encloses(board.card_hover.get_global_rect()), "hover bounds fit narrower logical viewport")
+	root.content_scale_size = Vector2i(560, 360)
+	await settle_client(narrow_client, board)
+	point(board, fighter)
+	check(root.get_visible_rect().size == Vector2(560, 360) and board.hud.size == root.get_visible_rect().size,
+		"equal physical and base dimensions actually install the narrow logical canvas")
+	check(visible_in_viewport(board), "visible hover fits actual narrower logical canvas")
+	# Nonmatching physical and logical aspect; verify alternate coordinate
+	# injection under a nonidentity transform, including where Board sees it.
+	root.size = initial_client
+	await settle_client(initial_client, board)
+	point(board, fighter)
+	check(root.size == initial_client and root.get_visible_rect().size == Vector2(576, 360),
+		"expand derives 576x360 logical canvas from real 1280x800 client")
+	check(visible_in_viewport(board), "visible tooltip fits expanded logical canvas")
+	var final_transform := root.get_final_transform()
+	var over_body: Vector2 = board.card_hover.body.get_global_rect().get_center()
+	var physical := final_transform * over_body
+	check(not final_transform.is_equal_approx(Transform2D.IDENTITY) and not physical.is_equal_approx(over_body),
+		"native physical probe cannot pass by accidental identity transform")
+	board.hit.card_id = wood
+	var physical_motion := InputEventMouseMotion.new()
+	physical_motion.position = physical
+	root.push_input(physical_motion)
+	await process_frame
+	board._sync_card_feedback()
+	check(board._card_pointer.is_equal_approx(over_body) and board._own_hover_control(root.gui_get_hovered_control()) and board.hovered_card_id == fighter,
+		"physical window coordinate maps once, retaining tooltip over competing card")
 	root.content_scale_size = previous_scale
-	root.size = Vector2i(1440, 900); await process_frame
+	await settle_client(initial_client, board)
 	point(board, fighter)
 	board._notification(Node.NOTIFICATION_WM_MOUSE_EXIT); board._sync_views()
 	check(not board.card_hover.visible and not board._card_pointer_known, "window exit clears and prevents stale automatic hover")
@@ -141,8 +173,22 @@ func run() -> void:
 	test_drag_targets(board)
 	await test_craft_and_lifecycle(board)
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
-	print("Card feedback board checks: %d passed / %d total; no GPU/manual input acceptance" % [checks - failures, checks])
+	print("Card feedback board checks: %d passed / %d total; no manual input or raster parity claim" % [checks - failures, checks])
 	quit(1 if failures else 0)
+
+func settle_client(client: Vector2i, board) -> void:
+	# Real window management is asynchronous; require two settled layout
+	# frames, with a bounded failure path in the caller's assertions.
+	var previous := Rect2()
+	for i in range(20):
+		await process_frame
+		var area := root.get_visible_rect()
+		if root.size == client and area == previous and board.hud.size == area.size: return
+		previous = area
+
+func visible_in_viewport(board) -> bool:
+	var box: Rect2 = board.card_hover.get_global_rect()
+	return board.card_hover.is_visible_in_tree() and box.has_area() and root.get_visible_rect().encloses(box)
 
 func test_equipment_hover(board) -> void:
 	clear_cards(board)

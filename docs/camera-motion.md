@@ -65,3 +65,20 @@ System's lazy very-first-read edge caveat, backend focus/reset policy,
 Unity EventSystem cache order or all original PhysicsRaycaster blockers.
 Native injected tests do not replace a physical-device or Unity
 reference run.
+
+## Trade collider admission
+
+The locked CameraController prefab's camera has an enabled PhysicsRaycaster:
+both its event mask and camera culling mask include the buyer/vendor's default
+layer. Their source BoxColliders are enabled and non-trigger. PackVendor changes
+transaction eligibility and its text on unlock; it does not deactivate its collider.
+As with cards and occupied equipment panels, the current native pointer ray can
+therefore block the source left-button pan over either trade receiver, regardless
+of whether hover text or a purchase is available. Middle pan still bypasses the
+check, and wheel/transaction routing are unchanged. A missing/disabled collision
+does not block. Board floor prefabs do not add a body to this admission path.
+
+The live trade fixture feeds the real viewport and source-positioned collider
+geometry (no fake ray result), including the locked vendor and a removed receiver.
+These checks do not recreate Unity's uGUI/EventSystem cached ordering or establish
+native physical hardware, global physics-layer, or Unity image parity.
