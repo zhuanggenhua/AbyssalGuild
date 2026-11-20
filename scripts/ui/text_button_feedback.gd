@@ -41,7 +41,11 @@ func _draw() -> void:
 	var font_size := get_theme_font_size("font_size")
 	var width := minf(font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x, maxf(0, size.x - 12))
 	var y := (size.y + font.get_height(font_size)) * 0.5 - font.get_descent(font_size) + 2
-	draw_line(Vector2((size.x - width) * 0.5, y), Vector2((size.x + width) * 0.5, y), get_theme_color("font_hover_color"), 1.0)
+	var leading := (size.x - width) * 0.5
+	var normal := get_theme_stylebox("normal")
+	if alignment == HORIZONTAL_ALIGNMENT_LEFT: leading = normal.get_margin(SIDE_LEFT)
+	elif alignment == HORIZONTAL_ALIGNMENT_RIGHT: leading = size.x - width - normal.get_margin(SIDE_RIGHT)
+	draw_line(Vector2(leading, y), Vector2(leading + width, y), get_theme_color("font_hover_color"), 1.0, alignment != HORIZONTAL_ALIGNMENT_CENTER)
 
 static func bind_modal(dialog: ConfirmationDialog, accept: Callable, decline: Callable, sound: Callable) -> void:
 	# Native default hides before confirmed, losing the admission evidence.

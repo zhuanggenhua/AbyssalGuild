@@ -23,8 +23,10 @@ scene documents and VisualAssets. It does not require an importer change.
 1. Create `SourceTitleView`, add it to the intended layer, size it to the viewport.
 2. `configure(catalog.data, visual_assets)` returns false if supported Title
    Canvas metadata is absent. No fabricated source artwork is generated.
-3. `mount(role, existing_control)` reparents a control without changing its text,
-   values, signals, or transaction callbacks. Supported roles: `new`, `load`,
+3. `mount(role, existing_control)` reparents a control without changing values,
+   signals or transaction callbacks. The four Home buttons use the actual
+   source TMP caption and alignment; other mounted controls keep caller text.
+   Supported roles: `new`, `load`,
    `options`, `quit`, `duration_label`, `duration`, `friendly`, `confirm`, `cancel`,
    `saves_close`, `saves_clear`. It maps scene geometry and font size/color, not
    save/delete semantics. Never wire native archive to source permanent-delete
@@ -64,5 +66,23 @@ visual acceptance or full Title parity.
 Title navigation (24), gameplay preferences (7), menu focus (64), GUI layout /
 Title reset (52) checks passed after integration. These include repeated
 New Game/Confirm, cancel, modal priority, error handling and repeated return to
-Title. The helper private-scene test also passed. Native visual inspection remains
-required; these are not screenshot-equivalence evidence.
+Title. The helper private-scene test also passed.
+
+## Native Title text and backing
+
+The four authored Home TMP captions are left aligned with middle vertical
+alignment in their existing 400×50 design rows. Native buttons now use each
+caption and horizontal alignment, including `Game Options` (not `Options`).
+The hover underline starts at the same alignment edge. Only the authored
+Home rows are affected; the fallback and settings transactions are unchanged.
+
+With licensed data, run `test_source_title_frame.gd` from a rendered Godot
+desktop. It samples 1152×648 and 960×720 on cold startup and after the real
+Pause → Title path, verifies the fully opaque original backing covers the
+world clear, compares uncovered samples with the source image, and reads
+actual left-aligned, vertically centered button ink and the hover-signal underline.
+Clicking the real Game Options button must still open the settings overlay.
+This is native Godot behavior, not Unity/Godot framebuffer equivalence or
+exact TMP character spacing, fallback glyph metrics or baseline. The normal
+resolved backing needed no camera change; no claim about a partially
+populated private configuration without the artwork.

@@ -85,7 +85,23 @@ func mount(role: String, control: Control) -> bool:
 	else: nodes[id].add_child(control)
 	control.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_style(control, id)
+	# These four controls replace the Title scene's actual TMPs. The other
+	# mounted controls may carry runtime/transaction text (e.g. Archive All).
+	if control is Button and role in ["new", "load", "options", "quit"]:
+		_style_home_caption(control, id)
 	return true
+
+func _style_home_caption(button: Button, id: String) -> void:
+	var authored := text_record(id)
+	if authored.is_empty(): return
+	var horizontal := int(authored.get("m_HorizontalAlignment", 0))
+	match horizontal:
+		1: button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		2: button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		4: button.alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	var caption := str(authored.m_text)
+	if button.tooltip_text == button.text: button.tooltip_text = caption
+	button.text = caption
 
 func _style(control: Control, id: String) -> void:
 	# Bind this exact source TMP component, not a view-wide assumed font.
