@@ -1487,6 +1487,7 @@ func _sync_card_feedback() -> void:
 # Pointer routing is separate from ray casting for deterministic adapter tests.
 func _begin_card_press(hit: Dictionary, screen: Vector2, raw_observed: bool = false) -> void:
 	if _mouse_drag.id >= 0: return
+	_mouse_drag.receiver = null
 	if _touch_drags.has(int(hit.get("card_id",-1))): return
 	_record_card_pointer(screen)
 	var id: int = int(hit.get("card_id",-1))
@@ -1725,12 +1726,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				# Native touch remains authoritative for card receivers. Keep
 				# touch-emulated mouse on the existing panel/blank path.
 				if event.device != InputEvent.DEVICE_ID_EMULATION or int(hit.card_id) < 0:
+					var already_held := _mouse_drag.id >= 0
 					_begin_card_press(hit, event.position, _source_equipment_outside!=null)
+					if not already_held and _mouse_drag.id >= 0 and event.device != InputEvent.DEVICE_ID_EMULATION:
+						_mouse_drag.receiver = weakref(views[_mouse_drag.id])
 			else:
 				if event.device != InputEvent.DEVICE_ID_EMULATION or pressed_panel >= 0:
 					_finish_drag(event.position)
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
+var _outbound_mouse_hold: Dictionary = {}
 var _outbound_camera_owner: int = 0
 var _outbound_camera_generation: int = -1
 var _camera_scroll_sample: float = 0.0
@@ -1740,16 +1745,52 @@ var _camera_scroll_during_fade: bool = false
 # An ordinary portal externally pauses the clock, not InputManager. Only the
 # verified departing owner/phase uses this branch; the full-screen fade still
 # consumes new UI/world presses and blocks CameraController's fresh left clause.
-func _source_outbound_camera_allowed() -> bool:
+func _source_ordinary_outbound_current() -> bool:
 	return _outbound_camera_owner == session.get_instance_id() \
 		and _outbound_camera_generation == scene_transition.generation \
 		and running and session.travel_pending and scene_transition.phase == "out" \
 		and session.phase == "playing" and session.scene_name in ["Main", "Island"] \
 		and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT \
-		and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not _has_card_drag() \
 		and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
 
+func _source_outbound_camera_allowed() -> bool:
+	return _source_ordinary_outbound_current() and not vendor_unlock.is_active() \
+		and camera_motion.focus.is_empty() and not _has_card_drag()
+
+func _ordinary_portal_mouse_id() -> int:
+	var id: int = _mouse_drag.id
+	if id < 0 or _mouse_drag.grant != id or _mouse_drag.receiver == null \
+			or camera_pointer.primary_active or not _touch_drags.is_empty() or not _held_receiver_current(_mouse_drag) \
+			or session.drag.held_ids() != [id] or session.drag.original_stack_id_for(id) >= 0 \
+			or session.combat.membership.has(id) or session.equipment.owners.has(id): return -1
+	var card = session.cards[id]
+	var stack = session.stacks.get(card.stack_id)
+	var definition: Dictionary = catalog.get_definition(card.definition_guid)
+	if stack == null or stack.id != session.drag.held_stack_id_for(id) or stack.card_ids != [id] \
+			or not stack.recipe_guid.is_empty() or card.base_definition_guid != card.definition_guid \
+			or definition.get("script_class") != "CardDefinition" or definition.get("fields",{}).get("category") != 4:
+		return -1
+	return id
+
+func _observe_outbound_mouse_card(event: InputEvent) -> void:
+	if _outbound_mouse_hold.is_empty() or not _source_ordinary_outbound_current() \
+			or event.device == InputEvent.DEVICE_ID_EMULATION: return
+	var id := _ordinary_portal_mouse_id()
+	if id < 0 or id != _outbound_mouse_hold.id or session.cards[id].get_instance_id() != _outbound_mouse_hold.card:
+		return
+	if event is InputEventMouseMotion:
+		# CardController.Update samples the mouse on the departing frame.
+		_record_card_pointer(event.position)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		var rendered: Vector3 = views[id].global_position
+		if not rendered.is_finite(): return
+		# The EventSystem delivers Up to the captured old receiver. Its screen
+		# coordinate does not replace the last rendered pose or issue a new press.
+		_outbound_mouse_hold = {}
+		_finish_card_drag(_mouse_drag,Vector2(rendered.x,-rendered.z))
+
 func _clear_outbound_camera() -> void:
+	_outbound_mouse_hold = {}
 	_outbound_camera_owner = 0
 	_outbound_camera_generation = -1
 
@@ -1783,6 +1824,7 @@ func _input(event: InputEvent) -> void:
 		return
 	if scene_transition.blocks_input():
 		if _source_outbound_camera_allowed(): _observe_camera_scroll(event, true)
+		_observe_outbound_mouse_card(event)
 		get_viewport().set_input_as_handled()
 		return
 	if running and pause_overlay.visible and not options_panel.visible and not _navigation_modal_active():
@@ -1913,7 +1955,7 @@ func _finish_drag(screen: Vector2) -> void:
 		return
 	_finish_card_drag(_mouse_drag)
 
-func _finish_card_drag(state: BoardDrag) -> void:
+func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 	var id: int = state.id
 	var held_root := id
 	var deferred_gear := state.deferred_gear_pose
@@ -1962,7 +2004,7 @@ func _finish_card_drag(state: BoardDrag) -> void:
 	if not session.drag.active_for(held_root) and not _begin_model_drag(state,id,null).ok:
 		state.delta = Vector2.ZERO
 		return
-	var destination: Vector2 = session.card_target_position(id) + state.delta
+	var destination: Vector2 = outbound_pose if outbound_pose is Vector2 else session.card_target_position(id) + state.delta
 	if deferred_gear and views.has(id):
 		var pose: Vector3 = views[id].global_position
 		destination = Vector2(pose.x,-pose.z)
@@ -3887,6 +3929,8 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	candidate.configure(catalog)
 	var provenance: Dictionary = SourceTravelLayout.capture(session, stack_id, recipe_guid)
 	var close_accepted: Dictionary = {}
+	var admitted_held := -1
+	var ordinary_hold := _ordinary_portal_mouse_id()
 	var result: Dictionary = candidate.campaign.restore(session.campaign.capture())
 	if result.ok:
 		# Stage against request-time state, without any live checkpoint callback.
@@ -3894,11 +3938,13 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	if result.ok:
 		# Retain exact returned IDs before checkpoint replaces this dictionary.
 		provenance = SourceTravelLayout.seal(candidate, result, provenance)
-		var snapshot: Dictionary = preload("res://scripts/ui/source_departure_checkpoint.gd").capture(session, stack_id, recipe_guid, result)
-		# Only the accepted, source-locked ordinary traveler receipt grants this.
-		# Carry it beside layout provenance without changing bound argument shape.
+		var snapshot: Dictionary = preload("res://scripts/ui/source_departure_checkpoint.gd").capture(session, stack_id, recipe_guid, result, ordinary_hold)
+		# A captured ordinary material shares the verified departing save, but
+		# must not grant the separate inbound close/tail authorization.
 		provenance["source_arrival_no_save"] = not snapshot.is_empty()
-		if not snapshot.is_empty(): close_accepted = result.duplicate(true)
+		if not snapshot.is_empty():
+			if ordinary_hold < 0: close_accepted = result.duplicate(true)
+			else: admitted_held = ordinary_hold
 		if snapshot.is_empty():
 			result = _departure_checkpoint()
 		else:
@@ -3911,7 +3957,7 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		_on_session_event("travel_failed", result)
 		return false
 	var close_receipt: Dictionary = {}
-	if provenance.get("source_arrival_no_save", false):
+	if not close_accepted.is_empty():
 		# Retain original accepted remap separately from later checkpoint result.
 		close_receipt = {"owner": session, "candidate": candidate, "stack": session.stacks.get(stack_id), "recipe": recipe_guid}
 		close_receipt["members"] = close_receipt.stack.card_ids.map(func(id): return session.cards[id])
@@ -3927,6 +3973,8 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		and source_recipe.get("fields", {}).get("targetScenes", []) == ["Main","Island"] \
 		and candidate.scene_name == ("Island" if session.scene_name == "Main" else "Main")
 	var accepted: bool = _request_scene_change(_commit_travel.bind(session, candidate, provenance), source_portal_camera)
+	if accepted and source_portal_camera and admitted_held >= 0:
+		_outbound_mouse_hold = {"id":admitted_held,"card":session.cards[admitted_held].get_instance_id()}
 	if accepted and not close_receipt.is_empty():
 		close_receipt["generation"] = scene_transition.generation
 		_source_close_receipt = close_receipt
