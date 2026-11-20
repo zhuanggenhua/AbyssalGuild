@@ -1764,7 +1764,10 @@ func _source_outbound_camera_allowed() -> bool:
 		return _source_outbound_world_current() and _source_pause_title_open() and not session.travel_pending
 	return _source_ordinary_outbound_current()
 
-func _ordinary_portal_mouse_id() -> int:
+const OUTBOUND_WOODEN_CHEST := "fbaf81068427a564a881180e011deb71"
+const OUTBOUND_WOODEN_CHEST_SHA := "6d8de701bcb914f844958e5e1d5ef85e91136bc9b595b5df300e5e1397c7a43b"
+
+func _source_portal_mouse_card_id() -> int:
 	var id: int = _mouse_drag.id
 	if id < 0 or _mouse_drag.grant != id or _mouse_drag.receiver == null \
 			or camera_pointer.primary_active or not _touch_drags.is_empty() or not _held_receiver_current(_mouse_drag) \
@@ -1774,15 +1777,23 @@ func _ordinary_portal_mouse_id() -> int:
 	var stack = session.stacks.get(card.stack_id)
 	var definition: Dictionary = catalog.get_definition(card.definition_guid)
 	if stack == null or stack.id != session.drag.held_stack_id_for(id) or stack.card_ids != [id] \
-			or not stack.recipe_guid.is_empty() or card.base_definition_guid != card.definition_guid \
-			or definition.get("script_class") != "CardDefinition" or definition.get("fields",{}).get("category") != 4:
+			or not stack.recipe_guid.is_empty() or card.base_definition_guid != card.definition_guid:
 		return -1
-	return id
+	var category: int = int(definition.get("fields", {}).get("category", -1))
+	var script_class: String = definition.get("script_class", "")
+	if script_class=="CardDefinition" and category==4: return id
+	# A loaded source Wooden Chest is another non-traveler singleton. Preserve
+	# its already captured receiver and reuse normal click/drop and chest logic.
+	if card.definition_guid==OUTBOUND_WOODEN_CHEST and definition.get("source_sha256")==OUTBOUND_WOODEN_CHEST_SHA \
+			and script_class=="ChestDefinition" and category==6 and card.stored_coins>0 \
+			and not session.world.currency_guid.is_empty():
+		return id
+	return -1
 
 func _observe_outbound_mouse_card(event: InputEvent) -> void:
 	if _outbound_mouse_hold.is_empty() or not _source_ordinary_outbound_current() \
 			or event.device == InputEvent.DEVICE_ID_EMULATION: return
-	var id := _ordinary_portal_mouse_id()
+	var id := _source_portal_mouse_card_id()
 	if id < 0 or id != _outbound_mouse_hold.id or session.cards[id].get_instance_id() != _outbound_mouse_hold.card:
 		return
 	if event is InputEventMouseMotion:
@@ -3945,7 +3956,7 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	var provenance: Dictionary = SourceTravelLayout.capture(session, stack_id, recipe_guid)
 	var close_accepted: Dictionary = {}
 	var admitted_held := -1
-	var ordinary_hold := _ordinary_portal_mouse_id()
+	var captured_hold := _source_portal_mouse_card_id()
 	var result: Dictionary = candidate.campaign.restore(session.campaign.capture())
 	if result.ok:
 		# Stage against request-time state, without any live checkpoint callback.
@@ -3953,13 +3964,13 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	if result.ok:
 		# Retain exact returned IDs before checkpoint replaces this dictionary.
 		provenance = SourceTravelLayout.seal(candidate, result, provenance)
-		var snapshot: Dictionary = preload("res://scripts/ui/source_departure_checkpoint.gd").capture(session, stack_id, recipe_guid, result, ordinary_hold)
-		# A captured ordinary material shares the verified departing save, but
+		var snapshot: Dictionary = preload("res://scripts/ui/source_departure_checkpoint.gd").capture(session, stack_id, recipe_guid, result, captured_hold)
+		# A captured non-traveler shares the verified departing save, but
 		# must not grant the separate inbound close/tail authorization.
 		provenance["source_arrival_no_save"] = not snapshot.is_empty()
 		if not snapshot.is_empty():
-			if ordinary_hold < 0: close_accepted = result.duplicate(true)
-			else: admitted_held = ordinary_hold
+			if captured_hold < 0: close_accepted = result.duplicate(true)
+			else: admitted_held = captured_hold
 		if snapshot.is_empty():
 			result = _departure_checkpoint()
 		else:

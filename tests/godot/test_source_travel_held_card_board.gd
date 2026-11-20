@@ -1,6 +1,7 @@
 extends SceneTree
 ## Actual viewport/collider route with injected mouse records, not hardware.
 const Board = preload("res://scripts/ui/board.gd")
+const DragInput = preload("res://scripts/ui/card_drag_input.gd")
 const Codec = preload("res://scripts/model/save_codec.gd")
 class QuietAudio extends "res://scripts/ui/audio_feedback.gd":
 	var calls: Array[String] = []
@@ -164,10 +165,157 @@ func exercise(origin: String, release_in_fade: bool) -> void:
 	b.queue_free()
 	await process_frame
 
+# Use the normal source factory for world placement and read its raw query
+# before attachment; do not replace it with a fake standalone spawn.
+func chest_exercise(scene_name: String, merge_currency: bool, short_drag: bool) -> void:
+	var b := Board.new()
+	b.feedback.free()
+	var audio := QuietAudio.new()
+	b.feedback=audio
+	var target := "user://source-fade-chest-%d"%Time.get_ticks_usec()
+	b.slot_root=target+"/slots"
+	b.options_path=target+"/options.json"
+	b.legacy_paths.clear()
+	root.add_child(b)
+	await process_frame
+	check(b.data_error==OK,"locked chest data loaded")
+	if b.data_error!=OK: b.queue_free(); return
+	b.start_new()
+	b.set_process(false)
+	clear_board(b)
+	if scene_name=="Island":
+		check(start_portal(b),"proper Grand Portal takes fixture to Island")
+		b._process(1)
+		b._process(1)
+		clear_board(b)
+	var old=b.session
+	check(old.scene_name==scene_name,"chest uses the active board")
+	var currency: String=old.world.currency_guid
+	# Resolve the exact authored TradeManager reference, not the English noun.
+	var manager_currency := ""
+	for scene: Dictionary in b.catalog.data.scenes:
+		if scene.name==scene_name:
+			for doc: Dictionary in scene.documents:
+				if doc.get("script_class")=="TradeManager":
+					manager_currency=b.catalog.ref_guid(doc.fields.currencyCard)
+	check(not currency.is_empty() and currency==manager_currency,"local scene TradeManager currency is bound")
+	b.camera.position=Vector3(0,12,1)
+	b.camera_motion.configure(b.camera.position)
+	b._clamp_camera()
+	var chest:=spawn(b,"Card_Chest_WoodenChest",Vector2(-2,-.8))
+	var deposit: int=old.spawn_card(currency,Vector2(-1,-2.8),-1,{"refuse_attach":true})
+	var chest_stack: int=old.cards[chest].stack_id
+	check(old.move_to_stack(deposit,chest_stack) and not old.cards.has(deposit) and old.cards[chest].stored_coins==1,
+		"load one coin using ChestLogic stacking, not a test balance setter")
+	var width: float=b._card_footprint(chest).x
+	var loose: int=-1
+	var loose_stack: int=-1
+	if merge_currency:
+		loose=old.spawn_card(currency,Vector2(-2+width+.12,-.8),-1,{"refuse_attach":true})
+		loose_stack=old.cards[loose].stack_id
+	b._refresh()
+	await physics_frame
+	await process_frame
+	var pick:=reachable(b,chest)
+	check(pick.is_finite(),"the original Wooden Chest collider can receive mouse Down")
+	if not pick.is_finite(): b.queue_free(); return
+	audio.calls.clear()
+	pointer(pick)
+	pointer(pick,true)
+	b._process(.04)
+	check(b.dragging==chest and old.drag.active_for(chest) and audio.calls==["CardPick"],"a real press captures only this Wooden Chest")
+	if b.dragging!=chest: b.queue_free(); return
+	var down: Vector3=b.drag_start_position
+	var at_down:=Vector2(down.x,down.z)
+	var currency_before := 1 if merge_currency else 0
+	check(start_portal(b),"real Grand Portal begins outbound with held chest")
+	check(b.scene_transition.phase=="out" and b._outbound_mouse_hold.get("id")==chest,"authored chest is retained without granting fresh input")
+	if b.scene_transition.phase!="out": b.queue_free(); return
+	var file: String=b._active_slot_path()
+	var sha:=FileAccess.get_sha256(file)
+	var save: Variant=JSON.parse_string(FileAccess.get_file_as_string(file))
+	check(save is Dictionary and not sha.is_empty(),"retrieve actual isolated departure save")
+	if not save is Dictionary: b.queue_free(); return
+	var saved: Dictionary=save.scenes[scene_name]
+	var saved_chest:=row(saved,chest)
+	check(saved_chest.get("stored_coins")==1 and saved.session.cards.size()==1+currency_before,
+		"departure excludes both travelers and has the pre-withdrawal chest balance")
+	var candidate_args: Array=b.scene_transition._commit.get_bound_arguments()
+	var candidate=candidate_args[1]
+	var frozen:=Codec.capture(candidate)
+	var traces: Array[Dictionary]=[]
+	var events: Array[String]=[]
+	var created: Array[int]=[]
+	var puff_poses: Array[Vector3]=[]
+	old.event_occurred.connect(func(kind, payload):
+		if kind=="puff_requested" and payload.card_id==chest:
+			events.append("puff"); puff_poses.append(payload.position)
+		if kind=="card_created" and payload.base_definition_guid==currency:
+			events.append("coin"); created.append(payload.card_id))
+	old.spawn_target_selector=func(id, ignored):
+		var selected: int=b._select_spawn_target(id,ignored)
+		if old.cards[id].base_definition_guid==currency: traces.append({"point":old.cards[id].position,"ignored":ignored,"selected":selected})
+		return selected
+	old.spawn_layout_resolver=b._resolve_layout
+	var threshold:=float(DragInput.source_settings(b.catalog,scene_name).get("clickThreshold",.02))
+	var original: Vector3=b.views[chest].global_position
+	var shift: float=threshold*.45 if short_drag else threshold*4
+	var screen_shift: Vector2=b.camera.unproject_position(original+Vector3(shift,0,0))-b.camera.unproject_position(original)
+	pointer(pick+screen_shift)
+	b._process(.08)
+	var draw: Vector3=b.views[chest].global_position
+	var rendered:=Vector2(draw.x,-draw.z)
+	check(rendered.distance_to(at_down)>.0005 and DragInput.is_click(down,rendered,DragInput.source_settings(b.catalog,scene_name))==short_drag,
+		"last rendered pose moved nonzero, on the intended side of the exact click threshold")
+	var up:=pick+Vector2(170,35)
+	check(b._board_point(up).distance_to(rendered)>threshold*4,"physical Up screen ray is far outside the click threshold")
+	var clock: float=old.elapsed
+	pointer(up,false,InputEvent.DEVICE_ID_EMULATION)
+	check(b.dragging==chest and created.is_empty(),"touch-mouse emulation cannot discharge captured chest")
+	pointer(up,false)
+	check(b.dragging<0 and not old.drag.active() and b._outbound_mouse_hold.is_empty(),"exact receiver releases, no residual hold")
+	if short_drag:
+		check(old.cards[chest].stored_coins==0 and old.card_target_position(chest).is_equal_approx(at_down)
+			and old.cards[chest].stack_id==chest_stack,"successful click returns same chest to its press target")
+		check(audio.calls==["CardPick","CardDrop","Puff","Coin"] and events==["puff","coin"],"one drop, puff, create and withdrawal sound in source order")
+		check(puff_poses.size()==1 and puff_poses[0].is_equal_approx(Vector3(draw.x,draw.y,-draw.z)),
+			"source puff uses the rendered chest position before it returns")
+		check(traces.size()==1 and traces[0].point.is_equal_approx(rendered+Vector2(width,0)) and traces[0].ignored==chest_stack,
+			"raw coin factory query uses rendered pose plus chest width and excludes only withdrawing chest")
+		if created.size()==1 and old.cards.has(created[0]):
+			var coin_stack: int=old.cards[created[0]].stack_id
+			check((merge_currency and coin_stack==loose_stack and old.stacks[loose_stack].card_ids==[loose,created[0]])
+				or (not merge_currency and old.stacks[coin_stack].card_ids==[created[0]]),
+				"new regional coin uses real factory stacking when a compatible loose pile is present")
+		else: check(false,"one live newly created currency card")
+	else:
+		check(old.cards[chest].stored_coins==1 and old.card_target_position(chest).is_equal_approx(rendered)
+			and audio.calls==["CardPick","CardDrop"] and events.is_empty() and traces.is_empty(),
+			"above-threshold release uses regular drop, not chest withdrawal")
+	pointer(up,false)
+	pointer(pick,true)
+	pointer(pick,false)
+	check(audio.calls.count("CardDrop")==1 and created.size()==int(short_drag) and is_equal_approx(old.elapsed,clock),
+		"duplicate and fresh faded edges neither move time nor repeat effects")
+	check(FileAccess.get_sha256(file)==sha and Codec.capture(candidate)==frozen,"departing chest cannot rewrite frozen save or future world")
+	b._process(1)
+	await process_frame
+	check(b.session==candidate and b.scene_transition.phase=="in" and b.dragging<0 and FileAccess.get_sha256(file)==sha,
+		"arrival consumes staged world, not the post-save chest transaction")
+	pointer(up,false)
+	check(audio.calls.count("Coin")==int(short_drag) and b._outbound_mouse_hold.is_empty(),"stale Up after swap cannot target replacement world")
+	old.spawn_target_selector=Callable()
+	old.spawn_layout_resolver=Callable()
+	b.queue_free()
+	await process_frame
+
 func run() -> void:
 	root.size=Vector2i(1240,820)
 	await exercise("Main",true)
 	await exercise("Island",true)
 	await exercise("Main",false)
-	print("Source fade held card: %d checks, %d failures"%[checks,failures])
+	await chest_exercise("Main",false,true)
+	await chest_exercise("Island",true,true)
+	await chest_exercise("Main",false,false)
+	print("Source fade held card and Wooden Chest: %d checks, %d failures"%[checks,failures])
 	quit(int(failures>0))

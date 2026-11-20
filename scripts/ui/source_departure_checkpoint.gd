@@ -3,7 +3,7 @@ extends RefCounted
 const Codec = preload("res://scripts/model/save_codec.gd")
 const Travel = preload("res://scripts/ui/source_travel_layout.gd")
 const Admission = preload("res://scripts/ui/source_restore_admission.gd")
-static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dictionary, ordinary_hold: int = -1) -> bool:
+static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dictionary, captured_hold: int = -1) -> bool:
 	if not accepted.get("ok", false) or source.catalog.data.get("provenance", {}).get("source_commit", "") != Admission.SOURCE_COMMIT: return false
 	var recipe: Dictionary = source.catalog.get_definition(recipe_guid)
 	if recipe_guid != Travel.RECIPE_GUID or recipe.get("source_sha256", "") != Travel.RECIPE_SHA or recipe.get("script_class") != "TravelRecipe": return false
@@ -13,10 +13,10 @@ static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dicti
 	if source.phase != "playing" or source.cycle.stage != "idle" or not source.combat.tasks.is_empty() or not source.combat.membership.is_empty(): return false
 	if not source.stacks.has(stack_id): return false
 	if source.drag.active():
-		# One ordinary non-traveler is already registered at its held target.
+		# One admitted non-traveler is already registered at its held target.
 		# Native save normalization must be a no-op (no early craft/quest/RNG).
-		if ordinary_hold < 0 or source.drag.held_ids() != [ordinary_hold] \
-				or source.stacks[stack_id].card_ids.has(ordinary_hold) \
+		if captured_hold < 0 or source.drag.held_ids() != [captured_hold] \
+				or source.stacks[stack_id].card_ids.has(captured_hold) \
 				or Codec.capture(source) != Codec._capture_unsettled(source): return false
 	var stack = source.stacks[stack_id]
 	if stack.recipe_guid != recipe_guid or stack.progress < float(fields.get("craftingDuration", 0)) or not source.matches_recipe(stack, fields): return false
@@ -42,8 +42,8 @@ static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dicti
 		expected.erase(card.definition_guid)
 	return true
 
-static func capture(source, stack_id: int, recipe_guid: String, accepted: Dictionary, ordinary_hold: int = -1) -> Dictionary:
-	if not admitted(source, stack_id, recipe_guid, accepted, ordinary_hold): return {}
+static func capture(source, stack_id: int, recipe_guid: String, accepted: Dictionary, captured_hold: int = -1) -> Dictionary:
+	if not admitted(source, stack_id, recipe_guid, accepted, captured_hold): return {}
 	var ids: Array = source.stacks[stack_id].card_ids.duplicate()
 	var snapshot: Dictionary = source.campaign.capture().duplicate(true)
 	var state: Dictionary = snapshot.scenes[snapshot.current_scene].session
