@@ -73,7 +73,7 @@ func run() -> void:
 	check(ids(Groups.describe(catalog, session, "recipes", expansion)).is_empty(), "New discovery inside collapsed category stays hidden")
 	session.discovered_recipes.b = true
 	rows = Groups.describe(catalog, session, "recipes", expansion)
-	check(ids(rows) == ["b"] and rows[0].text == "Early ▶", "Discovery keeps collapsed group closed while new group appears expanded")
+	check(ids(rows) == ["b"] and rows[0].text == "Early ►" and rows[0].text.unicode_at(rows[0].text.length()-1)==0x25ba, "Discovery keeps collapsed group closed while new group appears expanded")
 	check(session.collection.seen_items.is_empty(), "Pure descriptors never mark discovery seen")
 	expansion["recipes:0"] = true
 	check(ids(Groups.describe(catalog, session, "recipes", expansion)) == ["a", "z", "b"], "Category enum order precedes display name")

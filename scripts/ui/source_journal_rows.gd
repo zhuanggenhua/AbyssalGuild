@@ -12,6 +12,8 @@ var preferred_height := 20.0
 var rows: Dictionary = {}
 var ordered_keys: Array[String] = []
 var content_width := 400.0
+var row_padding := Vector4(20,10,20,10)
+var row_spacing := 10.0
 var binding: Dictionary = {}
 var default_font_id := ""
 var registry: RefCounted
@@ -54,8 +56,10 @@ class Item extends Control:
 		if hovered: label.push_underline()
 		label.add_text(str(descriptor.get("text", "")))
 		if descriptor.get("unread", false):
+			# MenuView.INDICATOR_NEW leaves the separating space outside the color span.
+			label.add_text(" ")
 			label.push_color(Color.RED)
-			label.add_text(" ●")
+			label.add_text("●")
 			label.pop()
 		if hovered: label.pop()
 	func _gui_input(event: InputEvent) -> void:
@@ -120,14 +124,18 @@ func set_rows(descriptors: Array, header_color: Color = Color.WHITE) -> void:
 	ordered_keys = next
 	layout_rows()
 
+func set_scroll_layout(contract: Dictionary) -> void:
+	row_padding = contract.get("padding",Vector4(20,10,20,10))
+	row_spacing = contract.get("spacing",10.0)
+
 func set_content_width(width: float) -> void:
 	if not is_finite(width): return
 	content_width = maxf(width, 0)
 	layout_rows()
 
 func layout_rows() -> void:
-	var y := 10.0
-	var available := maxf(0, content_width - 40)
+	var y := row_padding.y
+	var available := maxf(0, content_width - row_padding.x - row_padding.z)
 	for key in ordered_keys:
 		var item: Item = rows[key]
 		# Native preferred width/height deliberately remain tagged fallback.
@@ -137,11 +145,11 @@ func layout_rows() -> void:
 		item.label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		item.label.size = Vector2(width, 0)
 		var height := float(item.label.get_content_height())
-		item.position = Vector2(20, y)
+		item.position = Vector2(row_padding.x, y)
 		item.size = Vector2(width, height)
 		item.label.size = item.size
-		y += height + 10
-	preferred_height = y + 10 - (10 if not ordered_keys.is_empty() else 0)
+		y += height + row_spacing
+	preferred_height = y + row_padding.w - (row_spacing if not ordered_keys.is_empty() else 0)
 	size = Vector2(content_width, preferred_height)
 	extent_changed.emit(preferred_height)
 

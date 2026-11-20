@@ -356,6 +356,9 @@ func run() -> void:
 		check(board.active_tab == "quests" and board.ledger == qrows, "real start-new source lifecycle restores authored Quests selection")
 		check(q.motion.position == 0 and r.motion.position == 0, "real start-new clears both native offsets")
 		await test_source_group_hover(board)
+		check(q.source_scroll_bound and r.source_scroll_bound and qrows.row_padding==Vector4(20,10,20,10)
+			and rrows.row_padding==qrows.row_padding and qrows.row_spacing==10.0 and rrows.row_spacing==10.0,
+			"both live source panels resolve separate exact viewport and content chains")
 		print("Journal body private lifecycle: verified")
 	else:
 		print("SKIP: private source start-new lifecycle unavailable")

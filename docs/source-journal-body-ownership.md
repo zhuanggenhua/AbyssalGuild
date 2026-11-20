@@ -25,8 +25,9 @@ recipe view must therefore receive discovery, including collapsed categories.
 
 ## Bounded implementation
 
-`board.gd` now keeps two persistent RichTextLabel bodies with independent native
-scrollbars, content signatures, info and visible-row/group metadata. Selecting a
+`board.gd` now keeps two persistent ScrollRect hosts with independent vertical
+motion, content signatures, info and visible-row/group metadata. RichTextLabel
+is a non-scrolling child of each content row; neither authored view has a scrollbar. Selecting a
 tab changes visibility/input participation and the existing public `ledger`,
 `ledger_key`, `ledger_info`, `ledger_visible_ids` and `ledger_visible_groups`
 references. It no longer transfers the previously selected body's offset.
@@ -42,6 +43,16 @@ Ordinary tab/drawer toggles retain the body instances and offsets. Direct
 `active_tab` assignments followed by refresh retain compatibility; unknown
 public tab requests are ignored.
 
+The host only reports an admitted source layout after resolving each ScrollRect and
+MenuView to the same local Content reference and the active direct Viewport /
+Content parent chain under MenuPanel. The admitted branch has an axis-aligned
+full-stretch viewport with the authored hidden Mask graphic, top-pivot non-scaled
+Content, no scrollbar references, and top-left VerticalLayoutGroup plus
+preferred-height ContentSizeFitter. Admitted motion and row padding / spacing
+flow from serialized fields. An incomplete or incompatible record uses the
+explicit unverified fallback, clearing any formerly admitted motion state on
+replacement. Geometry admission does not prove how Unity rasterizes the mask.
+
 ## Evidence and limits
 
 `test_journal_body_ownership.gd` uses the actual Board controls with a synthetic
@@ -53,9 +64,18 @@ and verifies authored selection and reset. It runs in the public aggregate; the
 strict imported runner also requires the private-lifecycle marker and equal
 passed/total counts (no private skip accepted).
 
-This is body **ownership/lifecycle**, not a new renderer. The previous body
-geometry, RichTextLabel item rendering and font-binding policy are retained.
-It does not certify source ScrollRect inertia/elasticity/wheel or drag behavior,
-TMP line/baseline/SDF pixel parity, a natural full-game playthrough or synchronized
-Unity/Godot screenshots. Header Toggle graphics, separate label ColorBlock tint,
-ToggleGroup input/transition semantics remain a separate source-backed slice.
+The synthetic host test verifies admission rejection, invalid replacement,
+wheel/drag and unscaled inertia. The private Board test verifies both separately
+resolved original views at startup as well as GUI event routing and normal
+ownership. Native row shaping is still deliberately marked fallback, not TMP
+preferred size, baseline or SDF parity. Mask edge pixels, full-game playthrough
+and synchronized Unity/Godot screenshots remain unverified.
+
+The pinned `MenuView` declares U+25BA (►) and U+25BC (▼) for group state,
+U+2022 (•) for rows, and a plain space followed by red U+25CF (●) for unread
+rows. Quests append U+221A (√) before that unread suffix. The source-authored
+strings do not prove how a player font resolves those glyphs. In this import,
+the project-default TMP setting points to a font not present in the locked
+source tree; the separately available LiberationSans is not that reference.
+The production view stays on its explicitly unverified native metrics instead
+of using another project’s font as supposed source parity.

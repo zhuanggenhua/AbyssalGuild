@@ -43,6 +43,7 @@ const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
 const SourceBoardLifetime = preload("res://scripts/ui/source_board_lifetime.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
 var source_hud: Control
+const JournalScrollContract = preload("res://scripts/ui/source_journal_scroll_contract.gd")
 var hud_layout = preload("res://scripts/ui/source_hud_layout.gd").new()
 var info_requests = preload("res://scripts/ui/info_request_queue.gd").new()
 var stats_background: Panel
@@ -1253,14 +1254,13 @@ func _configure_source_hud() -> void:
 		body.position = viewport_rect.position
 		body.size = viewport_rect.size
 		body.set_background(hud_layout.color(view, Color(0,0,0,0.9019608)))
-		for fields in hud_layout.components(view):
-			if fields.has("m_Content") and fields.has("m_Elasticity"):
-				body.motion.configure(fields)
-				break
+		var contract: Dictionary = JournalScrollContract.resolve(hud_layout.documents, view)
+		var admitted: bool = body.configure_source_scroll(contract)
 		body.drag_threshold = float(hud_layout.field("EventSystem","m_DragThreshold",10))
 		body.scroll_delta_per_tick = float(hud_layout.field("EventSystem","m_ScrollDeltaPerTick",6))
 		var rows: Control = journal_rows[tab]
 		rows.configure(source_fonts)
+		rows.set_scroll_layout(contract if admitted else {})
 		rows.set_content_width(viewport_rect.size.x)
 	source_fonts.bind_control(detail_toggle, hud_layout.text_record("MenuPanel/MenuToggle/Label"))
 	var watermark_record: Dictionary = hud_layout.text_record("Watermark")

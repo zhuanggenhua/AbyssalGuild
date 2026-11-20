@@ -11,6 +11,17 @@ var press_screen := Vector2.ZERO
 var drag_threshold := 10.0
 var scroll_delta_per_tick := 6.0
 var last_tick := 0
+var source_scroll_bound := false
+
+func configure_source_scroll(contract: Dictionary) -> bool:
+	var scroll: Variant = contract.get("scroll")
+	var admitted: bool = scroll is Dictionary and motion.configure(scroll)
+	if not admitted:
+		motion.configure({})
+		if source_scroll_bound: reset_scroll()
+	source_scroll_bound = admitted
+	set_meta("scroll_layout_status", "source_vertical_rect" if admitted else "unverified_native_fallback")
+	return admitted
 
 func _init() -> void:
 	clip_contents = true
@@ -107,7 +118,10 @@ func _input(event: InputEvent) -> void:
 		call_deferred("_release_click_guard")
 	elif event is InputEventMouseMotion:
 		var local: Vector2 = get_global_transform_with_canvas().affine_inverse()*event.position
-		if not motion.dragging and press_screen.distance_squared_to(_physical_pointer(event.position)) >= drag_threshold*drag_threshold:
+		var distance := press_screen.distance_to(_physical_pointer(event.position))
+		# The viewport/physical round trip uses float vectors. An exact pixel
+		# threshold may come back a few ULPs short under fractional scaling.
+		if not motion.dragging and (distance >= drag_threshold or is_equal_approx(distance, drag_threshold)):
 			motion.begin_drag(-local.y)
 			suppress_click = true
 		if motion.dragging:

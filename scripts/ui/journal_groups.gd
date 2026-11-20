@@ -1,5 +1,8 @@
 extends RefCounted
 ## Pure source-shaped journal descriptors. Expansion is presentation-only.
+const GROUP_EXPANDED := "▼" # MenuView.SYMBOL_EXPANDED
+const GROUP_COLLAPSED := "►" # MenuView.SYMBOL_COLLAPSED; not U+25B6.
+
 static func describe(catalog, session, tab: String, expansion: Dictionary, quest_order: Array = [], quest_captions: Dictionary = {}) -> Array:
 	var groups: Array = []
 	if tab == "recipes":
@@ -58,7 +61,7 @@ static func describe(catalog, session, tab: String, expansion: Dictionary, quest
 	var result: Array = []
 	for group in groups:
 		var expanded: bool = expansion.get(group.key, true)
-		result.append({"id": "", "group": group.key, "text": group.title + (" ▼" if expanded else " ▶"), "unread": false})
+		result.append({"id": "", "group": group.key, "text": group.title + " " + (GROUP_EXPANDED if expanded else GROUP_COLLAPSED), "unread": false})
 		if expanded: result.append_array(group.rows)
 	if result.is_empty(): result.append({"id": "", "group": "", "text": "Discover recipes by combining cards or opening packs." if tab == "recipes" else "No quests yet.", "unread": false})
 	return result

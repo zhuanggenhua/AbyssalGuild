@@ -1,5 +1,7 @@
 extends SceneTree
 const Host = preload("res://scripts/ui/source_journal_scroll_host.gd")
+const Contract = preload("res://scripts/ui/source_journal_scroll_contract.gd")
+const Rows = preload("res://scripts/ui/source_journal_rows.gd")
 var checks := 0
 var failures := 0
 func check(ok: bool, label: String) -> void:
@@ -14,6 +16,7 @@ func move(at: Vector2) -> InputEventMouseMotion:
 	var event := InputEventMouseMotion.new(); event.position = at; return event
 func _initialize() -> void: call_deferred("run")
 func run() -> void:
+	test_source_contract()
 	var a = Host.new(); var b = Host.new()
 	root.add_child(a); root.add_child(b)
 	a.set_process(false); b.set_process(false)
@@ -40,7 +43,7 @@ func run() -> void:
 	a._gui_input(button(MOUSE_BUTTON_LEFT,true,Vector2(10,10)))
 	var final_inverse := root.get_final_transform().affine_inverse()
 	var press_physical: Vector2 = a._physical_pointer(Vector2(20,20))
-	a._input(move(final_inverse*(press_physical+Vector2(0,9))))
+	a._input(move(final_inverse*(press_physical+Vector2(0,9.99))))
 	check(not a.motion.dragging and a.can_click(),"below ten physical pixels retains click")
 	a._input(move(final_inverse*(press_physical+Vector2(0,10))))
 	check(a.motion.dragging and not a.can_click() and near(a.motion.position,0),"threshold begins at current cursor, no retrospective displacement")
@@ -109,3 +112,71 @@ func run() -> void:
 	a.free(); b.free()
 	print("Source Journal ScrollRect host: %d/%d" % [checks-failures,checks])
 	quit(1 if failures else 0)
+
+func ref(id: String) -> Dictionary:
+	return {"fileID":id}
+
+func doc(id: String, type: String, fields: Dictionary) -> Dictionary:
+	return {"file_id":id,"object_type":type,"fields":fields}
+
+func rect(owner: String, parent: String, kids: Array, min_y: int) -> Dictionary:
+	return {"m_GameObject":ref(owner), "m_Father":ref(parent),"m_Children":kids,
+		"m_LocalScale":{"x":1,"y":1,"z":1},"m_LocalRotation":{"x":"-0","y":0,"z":0,"w":1},
+		"m_LocalPosition":{"x":0,"y":0,"z":0},"m_Pivot":{"x":0,"y":1},
+		"m_AnchorMin":{"x":0,"y":min_y},"m_AnchorMax":{"x":1,"y":1},
+		"m_AnchoredPosition":{"x":0,"y":0},"m_SizeDelta":{"x":0,"y":0}}
+
+func test_source_contract() -> void:
+	var scroll := {"m_GameObject":ref("2"), "m_Content":ref("33"), "m_Viewport":ref("32"),
+		"m_HorizontalScrollbar":ref("0"), "m_VerticalScrollbar":ref("0"),
+		"m_Inertia":1,"m_Elasticity":0.2,"m_DecelerationRate":0.25,"m_ScrollSensitivity":2.0}
+	scroll.merge(Contract.REQUIRED_SCROLL)
+	var layout := {"m_GameObject":ref("4"), "m_Padding":{"m_Left":17,"m_Top":5,"m_Right":19,"m_Bottom":11},"m_Spacing":8}
+	layout.merge(Contract.REQUIRED_LAYOUT)
+	var docs := [
+		doc("1","GameObject",{"m_Name":"MenuPanel","m_IsActive":1}),
+		doc("2","GameObject",{"m_Name":"QuestsView","m_IsActive":1}),
+		doc("3","GameObject",{"m_Name":"Viewport","m_IsActive":1}),
+		doc("4","GameObject",{"m_Name":"Content","m_IsActive":1}),
+		doc("30","RectTransform",rect("1","0",[ref("31")],0)),
+		doc("31","RectTransform",rect("2","30",[ref("32")],0)),
+		doc("32","RectTransform",rect("3","31",[ref("33")],0)),
+		doc("33","RectTransform",rect("4","32",[],1)),
+		doc("34","MonoBehaviour",scroll),
+		doc("35","MonoBehaviour",{"m_GameObject":ref("3"),"m_Enabled":1,"m_ShowMaskGraphic":0}),
+		doc("36","MonoBehaviour",{"m_GameObject":ref("3"),"m_Enabled":1,"m_Type":1,"m_RaycastTarget":1,
+			"m_PreserveAspect":0,"m_UseSpriteMesh":0,"m_Material":ref("0"),"m_RaycastPadding":{"x":0,"y":0,"z":0,"w":0},
+			"m_Sprite":{"fileID":"10917","guid":"0000000000000000f000000000000000"}}),
+		doc("37","MonoBehaviour",layout),
+		doc("38","MonoBehaviour",{"m_GameObject":ref("4"),"m_Enabled":1,"m_HorizontalFit":0,"m_VerticalFit":2}),
+		doc("40","MonoBehaviour",{"m_GameObject":ref("2"),"m_Enabled":1,"content":ref("33")})]
+	var admitted := Contract.resolve(docs,"QuestsView")
+	check(not admitted.is_empty(),"local full-stretch viewport and top-pivot content admitted")
+	if admitted.is_empty(): return
+	var host := Host.new()
+	var rows := Rows.new()
+	check(host.configure_source_scroll(admitted) and host.source_scroll_bound
+		and near(host.motion.sensitivity,2.0) and near(host.motion.deceleration,.25),
+		"strictly admitted motion parameters reach the existing runtime")
+	rows.set_scroll_layout(admitted)
+	rows.layout_rows()
+	check(rows.row_padding==Vector4(17,5,19,11) and near(rows.row_spacing,8) and near(rows.preferred_height,16),
+		"authored padding and spacing drive preferred size without guessing TMP heights")
+	for mutation in [
+		[8,"m_Content",ref("32")], [8,"m_Viewport",{"fileID":"32","guid":"foreign"}],
+		[8,"m_VerticalScrollbar",ref("99")], [8,"m_HorizontalScrollbar",{}],
+		[8,"m_ScrollSensitivity","2"], [8,"m_Elasticity",NAN], [8,"m_DecelerationRate",1.1],
+		[6,"m_Father",ref("30")], [6,"m_SizeDelta",{"x":3,"y":0}], [6,"m_Children",[]],
+		[7,"m_Pivot",{"x":0,"y":.5}], [7,"m_LocalScale",{"x":1,"y":2,"z":1}],
+		[9,"m_ShowMaskGraphic",1], [10,"m_RaycastTarget",0], [11,"m_ChildAlignment",1], [12,"m_VerticalFit",1], [13,"content",ref("32")]]:
+		var changed := docs.duplicate(true)
+		changed[mutation[0]].fields[mutation[1]] = mutation[2]
+		check(Contract.resolve(changed,"QuestsView").is_empty(),"unsupported author field " + mutation[1] + " invalidates source admission")
+	var ambiguous := docs.duplicate(true)
+	ambiguous.append(doc("39","GameObject",{"m_Name":"QuestsView"}))
+	check(Contract.resolve(ambiguous,"QuestsView").is_empty(),"duplicate named views cannot bind accidentally")
+	host.motion.velocity = 80.0
+	check(not host.configure_source_scroll({}) and not host.source_scroll_bound and near(host.motion.sensitivity,1.0)
+		and near(host.motion.velocity,0.0) and host.get_meta("scroll_layout_status")=="unverified_native_fallback",
+		"unsupported replacement clears previous source ownership and coefficients")
+	host.free(); rows.free()
