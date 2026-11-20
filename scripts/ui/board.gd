@@ -951,6 +951,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	visual_assets.apply_scene(camera, board_mesh, session.scene_name)
 	visual_assets.apply_source_camera(camera, session.scene_name)
 	camera_motion.configure(camera.position, CameraMotion.source_settings(catalog.data, session.scene_name))
+	_clear_outbound_camera()
 	panning = false
 	camera_pointer.take_pan_edges()
 	source_flat_environment_bound = visual_assets.apply_source_light(source_light, session.scene_name)
@@ -1730,14 +1731,27 @@ func _unhandled_input(event: InputEvent) -> void:
 					_finish_drag(event.position)
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
-var _fade_wheel_owner: int = 0
-var _fade_wheel_generation: int = -1
+var _outbound_camera_owner: int = 0
+var _outbound_camera_generation: int = -1
 var _camera_scroll_sample: float = 0.0
 var _camera_scroll_owner: int = 0
 var _camera_scroll_generation: int = -1
 var _camera_scroll_during_fade: bool = false
-func _source_fade_wheel_allowed() -> bool:
-	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and not _has_card_drag() and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
+# An ordinary portal externally pauses the clock, not InputManager. Only the
+# verified departing owner/phase uses this branch; the full-screen fade still
+# consumes new UI/world presses and blocks CameraController's fresh left clause.
+func _source_outbound_camera_allowed() -> bool:
+	return _outbound_camera_owner == session.get_instance_id() \
+		and _outbound_camera_generation == scene_transition.generation \
+		and running and session.travel_pending and scene_transition.phase == "out" \
+		and session.phase == "playing" and session.scene_name in ["Main", "Island"] \
+		and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT \
+		and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not _has_card_drag() \
+		and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
+
+func _clear_outbound_camera() -> void:
+	_outbound_camera_owner = 0
+	_outbound_camera_generation = -1
 
 func _input(event: InputEvent) -> void:
 	if running:
@@ -1768,7 +1782,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if scene_transition.blocks_input():
-		if _source_fade_wheel_allowed(): _observe_camera_scroll(event, true)
+		if _source_outbound_camera_allowed(): _observe_camera_scroll(event, true)
 		get_viewport().set_input_as_handled()
 		return
 	if running and pause_overlay.visible and not options_panel.visible and not _navigation_modal_active():
@@ -2879,7 +2893,7 @@ func _observe_camera_scroll(event: InputEvent, during_fade: bool) -> void:
 		_camera_scroll_during_fade=during_fade
 	_camera_scroll_sample+=dy
 
-func _flush_camera_scroll(input_enabled: bool) -> void:
+func _flush_camera_scroll(input_enabled: bool, outbound_enabled: bool) -> void:
 	var scroll := _camera_scroll_sample
 	var owner := _camera_scroll_owner
 	var generation := _camera_scroll_generation
@@ -2887,11 +2901,7 @@ func _flush_camera_scroll(input_enabled: bool) -> void:
 	_camera_scroll_sample=0.0
 	_camera_scroll_owner=0
 	if owner!=session.get_instance_id() or generation!=scene_transition.generation or not is_finite(scroll): return
-	if during_fade:
-		if _source_fade_wheel_allowed() and camera_motion.zoom(scroll, -camera.global_basis.z):
-			_fade_wheel_owner=owner
-			_fade_wheel_generation=generation
-	elif input_enabled:
+	if (during_fade and outbound_enabled) or (not during_fade and input_enabled):
 		camera_motion.zoom(scroll, -camera.global_basis.z)
 
 func _focus_camera(target: Vector2, duration: float = 0.5) -> void:
@@ -2914,12 +2924,20 @@ func _camera_left_blocked() -> bool:
 func _update_camera_motion(delta: float) -> void:
 	_clamp_camera()
 	var enabled: bool = _camera_input_enabled()
+	var outbound: bool = _source_outbound_camera_allowed()
 	var edges: Dictionary = camera_pointer.take_pan_edges()
+	if _outbound_camera_owner != 0 and (_outbound_camera_owner != session.get_instance_id() \
+			or _outbound_camera_generation != scene_transition.generation or scene_transition.phase != "out"):
+		_clear_outbound_camera()
+		panning = false
+		# An invalidated outgoing frame isn't a new-scene press.
+		edges = {"left_pressed":false,"middle_pressed":false,"released":false}
 	# InputManager skips HandlePan in a locked update: discard that update's
 	# edge bits but retain drag/origin and the shared pointer's last position.
-	if enabled:
+	if enabled or outbound:
+		# The fader is a full-screen raycast target, not a drag cancellation.
 		# Start (left gated, middle unconditional), then either release.
-		if (edges.left_pressed and not _camera_left_blocked()) or edges.middle_pressed:
+		if (edges.left_pressed and not outbound and not _camera_left_blocked()) or edges.middle_pressed:
 			panning = true
 			camera_drag_origin = camera_pointer.position
 		if edges.released: panning = false
@@ -2932,10 +2950,8 @@ func _update_camera_motion(delta: float) -> void:
 	# CameraController.Update: final pan sample, one signed vertical sum,
 	# then unscaled SmoothDamp. Reject an oversize step rather than applying
 	# valid intermediate wheel events against a moving/clamped target.
-	_flush_camera_scroll(enabled)
-	var fade_wheel: bool = _fade_wheel_owner == session.get_instance_id() and _fade_wheel_generation == scene_transition.generation and _source_fade_wheel_allowed()
-	if not fade_wheel: _fade_wheel_owner = 0
-	camera.position = camera_motion.step(camera.position, delta, enabled or fade_wheel)
+	_flush_camera_scroll(enabled, outbound)
+	camera.position = camera_motion.step(camera.position, delta, enabled or outbound)
 
 func _layout_states() -> Array:
 	var result: Array = []
@@ -3805,11 +3821,23 @@ func _sync_scene_fader() -> void:
 	scene_shade.visible = scene_transition.active()
 	scene_shade.mouse_filter = Control.MOUSE_FILTER_STOP if scene_transition.blocks_input() else Control.MOUSE_FILTER_IGNORE
 
-func _request_scene_change(action: Callable) -> bool:
+func _request_scene_change(action: Callable, source_portal_camera: bool = false) -> bool:
+	var previous_generation: int = scene_transition.generation
 	if quit_dispatched or (is_instance_valid(source_title_quit) and source_title_quit.visible) or not scene_transition.begin(action): return false
 	_source_inbound_close_receipt = {}
-	panning = false
-	camera_pointer.take_pan_edges()
+	_clear_outbound_camera()
+	if source_portal_camera:
+		_outbound_camera_owner = session.get_instance_id()
+		_outbound_camera_generation = scene_transition.generation
+		# InputSystem wheel delta belongs to the dynamic frame, not the
+		# coroutine that happens to begin before CameraController.Update.
+		if _camera_scroll_owner==_outbound_camera_owner and _camera_scroll_generation==previous_generation \
+				and not _camera_scroll_during_fade:
+			_camera_scroll_generation = _outbound_camera_generation
+			_camera_scroll_during_fade = true
+	else:
+		panning = false
+		camera_pointer.take_pan_edges()
 	pending_quit = ""
 	_clear_card_hover()
 	if is_instance_valid(craft_progress): craft_progress.reset()
@@ -3889,7 +3917,16 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		close_receipt["members"] = close_receipt.stack.card_ids.map(func(id): return session.cards[id])
 		close_receipt["craft_generation"] = close_receipt.stack.craft_generation
 		close_receipt["accepted"] = close_accepted
-	var accepted: bool = _request_scene_change(_commit_travel.bind(session, candidate, provenance))
+	# The ordinary locked Main ↔ Island portal uses TravelSequence even with
+	# a first-time destination (layout/quit receipts have narrower ownership).
+	var source_recipe: Dictionary = catalog.get_definition(recipe_guid)
+	var source_portal_camera: bool = session.phase == "playing" and session.scene_name in ["Main","Island"] \
+		and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT \
+		and recipe_guid == SourceTravelLayout.RECIPE_GUID and source_recipe.get("source_sha256") == SourceTravelLayout.RECIPE_SHA \
+		and source_recipe.get("script_class") == "TravelRecipe" \
+		and source_recipe.get("fields", {}).get("targetScenes", []) == ["Main","Island"] \
+		and candidate.scene_name == ("Island" if session.scene_name == "Main" else "Main")
+	var accepted: bool = _request_scene_change(_commit_travel.bind(session, candidate, provenance), source_portal_camera)
 	if accepted and not close_receipt.is_empty():
 		close_receipt["generation"] = scene_transition.generation
 		_source_close_receipt = close_receipt

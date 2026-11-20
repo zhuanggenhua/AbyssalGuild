@@ -4,7 +4,7 @@ CameraController.cs and the scene-referenced CameraController prefab were static
 
 Pointer pan changes a target using pixel displacement and current camera height/10. Screen-Y and world-Z reflections preserve the source direction. Left pan checks the admitted Godot HUD and card receivers at a frame sample; middle pan bypasses the left blocker. Button and pointer events are collected before GUI; pan is not applied in an event callback. This does not reproduce the Unity EventSystem's cached raycast or its complete 3D hit list. Target X/Z is clamped to reflected board bounds plus source padding. Changed/shrinking bounds clamp the target immediately, not the current smoothed position. Zoom adds forward×scroll×zoomSpeed to target and rejects the complete step if its ground distance is outside5..20.
 
-Movement uses the standard critically damped SmoothDamp polynomial (0.48/0.235 coefficients), retained velocity and overshoot prevention, evaluated with real frame delta. This is an independent numerical port, not a guarantee of identical Unity floating-point results. Manual gameplay pause does not freeze camera smoothing. Feeding, encounter, ready, game-over, vendor reveal and scene transitions block new camera input and ordinary smoothing. PauseMenu/Options only externally pause time and do not acquire InputManager locks; camera zoom, middle pan and unscaled smoothing remain active. Selling removes the source day-cycle input lock and permits camera movement, while Escape still checks the separate ending-cycle flag. Source Update returns before HandlePan while locked, preserving dragOrigin/isDragging. The native adapter now likewise preserves them; unlock samples accumulated pointer displacement, and a release while locked is not retroactively replayed.
+Movement uses the standard critically damped SmoothDamp polynomial (0.48/0.235 coefficients), retained velocity and overshoot prevention, evaluated with real frame delta. This is an independent numerical port, not a guarantee of identical Unity floating-point results. Manual gameplay pause does not freeze camera smoothing. Feeding, encounter, ready, game-over, vendor reveal and non-portal outgoing transitions block new camera input and ordinary smoothing. PauseMenu/Options only externally pause time and do not acquire InputManager locks; camera zoom, middle pan and unscaled smoothing remain active. Selling removes the source day-cycle input lock and permits camera movement, while Escape still checks the separate ending-cycle flag. Source Update returns before HandlePan while locked, preserving dragOrigin/isDragging. The native adapter now likewise preserves them; unlock samples accumulated pointer displacement, and a release while locked is not retroactively replayed.
 
 `_focus_camera_position(source_position: Vector3, duration=0.5)` preserves source height and reflects Z. `_focus_camera(Vector2,duration)` is a ground-plane convenience wrapper. Focus runs with real time independently of ordinary input locks, toward target−forward×8, since source desired distance is lerp(20,5,0.8). Completion replaces target without an arbitrary board clamp. Only later pan/zoom or changed bounds clamps it. The interpolation uses explicit OutQuad matching the source default tween intent; arbitrary global DOTween overrides are not imported. No cycle event is wired in this batch and focus completion never drives model progression.
 
@@ -82,3 +82,22 @@ The live trade fixture feeds the real viewport and source-positioned collider
 geometry (no fake ray result), including the locked vendor and a removed receiver.
 These checks do not recreate Unity's uGUI/EventSystem cached ordering or establish
 native physical hardware, global physics-layer, or Unity image parity.
+
+## 普通传送的旧场景相机
+
+原 `GameDirector.TravelSequence` 只外部暂停游戏时间，淡出并不取得
+`InputManager` 的锁；原 `ScreenFader` 立即为整屏 Image 启用射线遮挡。
+由已核验的 Grand Portal（Main ↔ Island）启动时，旧场景继续原相机
+Update：淡出前已开始的平移继续，新左键被遮罩挡住，新中键不受遮罩
+影响，任一有效左/中释放先停止平移，最后一笔指针取样后再处理累计
+滚轮、跑不受时间倍率影响的阻尼。Travel 发生在同一 Update 之前时，
+同一个旧场景尚未消费的正常滚轮也只计一次，不因淡出开始丢失。
+即使没有新滚轮，旧场景未到位的目标也继续收敛。
+
+权限只属于原传送的旧场景实例与淡出代号；同实例取消后另开的淡出
+不继承，黑屏交换到新场景时新相机不继承平移或速度。淡入仍走现有
+正常输入路径。游戏牌、菜单、HUD 无新增输入权限，独立喂食/商店锁
+仍有效。牌已捕获时跨淡出的接收时序、并行镜头聚焦、非原配方和
+Unity EventSystem 同帧射线缓存顺序不是此验收范围；并未把此边界
+描述成额外的原版输入锁。双向真实传送与原生窗口回归不等于使用
+物理输入设备或完成 Unity 画面对照。
