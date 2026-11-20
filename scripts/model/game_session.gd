@@ -1,5 +1,6 @@
 extends RefCounted
 ## Engine-independent gameplay slice. No nodes, imported art, or Unity code.
+const BoardLayout = preload("res://scripts/model/board_layout.gd")
 const Collection = preload("res://scripts/model/collection.gd")
 const CardModel = preload("res://scripts/model/card.gd")
 const StackModel = preload("res://scripts/model/stack.gd")
@@ -277,7 +278,7 @@ func _weighted(entries: Array, minimum_one: bool) -> String:
 			return guid
 	return ""
 
-func open_pack(id: int, carried_press: bool = false) -> int:
+func open_pack(id: int, carried_press: bool = false, lifted_target: Variant = null) -> int:
 	if (phase not in ["playing", "selling"] and not carried_press) or not cards.has(id):
 		return -1
 	var card = cards[id]
@@ -311,10 +312,17 @@ func open_pack(id: int, carried_press: bool = false) -> int:
 	# A selected recipe with a missing template returns no card, not a second draw.
 	if not selected_recipe:
 		output = _weighted(slot.get("Entries", []), true)
-	var spawned: int = spawn_card(output, card.position, -1, {"height": 0.1})
+	var draw_position: Vector2 = card.position
+	var draw_height := 0.1
+	var lifted: bool = lifted_target is Vector3 and lifted_target.is_finite()
+	if lifted:
+		var draw := BoardLayout.pack_draw_position(lifted_target)
+		draw_position = Vector2(draw.x,draw.z)
+		draw_height = draw.y
+	var spawned: int = spawn_card(output, draw_position, -1, {"height": draw_height})
 	card.uses_left -= 1
 	if card.uses_left <= 0:
-		kill_card(id)
+		kill_card(id,lifted_target if lifted else null)
 	event_occurred.emit("pack_opened", {"card_id": spawned, "slot": index})
 	changed.emit()
 	return spawned

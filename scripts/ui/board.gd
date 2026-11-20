@@ -1766,6 +1766,10 @@ func _source_outbound_camera_allowed() -> bool:
 
 const OUTBOUND_WOODEN_CHEST := "fbaf81068427a564a881180e011deb71"
 const OUTBOUND_WOODEN_CHEST_SHA := "6d8de701bcb914f844958e5e1d5ef85e91136bc9b595b5df300e5e1397c7a43b"
+const OUTBOUND_STARTER_PACK := "51c2d41ab5d413649adfbe0e3bb29d85"
+const OUTBOUND_STARTER_PACK_SHA := "bf983c1b91a5d5992722516d4bf604861537927f4ef08c2ce28b2551626cdc33"
+const OUTBOUND_ISLAND_PACK := "413f08c4a1c64ed46a8b1aac38a088f6"
+const OUTBOUND_ISLAND_PACK_SHA := "fa955a930d6b464a456fffc78471bf02afede3a6e06b95a70c0f7c78d6cbf55b"
 
 func _source_portal_mouse_card_id() -> int:
 	var id: int = _mouse_drag.id
@@ -1788,6 +1792,16 @@ func _source_portal_mouse_card_id() -> int:
 			and script_class=="ChestDefinition" and category==6 and card.stored_coins>0 \
 			and not session.world.currency_guid.is_empty():
 		return id
+	# Admit the two exact authored regional packs with guaranteed, non-recipe
+	# slots. Other packs require evidence for their extra roll/discovery paths.
+	if script_class=="PackDefinition" and category==0:
+		var original_hash: Variant = definition.get("source_sha256")
+		if session.scene_name=="Main" and card.definition_guid==OUTBOUND_STARTER_PACK \
+				and original_hash==OUTBOUND_STARTER_PACK_SHA and card.uses_left in [1,2,3,4]:
+			return id
+		if session.scene_name=="Island" and card.definition_guid==OUTBOUND_ISLAND_PACK \
+				and original_hash==OUTBOUND_ISLAND_PACK_SHA and card.uses_left in [1,2,3,4,5]:
+			return id
 	return -1
 
 func _observe_outbound_mouse_card(event: InputEvent) -> void:
@@ -2027,16 +2041,24 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 	if deferred_gear and views.has(id):
 		var pose: Vector3 = views[id].global_position
 		destination = Vector2(pose.x,-pose.z)
-	_set_board_card_position(id, destination)
+	var held_target: Vector2 = session.card_target_position(id)
 	var click_handled := false
 	# Captured presses use the final world displacement, not whether the pointer
 	# ever crossed a pixel threshold. Returning to the origin can be a click.
 	var is_click: bool = CardDragInput.is_click(state.start, destination, CardDragInput.source_settings(catalog, session.scene_name)) if carried_press else not state.moved
+	var pack_click: bool = is_click and catalog.get_definition(session.cards[id].definition_guid).get("script_class", "")=="PackDefinition"
+	# Unlike ChestLogic (rendered transform + width), PackInstance draws from
+	# the held stack target with its authored lift, then grounds the survivor.
+	var pack_target: Variant = null
+	if pack_click and outbound_pose is Vector2:
+		var height := float(CardDragInput.source_settings(catalog,session.scene_name).get("dragHeight",0.1))
+		pack_target = Vector3(held_target.x,height,held_target.y)
+	_set_board_card_position(id, held_target if pack_target is Vector3 else destination)
 	if is_click:
-		if catalog.get_definition(session.cards[id].definition_guid).get("script_class", "") == "PackDefinition":
+		if pack_click:
 			var pack_stack: int = session.cards[id].stack_id
 			layout_locks[pack_stack] = true
-			session.open_pack(id, carried_press)
+			session.open_pack(id, carried_press, pack_target)
 			layout_locks.erase(pack_stack)
 			click_handled = true
 		elif session.world._is_chest(id):

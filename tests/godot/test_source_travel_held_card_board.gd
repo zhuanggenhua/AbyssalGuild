@@ -309,6 +309,142 @@ func chest_exercise(scene_name: String, merge_currency: bool, short_drag: bool) 
 	b.queue_free()
 	await process_frame
 
+func pack_exercise(scene_name: String, prior_draws: int) -> void:
+	var b := Board.new()
+	b.feedback.free()
+	var audio := QuietAudio.new()
+	b.feedback=audio
+	var target := "user://source-fade-pack-%d"%Time.get_ticks_usec()
+	b.slot_root=target+"/slots"
+	b.options_path=target+"/options.json"
+	b.legacy_paths.clear()
+	root.add_child(b)
+	await process_frame
+	check(b.data_error==OK,"locked regional pack data loaded")
+	if b.data_error!=OK: b.queue_free(); return
+	b.start_new()
+	b.set_process(false)
+	clear_board(b)
+	if scene_name=="Island":
+		check(start_portal(b),"proper Grand Portal takes pack fixture to Island")
+		b._process(1)
+		b._process(1)
+		clear_board(b)
+	var old=b.session
+	check(old.scene_name==scene_name,"depart expected regional pack board")
+	var first_world := scene_name=="Main"
+	var pack_name := "00_Pack_Starter" if first_world else "10_Pack_Island"
+	var pack: int=old.spawn_card(b.catalog.find_by_name(pack_name,"packs"),Vector2(-2,-.8),-1,{"refuse_attach":true})
+	check(old.cards.has(pack),"authored regional pack loaded through its normal factory")
+	if not old.cards.has(pack): b.queue_free(); return
+	var pack_stack: int=old.cards[pack].stack_id
+	for i in prior_draws:
+		var drawn: int=old.open_pack(pack)
+		check(drawn>=0 and old.cards.has(drawn),"consume an earlier genuine slot")
+		if old.cards.has(drawn): old._remove_card(drawn)
+	var remaining: int=old.cards[pack].uses_left
+	check(remaining==(4 if first_world else 5)-prior_draws,"no direct setting of pack progress")
+	b._refresh()
+	await physics_frame
+	await process_frame
+	var pick:=reachable(b,pack)
+	check(pick.is_finite(),"the authored Pack collider can receive physical Down")
+	if not pick.is_finite(): b.queue_free(); return
+	audio.calls.clear()
+	pointer(pick)
+	pointer(pick,true)
+	b._process(.04)
+	check(b.dragging==pack and old.drag.active_for(pack),"native viewport captures the real pack receiver")
+	if b.dragging!=pack: b.queue_free(); return
+	check(start_portal(b) and b._outbound_mouse_hold.get("id")==pack,
+		"original portal keeps exact captured regional pack")
+	if b.scene_transition.phase!="out": b.queue_free(); return
+	var file: String=b._active_slot_path()
+	var sha:=FileAccess.get_sha256(file)
+	var save: Variant=JSON.parse_string(FileAccess.get_file_as_string(file))
+	if not save is Dictionary: check(false,"departure save missing"); b.queue_free(); return
+	var saved: Dictionary=save.scenes[scene_name]
+	check(row(saved,pack).get("uses_left")==remaining and saved.session.cards.size()==1,
+		"pre-fade save retains exactly the unspent pack with travelers excluded")
+	var bound: Array=b.scene_transition._commit.get_bound_arguments()
+	var candidate=bound[1]
+	var frozen:=Codec.capture(candidate)
+	var rng_before: int=old.rng.state
+	var expected_rng:=RandomNumberGenerator.new()
+	expected_rng.state=rng_before
+	expected_rng.randi_range(0,99)
+	var queries: Array[Dictionary]=[]
+	var opened: Array[Dictionary]=[]
+	var kills: Array[int]=[]
+	var puff: Array[Vector3]=[]
+	var terminal_card := "Card_Wood" if first_world else "Card_BasaltColumns"
+	var expected_card: String=b.catalog.find_by_name("Card_Villager" if prior_draws==0 else terminal_card)
+	old.event_occurred.connect(func(kind,payload):
+		if kind=="pack_opened": opened.append(payload)
+		if kind=="card_killed": kills.append(payload.card_id)
+		if kind=="puff_requested" and payload.card_id==pack: puff.append(payload.position))
+	old.spawn_target_selector=func(id,ignored):
+		if old.cards[id].base_definition_guid==expected_card:
+			queries.append({"position":old.cards[id].position, "height":old.spawn_query_height,
+				"ignored":ignored,"pack_live":old.cards.has(pack),"pack_locked":b.layout_locks.has(pack_stack)})
+		return b._select_spawn_target(id,ignored)
+	old.spawn_layout_resolver=b._resolve_layout
+	var settings:=DragInput.source_settings(b.catalog,scene_name)
+	var visible: Vector3=b.views[pack].global_position
+	var offset:=float(settings.clickThreshold)*.4
+	var pixels: Vector2=b.camera.unproject_position(visible+Vector3(offset,0,0))-b.camera.unproject_position(visible)
+	pointer(pick+pixels)
+	b._process(.08)
+	var drawn_at: Vector3=b.views[pack].global_position
+	var held_target: Vector2=old.card_target_position(pack)
+	var pressed: Vector3=b.drag_start_position
+	var up:=pick+Vector2(180,40)
+	check(held_target.is_equal_approx(Vector2(drawn_at.x,-drawn_at.z))
+		and held_target.distance_to(Vector2(pressed.x,pressed.z))>.0005
+		and DragInput.is_click(pressed,held_target,settings)
+		and b._board_point(up).distance_to(held_target)>float(settings.clickThreshold)*4,
+		"rendered click and lifted target are distinct from press and the physical release ray")
+	pointer(up,false,InputEvent.DEVICE_ID_EMULATION)
+	check(b.dragging==pack and opened.is_empty(),"emulated Up has no pack ownership")
+	pointer(up,false)
+	check(b.dragging<0 and not old.drag.active() and b._outbound_mouse_hold.is_empty(),
+		"the captured Up consumes the exact receipt")
+	check(opened.size()==1 and opened[0].slot==prior_draws and old.cards.has(int(opened[0].card_id))
+		and old.cards[int(opened[0].card_id)].base_definition_guid==expected_card
+		and old.rng.state==expected_rng.state and old.rng.state!=rng_before,
+		"one authored card and one real weighted roll on the departing owner")
+	var queried_height:=float(settings.dragHeight)+.1
+	check(queries.size()==1 and queries[0].position.is_equal_approx(held_target)
+		and is_equal_approx(queries[0].height,queried_height) and queries[0].ignored==-1
+		and queries[0].pack_live and queries[0].pack_locked,
+		"normal factory queries pack held target + .1 height while pack is live and locked")
+	if remaining>1:
+		check(old.cards.has(pack) and old.cards[pack].uses_left==remaining-1 and old.cards[pack].stack_id==pack_stack
+			and old.card_target_position(pack).is_equal_approx(held_target) and kills.is_empty() and puff.is_empty(),
+			"nonfinal draw preserves the grounded same pack and decreases remaining slots")
+	else:
+		check(not old.cards.has(pack) and not old.stacks.has(pack_stack) and kills==[pack]
+			and puff.size()==1 and puff[0].is_equal_approx(Vector3(drawn_at.x,drawn_at.y,-drawn_at.z)),
+			"final slot kills the pack once and puffs at the actual released view")
+	check(not b.layout_locks.has(pack_stack),"no retained pack layout lock")
+	pointer(up,false)
+	pointer(pick,true)
+	pointer(pick,false)
+	check(opened.size()==1 and audio.calls.count("CardDrop")==1 and old.rng.state==expected_rng.state,
+		"duplicate/fresh fade edges cannot roll again")
+	check(FileAccess.get_sha256(file)==sha and saved.session.rng_state==str(rng_before) and Codec.capture(candidate)==frozen,
+		"only old live board changes; pre-fade file and staged arrival are frozen")
+	b._process(1)
+	await process_frame
+	check(b.session==candidate and b.scene_transition.phase=="in" and FileAccess.get_sha256(file)==sha,
+		"real arrival cannot overwrite the saved pack or reroll")
+	pointer(up,false)
+	check(opened.size()==1 and b.dragging<0 and b._outbound_mouse_hold.is_empty(),"stale Up cannot affect a new receiver")
+	old.spawn_target_selector=Callable()
+	old.spawn_layout_resolver=Callable()
+	b.queue_free()
+	await process_frame
+
 func run() -> void:
 	root.size=Vector2i(1240,820)
 	await exercise("Main",true)
@@ -317,5 +453,9 @@ func run() -> void:
 	await chest_exercise("Main",false,true)
 	await chest_exercise("Island",true,true)
 	await chest_exercise("Main",false,false)
-	print("Source fade held card and Wooden Chest: %d checks, %d failures"%[checks,failures])
+	await pack_exercise("Main",0)
+	await pack_exercise("Main",3)
+	await pack_exercise("Island",0)
+	await pack_exercise("Island",4)
+	print("Source fade held cards, Wooden Chest and regional packs: %d checks, %d failures"%[checks,failures])
 	quit(int(failures>0))
