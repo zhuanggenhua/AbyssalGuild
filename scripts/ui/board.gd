@@ -43,6 +43,7 @@ const VisualAssets = preload("res://scripts/ui/visual_assets.gd")
 const SourceBoardLifetime = preload("res://scripts/ui/source_board_lifetime.gd")
 const SceneConfig = preload("res://scripts/ui/scene_config.gd")
 var source_hud: Control
+const JournalPointerInput := preload("res://scripts/ui/source_journal_pointer_input.gd")
 const JournalScrollContract = preload("res://scripts/ui/source_journal_scroll_contract.gd")
 var hud_layout = preload("res://scripts/ui/source_hud_layout.gd").new()
 var info_requests = preload("res://scripts/ui/info_request_queue.gd").new()
@@ -105,6 +106,7 @@ var trade_views: Dictionary = {}
 var trade_activated: Dictionary = {}
 var vendor_unlock = VendorUnlockPresenter.new()
 var journal_bodies: Dictionary = {}
+var journal_pointer := JournalPointerInput.new()
 var journal_rows: Dictionary = {}
 var journal_body_state: Dictionary = {}
 var ledger_visible_ids: Dictionary = {}
@@ -988,7 +990,13 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	var focus: Dictionary = session.cycle.focus_state()
 	if not focus.is_empty(): _focus_camera_position(focus.target_position, float(focus.duration))
 
+func _advance_journal_pointer_input() -> void:
+	if running and journal_bodies.has(active_tab):
+		journal_pointer.flush(get_viewport().get_final_transform(),_journal_source_mouse_hit,
+			journal_bodies[active_tab].drag_threshold,_dispatch_journal_source_mouse)
+
 func _process(delta: float) -> void:
+	_advance_journal_pointer_input()
 	# Presentation ownership still changes while external pause skips clock sync.
 	if day_clock != null: day_clock._sync_pause_icon_tint(_ordinary_source_pause_icon())
 	_advance_source_audio_frame(delta)
@@ -1259,6 +1267,10 @@ func _configure_source_hud() -> void:
 		body.drag_threshold = float(hud_layout.field("EventSystem","m_DragThreshold",10))
 		body.scroll_delta_per_tick = float(hud_layout.field("EventSystem","m_ScrollDeltaPerTick",6))
 		var rows: Control = journal_rows[tab]
+		if body.source_pointer_managed!=admitted:
+			journal_pointer.reset()
+		body.source_pointer_managed = admitted
+		rows.source_pointer_managed = admitted
 		rows.configure(source_fonts)
 		rows.set_scroll_layout(contract if admitted else {})
 		rows.set_content_width(viewport_rect.size.x)
@@ -1726,6 +1738,8 @@ func _source_fade_wheel_allowed() -> bool:
 	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and not _has_card_drag() and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
 
 func _input(event: InputEvent) -> void:
+	if running:
+		journal_pointer.observe(event,get_viewport().get_final_transform())
 	if NavigationInput.is_cancel_press(event) and (_source_title_overlay_cancel() or _source_title_options_cancel() or _source_options_cancel()):
 		get_viewport().set_input_as_handled()
 		return
@@ -2047,6 +2061,7 @@ func _refresh_ledger() -> void:
 	if ledger_session_id != session.get_instance_id() or ledger_scene_name != session.scene_name:
 		ledger_session_id = session.get_instance_id()
 		ledger_scene_name = session.scene_name
+		journal_pointer.reset()
 		ledger_expansion.clear()
 		ledger_quest_order.clear()
 		ledger_key = ""
@@ -2088,6 +2103,33 @@ func _refresh_journal_body(tab: String) -> void:
 		if not row.group.is_empty(): state.groups[row.group] = true
 		elif not row.id.is_empty(): state.ids[row.id] = true
 	renderer.set_rows(rows,preload("res://scripts/ui/journal_groups.gd").header_color(catalog,tab))
+
+func _journal_source_mouse_hit(point: Vector2) -> Dictionary:
+	if not get_viewport().get_visible_rect().has_point(point) or not _journal_release_uncovered(point,active_tab):
+		return {}
+	var body: Control = journal_bodies[active_tab]
+	if not body.source_pointer_managed or _journal_has_later_blocker(body,point): return {}
+	return {"click":journal_rows[active_tab].source_receiver_at(point),"drag":body.get_instance_id()}
+
+func _journal_has_later_blocker(control: Control, point: Vector2) -> bool:
+	var ancestor: Node = control.get_parent()
+	while ancestor is Control:
+		for i in range(control.get_index()+1,ancestor.get_child_count()):
+			var sibling := ancestor.get_child(i) as Control
+			if sibling!=null and _hud_blocks_panel_click(sibling,point): return true
+		control = ancestor
+		ancestor = control.get_parent()
+	return false
+
+func _dispatch_journal_source_mouse(receipt: Dictionary, point: Vector2) -> void:
+	var target := instance_from_id(receipt.receiver) as Control
+	if not is_instance_valid(target) or target.is_queued_for_deletion(): return
+	if receipt.kind=="click":
+		var rows: Control = journal_rows.get(active_tab)
+		if rows!=null and rows.owns_source_receiver(target) and target.is_visible_in_tree():
+			target.click_source()
+	elif receipt.button==MOUSE_BUTTON_LEFT and target in journal_bodies.values():
+		target.source_drag(receipt.kind,point)
 
 ## Unity TextButton click requires the release raycast to still resolve to the
 ## row. Native GUI capture can deliver the release after the mask or a later
@@ -2417,6 +2459,9 @@ func _show_title() -> void:
 	for tab in journal_bodies:
 		info_requests.submit(_journal_request_key(tab), 0, {})
 	world_post_process.cancel()
+	journal_pointer.reset()
+	for body in journal_bodies.values():
+		if body.source_pointer_managed and not body.pending_drag: body.motion.end_drag()
 	journal_slide.reset(false)
 	_clear_card_feedback()
 	vendor_unlock.cancel()
@@ -2466,6 +2511,10 @@ func _notification(what: int) -> void:
 		if is_instance_valid(original_board): SourceBoardLifetime.detach_meshes(original_board)
 		return
 	if what in [NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]:
+		if what==NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+			journal_pointer.reset()
+			for body in journal_bodies.values():
+				if body.source_pointer_managed and not body.pending_drag: body.motion.end_drag()
 		_card_pointer_known = false
 		camera_pointer.known = false
 		_clear_card_hover()

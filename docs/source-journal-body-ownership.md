@@ -79,3 +79,31 @@ the project-default TMP setting points to a font not present in the locked
 source tree; the separately available LiberationSans is not that reference.
 The production view stays on its explicitly unverified native metrics instead
 of using another project’s font as supposed source parity.
+
+### Board mouse processing frame
+
+The project's Input System 1.19.0 module processes one mouse raycast per
+frame in left, right, middle order. Its press and drag captures are per
+button, but the click receiver and eligibility are shared. A pointer exit
+does not itself discard eligibility. A release consumes eligibility, even
+on a mismatched current hit; a fresh press replaces the shared receiver.
+Each button releases before its drag phase, so motion on an earlier frame
+and movement coincident with release are not interchangeable.
+
+The Board samples physical events without consuming camera, modal, or wheel
+routing, then processes them once against the final current hit. Both tabs
+share one model; item rows participate in hit matching even if they have no
+click action. Only the left slot drives the ScrollRect captured at press.
+Layout at release is rechecked, including clipping and later visible
+blockers; the outbound fader is a blocker, the inbound fader is not.
+The header remains a separate left-only Toggle, and touch-emulated events
+stay on the previous compatibility route rather than joining the real mouse
+model. Pen, native multi-touch and exact live Unity frame comparison are
+still outside this slice. Only a positively admitted original ScrollRect
+uses the framed path. The native suite includes actual Viewport input and
+initialized Board processing; the reference test covers the order-sensitive
+combinations without depending on rendering.
+
+Reference: [Input module, pinned 1.19.0](https://github.com/Unity-Technologies/InputSystem/blob/ca8d898356596a91bda6505e506cc1a4bb3a9fa6/Packages/com.unity.inputsystem/InputSystem/Plugins/UI/InputSystemUIInputModule.cs#L430-L479),
+[shared click transitions](https://github.com/Unity-Technologies/InputSystem/blob/ca8d898356596a91bda6505e506cc1a4bb3a9fa6/Packages/com.unity.inputsystem/InputSystem/Plugins/UI/InputSystemUIInputModule.cs#L596-L730),
+[per-button state](https://github.com/Unity-Technologies/InputSystem/blob/ca8d898356596a91bda6505e506cc1a4bb3a9fa6/Packages/com.unity.inputsystem/InputSystem/Plugins/UI/PointerModel.cs#L237-L269).

@@ -12,6 +12,8 @@ var drag_threshold := 10.0
 var scroll_delta_per_tick := 6.0
 var last_tick := 0
 var source_scroll_bound := false
+var source_pointer_managed := false
+const PointerInput := preload("res://scripts/ui/source_journal_pointer_input.gd")
 
 func configure_source_scroll(contract: Dictionary) -> bool:
 	var scroll: Variant = contract.get("scroll")
@@ -100,6 +102,7 @@ func _gui_input(event: InputEvent) -> void:
 			MOUSE_BUTTON_WHEEL_LEFT: ticks.x = -event.factor
 			MOUSE_BUTTON_WHEEL_RIGHT: ticks.x = event.factor
 			MOUSE_BUTTON_LEFT:
+				if source_pointer_managed and PointerInput.physical_mouse(event): return
 				motion.initialize_drag()
 				pending_drag = true
 				suppress_click = false
@@ -109,6 +112,8 @@ func _gui_input(event: InputEvent) -> void:
 	# Board's source camera observes input separately before this GUI dispatch.
 
 func _input(event: InputEvent) -> void:
+	# The framed physical mouse route and touch-emulated capture cannot double run.
+	if source_pointer_managed and PointerInput.physical_mouse(event): return
 	# Only an admitted GUI press owns a drag. Rectangle tests here would bypass modals.
 	if not pending_drag: return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
@@ -127,6 +132,16 @@ func _input(event: InputEvent) -> void:
 		if motion.dragging:
 			motion.drag(-local.y)
 			_apply_motion()
+
+func source_drag(kind: String, point: Vector2) -> void:
+	var local: Vector2 = get_global_transform_with_canvas().affine_inverse()*point
+	match kind:
+		"initialize_drag": motion.initialize_drag()
+		"begin_drag": motion.begin_drag(-local.y)
+		"drag":
+			motion.drag(-local.y)
+			_apply_motion()
+		"end_drag": motion.end_drag()
 
 func _physical_pointer(viewport_position: Vector2) -> Vector2:
 	return get_viewport().get_final_transform()*viewport_position

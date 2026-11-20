@@ -11,13 +11,15 @@ func _init() -> void: call_deferred("run")
 func settle() -> void:
 	await process_frame
 	await process_frame
-func point_event(point: Vector2, button := 0, pressed := true, factor := 1.0) -> void:
+func point_event(point: Vector2, button := 0, pressed := true, factor := 1.0, device := 0) -> void:
 	var motion := InputEventMouseMotion.new()
+	motion.device = device
 	motion.position = point
 	motion.global_position = point
 	root.push_input(motion,true)
 	if button == 0: return
 	var event := InputEventMouseButton.new()
+	event.device = device
 	event.position = point
 	event.global_position = point
 	event.button_index = button
@@ -65,26 +67,76 @@ func test_native_scroll(board, q, r) -> void:
 	q.reset_scroll()
 	var group: String = board.ledger_visible_groups.keys()[0]
 	var hit: Vector2 = q.get_global_transform_with_canvas()*Vector2(30,25)
+	if not q.source_scroll_bound or not r.source_scroll_bound:
+		# CI has no original ScrollRect asset; exercise the same Board router
+		# through its test geometry without claiming actual source admission.
+		check(not q.source_pointer_managed and not r.source_pointer_managed,"no source admission in fallback")
+		q.source_pointer_managed = true
+		r.source_pointer_managed = true
+		board.journal_rows.quests.source_pointer_managed = true
+		board.journal_rows.recipes.source_pointer_managed = true
+	else:
+		check(q.source_pointer_managed and r.source_pointer_managed,"both exact contracts activate framed routing")
 	point_event(hit,MOUSE_BUTTON_LEFT)
+	await settle()
 	point_event(hit+Vector2(0,30))
+	await settle()
 	point_event(hit+Vector2(0,50))
+	await settle()
+	check(q.motion.dragging and not is_zero_approx(q.motion.position),"source capture receives earlier-frame left ScrollRect movement")
 	point_event(hit+Vector2(0,50),MOUSE_BUTTON_LEFT,false)
-	check(board.ledger_expansion.get(group,true) and board.dragging == -1,
+	await settle()
+	check(board.ledger_expansion.get(group,true) and board.dragging == -1 and not q.motion.dragging,
 		"scroll drag cancels row click and cannot grab the board")
 	q.reset_scroll()
-	await process_frame
-	point_event(hit,MOUSE_BUTTON_LEFT)
-	point_event(hit,MOUSE_BUTTON_LEFT,false)
-	check(not board.ledger_expansion.get(group,true),"actual below-threshold release collapses header group")
-	point_event(hit,MOUSE_BUTTON_LEFT)
-	point_event(hit,MOUSE_BUTTON_LEFT,false)
-	check(board.ledger_expansion.get(group,true),"same actual header node expands again")
+	for pair in [[MOUSE_BUTTON_LEFT,MOUSE_BUTTON_RIGHT],[MOUSE_BUTTON_RIGHT,MOUSE_BUTTON_LEFT]]:
+		point_event(hit,MOUSE_BUTTON_LEFT)
+		point_event(hit,MOUSE_BUTTON_RIGHT)
+		await settle()
+		point_event(hit,pair[0],false)
+		await settle()
+		check(not board.ledger_expansion.get(group,true),"first chord release toggles exactly once")
+		point_event(hit,pair[1],false)
+		await settle()
+		check(not board.ledger_expansion.get(group,true),"second chord release consumes nothing")
+		point_event(hit,MOUSE_BUTTON_RIGHT)
+		point_event(hit,MOUSE_BUTTON_RIGHT,false)
+		await settle()
+		check(board.ledger_expansion.get(group,true),"plain right tap reopens same group")
+	var physical: Transform2D = root.get_final_transform()
+	var offset: Vector2 = physical.affine_inverse().basis_xform(Vector2(0,10))
 	point_event(hit,MOUSE_BUTTON_RIGHT)
+	await settle()
+	point_event(hit+offset)
+	await settle()
 	point_event(hit,MOUSE_BUTTON_RIGHT,false)
-	check(not board.ledger_expansion.get(group,true),"source TextButton header also accepts actual right click")
-	point_event(hit,MOUSE_BUTTON_RIGHT)
-	point_event(hit,MOUSE_BUTTON_RIGHT,false)
-	check(board.ledger_expansion.get(group,true),"right click keeps the same group owner")
+	await settle()
+	check(board.ledger_expansion.get(group,true) and not q.motion.dragging and q.motion.position==0,
+		"right capture crosses exact drag threshold without moving ScrollRect or clicking")
+	point_event(hit,MOUSE_BUTTON_MIDDLE)
+	await settle()
+	point_event(hit+offset,MOUSE_BUTTON_MIDDLE,false)
+	await settle()
+	check(not board.ledger_expansion.get(group,true),
+		"movement sampled in the release frame is not an earlier drag")
+	point_event(hit,MOUSE_BUTTON_LEFT,true,1.0,InputEvent.DEVICE_ID_EMULATION)
+	point_event(hit,MOUSE_BUTTON_LEFT,false,1.0,InputEvent.DEVICE_ID_EMULATION)
+	check(board.ledger_expansion.get(group,true),"touch emulation retains its independent compatibility path")
+	# Capture of native ScrollRect is tied to the press view, not active tab.
+	point_event(hit,MOUSE_BUTTON_LEFT)
+	await settle()
+	point_event(hit+Vector2(0,30))
+	await settle()
+	board._show_journal_tab("recipes")
+	point_event(hit+Vector2(0,50))
+	await settle()
+	check(q.motion.dragging and q.motion.position!=0 and r.motion.position==0,
+		"hidden captured Quests body still owns its physical left drag")
+	point_event(hit+Vector2(0,50),MOUSE_BUTTON_LEFT,false)
+	await settle()
+	check(not q.motion.dragging and r.motion.position==0,"hidden owner receives matching release")
+	board._show_journal_tab("quests")
+	q.reset_scroll()
 	q.motion.position = 25
 	q.motion.velocity = 120
 	board._show_journal_tab("recipes")
@@ -106,7 +158,6 @@ func test_captured_release(board, q: Control, rows: Control) -> void:
 	await settle()
 	var hit: Vector2 = q.get_global_transform_with_canvas() * local
 	var behind_mask: Vector2 = q.get_global_transform_with_canvas() * Vector2(local.x, -3)
-	var mask_release_local: Vector2 = row.get_global_transform_with_canvas().affine_inverse() * behind_mask
 	var mask_clicks := {"n":0}
 	var note_mask := func(_meta): mask_clicks.n += 1
 	rows.meta_clicked.connect(note_mask)
@@ -114,49 +165,58 @@ func test_captured_release(board, q: Control, rows: Control) -> void:
 		"part of the same header is outside the viewport mask")
 	for button in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_RIGHT,MOUSE_BUTTON_MIDDLE]:
 		point_event(hit,button)
+		await settle()
 		point_event(behind_mask,button,false)
-		check(board.ledger_expansion.get(group,true),"captured release outside the mask does not toggle: %s" % button)
-		if not board.ledger_expansion.get(group,true):
-			board.ledger_expansion[group] = true
-			board._refresh_ledger()
 		await settle()
-		var prior: int = mask_clicks.n
-		point_event(hit,button)
-		check(row.pressed_button==button,"press acquired by the partly masked header: %s" % button)
-		var captured_mask := InputEventMouseButton.new()
-		captured_mask.button_index = button
-		captured_mask.position = mask_release_local
-		captured_mask.pressed = false
-		row._gui_input(captured_mask)
-		check(mask_clicks.n==prior,"even an explicitly captured release must recheck the mask: %s" % button)
-		point_event(hit,button,false)
-		if not board.ledger_expansion.get(group,true):
-			board.ledger_expansion[group] = true
-			board._refresh_ledger()
-		await settle()
+		check(mask_clicks.n==0 and board.ledger_expansion.get(group,true),
+			"captured release outside the mask does not toggle: %s" % button)
+	var factor: Transform2D = root.get_final_transform()
+	var near_hit: Vector2 = q.get_global_transform_with_canvas()*Vector2(local.x,1)
+	var excursion: Vector2 = factor.affine_inverse().basis_xform(Vector2(0,3))
+	point_event(near_hit,MOUSE_BUTTON_RIGHT)
+	await settle()
+	point_event(near_hit-excursion)
+	await settle()
+	point_event(near_hit)
+	await settle()
+	point_event(near_hit,MOUSE_BUTTON_RIGHT,false)
+	await settle()
+	check(mask_clicks.n==1,"exit and return below drag threshold preserves click ticket")
 	rows.meta_clicked.disconnect(note_mask)
+	board.ledger_expansion[group]=true
+	board._refresh_ledger()
 	q.reset_scroll()
 	await settle()
-	var on_row: Vector2 = row.get_global_transform_with_canvas() * Vector2(4,4)
+	var on_row: Vector2 = row.get_global_transform_with_canvas()*Vector2(4,4)
+	var blocker := Control.new()
+	blocker.mouse_filter=Control.MOUSE_FILTER_STOP
+	board.source_hud.add_child(blocker)
+	blocker.position=board.detail_panel.position+q.position
+	blocker.size=q.size
+	point_event(on_row,MOUSE_BUTTON_RIGHT)
+	point_event(on_row,MOUSE_BUTTON_RIGHT,false)
+	await settle()
+	check(board.ledger_expansion.get(group,true),"later GUI blocker masks framed click admission")
+	blocker.free()
 	point_event(on_row,MOUSE_BUTTON_MIDDLE)
-	check(board.scene_transition.begin(func(): pass),"real outbound fader acquires raycasts")
-	board._sync_scene_fader()
-	var captured := InputEventMouseButton.new()
-	captured.button_index = MOUSE_BUTTON_MIDDLE
-	captured.position = Vector2(4,4)
-	captured.pressed = false
+	await settle()
 	var received := {"n":0}
 	var note_click := func(_meta): received.n += 1
 	rows.meta_clicked.connect(note_click)
-	check(row.pressed_button == MOUSE_BUTTON_MIDDLE, "middle press actually captured by source row")
-	row._gui_input(captured)
-	check(received.n == 0 and board.scene_shade.mouse_filter == Control.MOUSE_FILTER_STOP,
+	check(board.scene_transition.begin(func(): pass),"real outbound fader acquires raycasts")
+	board._sync_scene_fader()
+	point_event(on_row,MOUSE_BUTTON_MIDDLE,false)
+	board.journal_pointer.flush(root.get_final_transform(),board._journal_source_mouse_hit,
+		q.drag_threshold,board._dispatch_journal_source_mouse)
+	check(received.n==0 and board.scene_shade.mouse_filter==Control.MOUSE_FILTER_STOP,
 		"captured release is not emitted through the visible outbound fader")
 	board.scene_transition.advance(1.0)
 	board._sync_scene_fader()
 	point_event(on_row,MOUSE_BUTTON_MIDDLE)
 	point_event(on_row,MOUSE_BUTTON_MIDDLE,false)
-	check(received.n == 1 and not board.ledger_expansion.get(group,true) and board.scene_shade.color.a == 1.0,
+	board.journal_pointer.flush(root.get_final_transform(),board._journal_source_mouse_hit,
+		q.drag_threshold,board._dispatch_journal_source_mouse)
+	check(received.n==1 and not board.ledger_expansion.get(group,true) and board.scene_shade.color.a==1.0,
 		"opaque inbound fader ignores pointer and permits ordinary Journal release")
 	rows.meta_clicked.disconnect(note_click)
 	board.scene_transition.cancel()
@@ -255,6 +315,9 @@ func run() -> void:
 	root.add_child(board)
 	await settle()
 	board.set_process(false)
+	# Synthetic catalog tests stop the full campaign frame, but still pump
+	# the identical journal frame tick after real Viewport input.
+	process_frame.connect(board._advance_journal_pointer_input)
 	drain.observe_music(board.feedback.music)
 	board.title_panel.hide()
 	board.source_hud.show()
@@ -359,6 +422,20 @@ func run() -> void:
 		check(q.source_scroll_bound and r.source_scroll_bound and qrows.row_padding==Vector4(20,10,20,10)
 			and rrows.row_padding==qrows.row_padding and qrows.row_spacing==10.0 and rrows.row_spacing==10.0,
 			"both live source panels resolve separate exact viewport and content chains")
+		# Exercise the real Board _process entry with initialized original data as well.
+		board._show_journal_tab("quests")
+		board.journal_slide.reset(true)
+		await settle()
+		var owned_key: String = board.ledger_visible_groups.keys()[0]
+		var owned_row: Control = qrows.rows["group:"+owned_key]
+		var owned_point := owned_row.get_global_transform_with_canvas()*Vector2(4,4)
+		process_frame.disconnect(board._advance_journal_pointer_input)
+		board.set_process(true)
+		point_event(owned_point,MOUSE_BUTTON_RIGHT)
+		point_event(owned_point,MOUSE_BUTTON_RIGHT,false)
+		await settle()
+		check(not board.ledger_expansion.get(owned_key,true),"initialized source Board advances framed Journal clicks in its real process")
+		board.set_process(false)
 		print("Journal body private lifecycle: verified")
 	else:
 		print("SKIP: private source start-new lifecycle unavailable")

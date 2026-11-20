@@ -8,6 +8,8 @@ signal meta_hover_ended(meta: Variant)
 signal meta_clicked(meta: Variant)
 var can_click: Callable
 var release_uncovered: Callable
+var source_pointer_managed := false
+const PointerInput := preload("res://scripts/ui/source_journal_pointer_input.gd")
 var preferred_height := 20.0
 var rows: Dictionary = {}
 var ordered_keys: Array[String] = []
@@ -64,6 +66,7 @@ class Item extends Control:
 		if hovered: label.pop()
 	func _gui_input(event: InputEvent) -> void:
 		if not event is InputEventMouseButton or event.button_index not in [MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE]: return
+		if owner_rows.source_pointer_managed and PointerInput.physical_mouse(event): return
 		if event.pressed:
 			pressed_button = event.button_index
 			return
@@ -73,7 +76,10 @@ class Item extends Control:
 			var viewport_point: Vector2 = get_global_transform_with_canvas() * event.position
 			admitted = bool(owner_rows.release_uncovered.call(viewport_point))
 		if admitted and event.button_index == MOUSE_BUTTON_LEFT and owner_rows.can_click.is_valid(): admitted = bool(owner_rows.can_click.call())
-		if admitted and not str(descriptor.get("group", "")).is_empty(): owner_rows.meta_clicked.emit(meta())
+		if admitted: click_source()
+
+	func click_source() -> void:
+		if not str(descriptor.get("group", "")).is_empty(): owner_rows.meta_clicked.emit(meta())
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
@@ -152,6 +158,18 @@ func layout_rows() -> void:
 	preferred_height = y + row_padding.w - (row_spacing if not ordered_keys.is_empty() else 0)
 	size = Vector2(content_width, preferred_height)
 	extent_changed.emit(preferred_height)
+
+func source_receiver_at(point: Vector2) -> int:
+	if not is_visible_in_tree(): return 0
+	for index in range(get_child_count()-1,-1,-1):
+		var item := get_child(index) as Item
+		if item==null or not item.is_visible_in_tree(): continue
+		var local: Vector2 = item.get_global_transform_with_canvas().affine_inverse()*point
+		if Rect2(Vector2.ZERO,item.size).has_point(local): return item.get_instance_id()
+	return 0
+
+func owns_source_receiver(node: Node) -> bool:
+	return node is Item and node.get_parent()==self
 
 func get_parsed_text() -> String:
 	var texts: PackedStringArray = []
