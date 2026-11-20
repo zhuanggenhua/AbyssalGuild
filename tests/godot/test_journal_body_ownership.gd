@@ -35,38 +35,10 @@ func test_native_scroll(board, q, r) -> void:
 	r.set_process(false)
 	check(q.clip_contents and is_equal_approx(q.size.x,400) and is_equal_approx(q.position.y,60),
 		"full source viewport under header, not permanently clipped padding")
+	check(q.process_priority>board.process_priority and r.process_priority>board.process_priority,
+		"both actual ScrollRects step after the Board input sample")
 	check(q.content.size.x == q.size.x and q.motion.hidden_length() > 0,
 		"overflow from actual content bounds in full-width host")
-	var where: Vector2 = q.get_global_transform_with_canvas()*Vector2(5,5)
-	q.reset_scroll()
-	board.session.phase = "playing"
-	var forward: Vector3 = -board.camera.global_basis.z
-	board.camera_motion.configure(-forward*10)
-	var expected_camera = preload("res://scripts/ui/camera_motion.gd").new()
-	expected_camera.configure(board.camera_motion.target)
-	expected_camera.zoom(-1,forward)
-	point_event(where,MOUSE_BUTTON_WHEEL_DOWN)
-	check(is_equal_approx(q.motion.position,6) and q.content.position.y == -6 and r.motion.position == 0,
-		"one viewport-routed wheel tick scrolls only active body by six source units")
-	check(board.camera_motion.target.is_equal_approx(expected_camera.target),
-		"same event keeps exactly one independent camera wheel update")
-	point_event(where,MOUSE_BUTTON_WHEEL_LEFT,true,.5)
-	check(is_equal_approx(q.motion.position,3),"fractional horizontal wheel uses vertical-only source fallback")
-	var tab: Control = board.journal_tabs.get_child(0)
-	point_event(tab.get_global_transform_with_canvas()*(tab.size/2),MOUSE_BUTTON_WHEEL_DOWN)
-	check(is_equal_approx(q.motion.position,3),"header does not acquire body wheel")
-	var blocker := Control.new()
-	blocker.mouse_filter = Control.MOUSE_FILTER_STOP
-	board.source_hud.add_child(blocker)
-	blocker.position = board.detail_panel.position + q.position
-	blocker.size = q.size
-	await settle()
-	point_event(where,MOUSE_BUTTON_WHEEL_DOWN)
-	check(is_equal_approx(q.motion.position,3),"topmost GUI blocker prevents rectangle-based input leak")
-	blocker.free()
-	q.reset_scroll()
-	var group: String = board.ledger_visible_groups.keys()[0]
-	var hit: Vector2 = q.get_global_transform_with_canvas()*Vector2(30,25)
 	if not q.source_scroll_bound or not r.source_scroll_bound:
 		# CI has no original ScrollRect asset; exercise the same Board router
 		# through its test geometry without claiming actual source admission.
@@ -77,6 +49,58 @@ func test_native_scroll(board, q, r) -> void:
 		board.journal_rows.recipes.source_pointer_managed = true
 	else:
 		check(q.source_pointer_managed and r.source_pointer_managed,"both exact contracts activate framed routing")
+	var group: String = board.ledger_visible_groups.keys()[0]
+	var hit: Vector2 = q.get_global_transform_with_canvas()*Vector2(30,25)
+	# Test the legacy compatibility path on its own, not with the synthetic
+	# test harness's wheel/click GUI capture history still in the viewport.
+	point_event(hit,MOUSE_BUTTON_LEFT,true,1.0,InputEvent.DEVICE_ID_EMULATION)
+	point_event(hit,MOUSE_BUTTON_LEFT,false,1.0,InputEvent.DEVICE_ID_EMULATION)
+	check(not board.ledger_expansion.get(group,true),"touch emulation retains its independent compatibility path")
+	board.ledger_expansion[group]=true
+	board._refresh_ledger()
+	await settle()
+	var where: Vector2 = q.get_global_transform_with_canvas()*Vector2(5,5)
+	q.reset_scroll()
+	board.session.phase = "playing"
+	var forward: Vector3 = -board.camera.global_basis.z
+	board.camera_motion.configure(-forward*10)
+	var expected_camera = preload("res://scripts/ui/camera_motion.gd").new()
+	expected_camera.configure(board.camera_motion.target)
+	expected_camera.zoom(-1,forward)
+	point_event(where,MOUSE_BUTTON_WHEEL_DOWN)
+	await settle()
+	board._update_camera_motion(.016) # Synthetic Journal fixture disables Board processing.
+	check(is_equal_approx(q.motion.position,6) and q.content.position.y == -6 and r.motion.position == 0,
+		"one viewport-routed wheel tick scrolls only active body by six source units")
+	check(board.camera_motion.target.is_equal_approx(expected_camera.target),
+		"same event keeps exactly one independent camera wheel update")
+	point_event(where,MOUSE_BUTTON_WHEEL_LEFT,true,.5)
+	await settle()
+	check(is_equal_approx(q.motion.position,3),"fractional horizontal wheel uses vertical-only source fallback")
+	var tab: Control = board.journal_tabs.get_child(0)
+	point_event(tab.get_global_transform_with_canvas()*(tab.size/2),MOUSE_BUTTON_WHEEL_DOWN)
+	await settle()
+	check(is_equal_approx(q.motion.position,3),"header does not acquire body wheel")
+	var blocker := Control.new()
+	blocker.mouse_filter = Control.MOUSE_FILTER_STOP
+	board.source_hud.add_child(blocker)
+	blocker.position = board.detail_panel.position + q.position
+	blocker.size = q.size
+	await settle()
+	point_event(where,MOUSE_BUTTON_WHEEL_DOWN)
+	await settle()
+	check(is_equal_approx(q.motion.position,3),"topmost GUI blocker prevents rectangle-based input leak")
+	blocker.free()
+	q.reset_scroll()
+	point_event(where,MOUSE_BUTTON_WHEEL_DOWN)
+	point_event(where,MOUSE_BUTTON_WHEEL_UP)
+	await settle()
+	check(q.motion.position==0,"equal opposite wheel impulses cancel within source frame")
+	point_event(where,MOUSE_BUTTON_WHEEL_RIGHT,true,.8)
+	point_event(where,MOUSE_BUTTON_WHEEL_DOWN,true,.5)
+	await settle()
+	check(is_equal_approx(q.motion.position,4.8),"dominant axis selected after per-frame wheel sum")
+	q.reset_scroll()
 	point_event(hit,MOUSE_BUTTON_LEFT)
 	await settle()
 	point_event(hit+Vector2(0,30))
@@ -119,9 +143,26 @@ func test_native_scroll(board, q, r) -> void:
 	await settle()
 	check(not board.ledger_expansion.get(group,true),
 		"movement sampled in the release frame is not an earlier drag")
-	point_event(hit,MOUSE_BUTTON_LEFT,true,1.0,InputEvent.DEVICE_ID_EMULATION)
-	point_event(hit,MOUSE_BUTTON_LEFT,false,1.0,InputEvent.DEVICE_ID_EMULATION)
-	check(board.ledger_expansion.get(group,true),"touch emulation retains its independent compatibility path")
+	# UI wheel is dispatched between left and right, but all three share
+	# the unchanged pre-wheel hit. Place the cursor one unit into the row.
+	var row: Control = board.ledger.rows["group:"+group]
+	var edge: Vector2 = row.get_global_transform_with_canvas()*Vector2(4,1)
+	var positions: Array[float] = []
+	var record := func(_m): positions.append(q.motion.position)
+	board.ledger.meta_clicked.connect(record)
+	for button in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_RIGHT]:
+		point_event(edge,button)
+		await settle()
+		point_event(edge,MOUSE_BUTTON_WHEEL_DOWN)
+		point_event(edge,button,false)
+		await settle()
+		q.reset_scroll()
+		board.ledger_expansion[group]=true
+		board._refresh_ledger()
+		await settle()
+	board.ledger.meta_clicked.disconnect(record)
+	check(positions==[0.0,6.0],"left click then wheel then right release; same pre-wheel row raycast")
+	await test_wheel_drag_late_step(board,q,r)
 	# Capture of native ScrollRect is tied to the press view, not active tab.
 	point_event(hit,MOUSE_BUTTON_LEFT)
 	await settle()
@@ -148,6 +189,72 @@ func test_native_scroll(board, q, r) -> void:
 	r.reset_scroll()
 	point_event(where-Vector2(10,40))
 	await settle()
+
+# Explicitly advance the same ScrollRect clock used by the production hosts.
+# This separates exact resulting positions from actual cloud FPS.
+func test_wheel_drag_late_step(board, q: Control, r: Control) -> void:
+	q.reset_scroll()
+	r.reset_scroll()
+	q.motion.position=100
+	q.motion.previous=100
+	q._apply_motion()
+	var xform: Transform2D = q.get_global_transform_with_canvas()
+	point_event(xform*Vector2(12,100),MOUSE_BUTTON_LEFT)
+	await settle()
+	point_event(xform*Vector2(12,70))
+	await settle()
+	check(q.motion.dragging and is_equal_approx(q.motion.position,100),"drag begins at current position without retrospective change")
+	point_event(xform*Vector2(12,50),MOUSE_BUTTON_WHEEL_DOWN)
+	await settle()
+	check(is_equal_approx(q.motion.position,126) and q.motion.scrolling,
+		"active drag resolves from stored origin first, then wheel adds six in the same frame")
+	q.advance_unscaled(.02)
+	check(is_equal_approx(q.motion.velocity,260) and not q.motion.scrolling and is_equal_approx(q.motion.previous,126),
+		"late drag velocity samples combined change using unscaled step and clears wheel flag")
+	point_event(xform*Vector2(12,30),MOUSE_BUTTON_WHEEL_DOWN)
+	point_event(xform*Vector2(12,30),MOUSE_BUTTON_LEFT,false)
+	await settle()
+	check(not q.motion.dragging and is_equal_approx(q.motion.position,132) and q.motion.scrolling,
+		"button release ends drag before wheel; release-frame movement is not applied as drag")
+	q.advance_unscaled(.02)
+	var inertia_velocity := 260.0*pow(q.motion.deceleration,.02)
+	check(is_equal_approx(q.motion.velocity,inertia_velocity) and is_equal_approx(q.motion.position,132+inertia_velocity*.02)
+		and not q.motion.scrolling,"release LateUpdate chooses inertia after the same-frame wheel")
+
+	q.reset_scroll()
+	q.motion.position=2
+	q.motion.previous=2
+	q._apply_motion()
+	point_event(xform*Vector2(12,100),MOUSE_BUTTON_LEFT)
+	await settle()
+	point_event(xform*Vector2(12,70))
+	await settle()
+	point_event(xform*Vector2(12,70),MOUSE_BUTTON_WHEEL_UP)
+	point_event(xform*Vector2(12,70),MOUSE_BUTTON_LEFT,false)
+	await settle()
+	check(is_equal_approx(q.motion.position,-4) and not q.motion.dragging and q.motion.scrolling,
+		"release wheel can leave content in the authored elastic overscroll")
+	q.advance_unscaled(.02)
+	# Pinned uGUI SmoothDamp, starting at -4, velocity 0; because scrolling
+	# is true it uses 0.1*3 for this spring step, not the usual 0.1.
+	check(is_equal_approx(q.motion.position,-3.96817163) and is_equal_approx(q.motion.velocity,3.11229148)
+		and not q.motion.scrolling,"release-frame spring uses the one-frame tripled smooth time")
+
+	q.reset_scroll()
+	point_event(xform*Vector2(12,100),MOUSE_BUTTON_LEFT)
+	await settle()
+	point_event(xform*Vector2(12,70))
+	await settle()
+	board._show_journal_tab("recipes")
+	point_event(xform*Vector2(12,50),MOUSE_BUTTON_WHEEL_DOWN)
+	await settle()
+	check(q.motion.dragging and is_equal_approx(q.motion.position,20) and is_equal_approx(r.motion.position,6),
+		"captured left drag remains Quests but wheel owner is final hover over Recipes")
+	point_event(xform*Vector2(12,50),MOUSE_BUTTON_LEFT,false)
+	await settle()
+	board._show_journal_tab("quests")
+	q.reset_scroll()
+	r.reset_scroll()
 
 func test_captured_release(board, q: Control, rows: Control) -> void:
 	var group: String = board.ledger_visible_groups.keys()[0]

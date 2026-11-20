@@ -87,7 +87,9 @@ func run() -> void:
 		return
 	var focus_end: Vector3 = board.camera_motion.focus.end
 	var target: Vector3 = board.camera_motion.target
-	board._zoom_camera(1)
+	var scroll := InputEventMouseButton.new()
+	scroll.button_index=MOUSE_BUTTON_WHEEL_UP;scroll.pressed=true;scroll.factor=1.0
+	board._input(scroll)
 	check(not board._camera_input_enabled() and board.camera_motion.target == target and not board._allows_card_actions(), "Reveal blocks camera navigation and new convenience transactions")
 	board.hit.card_id = villager
 	var press := InputEventMouseButton.new()

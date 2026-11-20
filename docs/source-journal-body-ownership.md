@@ -107,3 +107,38 @@ combinations without depending on rendering.
 Reference: [Input module, pinned 1.19.0](https://github.com/Unity-Technologies/InputSystem/blob/ca8d898356596a91bda6505e506cc1a4bb3a9fa6/Packages/com.unity.inputsystem/InputSystem/Plugins/UI/InputSystemUIInputModule.cs#L430-L479),
 [shared click transitions](https://github.com/Unity-Technologies/InputSystem/blob/ca8d898356596a91bda6505e506cc1a4bb3a9fa6/Packages/com.unity.inputsystem/InputSystem/Plugins/UI/InputSystemUIInputModule.cs#L596-L730),
 [per-button state](https://github.com/Unity-Technologies/InputSystem/blob/ca8d898356596a91bda6505e506cc1a4bb3a9fa6/Packages/com.unity.inputsystem/InputSystem/Plugins/UI/PointerModel.cs#L237-L269).
+
+### Combined wheel and button frames
+
+The source pointer is sampled before any input-specific callback can move
+the content. Physical wheel events contribute signed raw ticks to the
+current frame; horizontal/vertical dominance is resolved after summing,
+and equal opposite ticks cancel. Dispatch follows Unity's left button and
+drag, then wheel, then right and middle. Thus a wheel shift does not
+retroactively change the captured click's current receiver in that frame.
+Pointer-enter resolves the same authored ScrollRect through clipped row or
+padding; covered surfaces do not receive Journal scrolling. Header and
+fallback input ownership are unchanged. The Board camera still receives
+its separate existing raw route; combinations at camera zoom clamps and
+source update phase are not validated by these Journal checks.
+
+The Journal host's unscaled motion step runs after the Board frame sample.
+With a held left drag, that step computes velocity from the combined drag
+and wheel displacement. With a left release in that frame, it instead
+runs inertia (inside bounds) or the source wheel-adjusted spring (outside
+bounds). Tests also send wheel to Recipes while a previously captured
+Quests drag is still active; each host receives only its own action.
+
+### 同一滚轮输入的独立相机更新
+
+锁定 Unity `com.unity.inputsystem` 1.19.0 默认动态更新、UniformAcrossAllPlatforms，
+在每次更新前清除 Mouse.scroll、逐事件合计；原项目未覆盖这一模式。Windows 一格
+滚轮以归一化的 1 读取，不是旧原生计数 120；Godot 每个按下事件保留带符号 factor。
+Journal 按自己的二维轴选择、翻转和 ScrollRect 灵敏度 6 更新，CameraController
+独立读取同帧纵轴合计，在平移后和 unscaled SmoothDamp 前仅处理一次。相反滚轮先
+抵消，小滚轮合计才过阈值，越界时拒绝整个缩放量，成功才夹取 XZ。GUI 消费不排除
+相机观测；不在 unhandled 输入重复分派。原生触控不冒充 Mouse.scroll。
+
+当前仅更改相机滚轮批次：原有物理像素平移由现有路径保持，并未迁移所有鼠标平移
+边缘到统一帧。旅行淡出的原有严格迁移护栏仍有效，只有同一会话和淡出代次接纳的
+有效合计才授予离场平滑；新场景与新代次不会承接积压。

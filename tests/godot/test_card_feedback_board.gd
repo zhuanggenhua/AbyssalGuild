@@ -105,6 +105,7 @@ func run() -> void:
 	var camera_target: Vector3 = board.camera_motion.target
 	var wheel := InputEventMouseButton.new(); wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN; wheel.pressed = true; wheel.position = panel_point
 	root.push_input(wheel); await process_frame
+	board._update_camera_motion(.016) # This fixture disables automatic Board processing.
 	check(board.camera_motion.target != camera_target and board.hovered_card_id == fighter, "source wheel over information also zooms without dismissing tooltip")
 	var panel_click := InputEventMouseButton.new(); panel_click.button_index = MOUSE_BUTTON_LEFT; panel_click.pressed = true; panel_click.position = panel_point
 	root.push_input(panel_click); await process_frame

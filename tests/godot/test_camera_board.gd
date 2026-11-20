@@ -17,6 +17,10 @@ func check(value: bool, label: String) -> void:
 	checks += 1
 	if not value: failures += 1; printerr("FAIL: ",label)
 func _init() -> void: call_deferred("run")
+func sample(board: Node, factor:=1.0, index:=MOUSE_BUTTON_WHEEL_UP) -> void:
+	var wheel := InputEventMouseButton.new()
+	wheel.factor=factor;wheel.button_index=index;wheel.pressed=true
+	board._input(wheel)
 func run() -> void:
 	var board = BoardAdapter.new()
 	board.feedback.free(); board.feedback = SilentFeedback.new()
@@ -29,21 +33,21 @@ func run() -> void:
 	check(board.camera.fov == 30 and board.camera.near == 2 and board.camera.far == 40, "imported camera lens preserved")
 	check(board.camera_motion.settings.panSpeed == 0.01 and board.camera_motion.settings.smoothTime == 0.15, "actual controller fields loaded")
 	var start: Vector3 = board.camera.position
-	board._zoom_camera(1)
-	check(board.camera.position == start and board.camera_motion.target != start, "scroll updates target instead of teleporting camera")
+	sample(board)
+	check(board.camera.position == start and board.camera_motion.target == start, "wheel is sampled without teleporting or precommitting the target")
 	board.session.paused = true
 	board._process(0.016)
-	check(board.camera.position != start, "manual gameplay pause retains unscaled camera smoothing")
+	check(board.camera.position != start and board.camera_motion.target != start, "manual gameplay pause applies wheel and retains unscaled smoothing")
 	for phase in ["feeding","ready","game_over"]:
 		board.session.phase = phase
 		var target: Vector3 = board.camera_motion.target
 		var current: Vector3 = board.camera.position
-		board._zoom_camera(1)
+		sample(board)
 		board._process(0.1)
 		check(board.camera_motion.target == target and board.camera.position == current, phase + " blocks zoom and ordinary camera smoothing")
 	board.session.phase = "selling"
 	var selling_target: Vector3 = board.camera_motion.target
-	board._zoom_camera(1)
+	sample(board); board._update_camera_motion(0.016)
 	check(board._camera_input_enabled() and board.camera_motion.target != selling_target, "selling removes cycle input lock for camera")
 	board._handle_escape()
 	check(not board.pause_overlay.visible, "selling still blocks Escape through ending-cycle flag")
@@ -56,7 +60,7 @@ func run() -> void:
 	board.session.phase = "playing"
 	board.pause_overlay.show()
 	var current: Vector3 = board.camera.position
-	board._zoom_camera(1); board._process(0.1)
+	sample(board); board._process(0.1)
 	check(board.camera.position != current, "source external pause retains normal unscaled camera input")
 	board.pause_overlay.hide()
 	var press := InputEventMouseButton.new()
@@ -96,12 +100,14 @@ func run() -> void:
 	board._clamp_camera()
 	var before_wheel: Vector3 = board.camera_motion.target
 	root.push_input(wheel,true)
-	check(panel.wheels == 1 and board.camera_motion.target != before_wheel,"GUI consumes wheel but source camera still zooms")
+	check(panel.wheels == 1 and board.camera_motion.target == before_wheel,"GUI consumes wheel without immediate camera mutation")
+	board._update_camera_motion(.016)
+	check(board.camera_motion.target != before_wheel,"one camera frame still applies the GUI-consumed wheel")
 	var once: Vector3 = board.camera_motion.target
 	board._unhandled_input(wheel)
 	check(board.camera_motion.target == once,"wheel is not dispatched twice through unhandled path")
 	board.pause_overlay.show()
-	board._input(wheel)
+	board._input(wheel); board._update_camera_motion(.016)
 	check(board.camera_motion.target != once,"pause menu does not create an input lock")
 	press.button_index = MOUSE_BUTTON_MIDDLE; press.pressed = true; press.position = Vector2(40,40)
 	board._input(press)
@@ -130,6 +136,52 @@ func run() -> void:
 	check(board.camera_motion.target != target,"unlock samples accumulated source dragOrigin delta")
 	board._input(press)
 	check(not board.panning,"unlocked release clears camera drag")
+	# Near the source minimum, opposite detents must cancel before either
+	# step can constrain the target. A per-event implementation fails this.
+	board.pause_overlay.hide()
+	var facing: Vector3 = -board.camera.global_basis.z
+	board.camera_motion.configure(-facing*5.25)
+	board._clamp_camera()
+	var original: Vector3 = board.camera_motion.target
+	sample(board,.5); sample(board,.5,MOUSE_BUTTON_WHEEL_DOWN)
+	board._update_camera_motion(.016)
+	check(board.camera_motion.target==original,"same-frame +/- rejects order-dependent intermediate zoom")
+	board.camera_motion.configure(-facing*5.25)
+	original=board.camera_motion.target
+	sample(board,.17); sample(board,.17)
+	board._update_camera_motion(.016)
+	check(board.camera_motion.target==original,"two acceptable individual ticks form one rejected oversize step")
+	board.camera_motion.configure(-facing*10.)
+	board._clamp_camera()
+	original=board.camera_motion.target
+	sample(board,.006); sample(board,.006); sample(board,4.,MOUSE_BUTTON_WHEEL_RIGHT); sample(board,NAN)
+	board._update_camera_motion(.016)
+	var committed: Vector3 = board.camera_motion.target
+	check(committed.is_equal_approx(original+facing*.012),"two sub-threshold ticks accumulate; horizontal and NaN ignored")
+	board._update_camera_motion(.016)
+	check(board.camera_motion.target==committed,"wheel reset next frame")
+	sample(board)
+	board.session.phase="feeding"
+	board._update_camera_motion(.016)
+	board.session.phase="playing"
+	board._update_camera_motion(.016)
+	check(board.camera_motion.target==committed,"frame-time lock discards pending ordinary wheel")
+	# Wheel arrives before the motion event, but source Update pans first.
+	board.camera_motion.configure(-facing*10.)
+	board._clamp_camera()
+	var far_edge: float = board.camera_motion.bounds.end.y+float(board.camera_motion.settings.panPadding)
+	board.camera_motion.target.z=far_edge-0.05
+	sample(board,.5)
+	var to_viewport := root.get_final_transform().affine_inverse()
+	press.button_index=MOUSE_BUTTON_MIDDLE; press.pressed=true; press.position=to_viewport*Vector2(40,90)
+	board._input(press)
+	motion.position=to_viewport*Vector2(40,10)
+	board._input(motion)
+	check(is_equal_approx(board.camera_motion.target.z,far_edge),"pan before frame clamps to the edge without consuming wheel")
+	board._update_camera_motion(.016)
+	check(is_equal_approx(board.camera_motion.target.z,far_edge+facing.z*.5),
+		"real camera Update zooms inward after clamped pan even when wheel event arrived first")
+	press.pressed=false; board._input(press)
 	board.scene_transition.phase = "out"
 	check(not board._camera_input_enabled(),"scene transition retains independent input lock")
 	board.scene_transition.cancel()

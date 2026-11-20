@@ -29,6 +29,9 @@ func _init() -> void:
 	clip_contents = true
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# Explicit LateUpdate ordering: Board samples the frame at default
+	# priority before this host derives motion from all delivered events.
+	process_priority = 1
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	background.color = Color(0,0,0,0.9019608)
 	add_child(background)
@@ -95,20 +98,15 @@ func scroll_ticks(ticks: Vector2) -> void:
 func _gui_input(event: InputEvent) -> void:
 	if not tab_active or not is_visible_in_tree(): return
 	if event is InputEventMouseButton and event.pressed:
-		var ticks := Vector2.ZERO
-		match event.button_index:
-			MOUSE_BUTTON_WHEEL_UP: ticks.y = event.factor
-			MOUSE_BUTTON_WHEEL_DOWN: ticks.y = -event.factor
-			MOUSE_BUTTON_WHEEL_LEFT: ticks.x = -event.factor
-			MOUSE_BUTTON_WHEEL_RIGHT: ticks.x = event.factor
-			MOUSE_BUTTON_LEFT:
-				if source_pointer_managed and PointerInput.physical_mouse(event): return
-				motion.initialize_drag()
-				pending_drag = true
-				suppress_click = false
-				# GUI event coordinates are local, input coordinates are viewport pixels.
-				press_screen = _physical_pointer(get_global_transform_with_canvas()*event.position)
-		if ticks != Vector2.ZERO: scroll_ticks(ticks)
+		if source_pointer_managed and PointerInput.physical_mouse(event): return
+		var ticks := PointerInput.wheel_ticks(event)
+		if ticks!=Vector2.ZERO: scroll_ticks(ticks)
+		if event.button_index==MOUSE_BUTTON_LEFT:
+			motion.initialize_drag()
+			pending_drag = true
+			suppress_click = false
+			# GUI event coordinates are local, input coordinates are viewport pixels.
+			press_screen = _physical_pointer(get_global_transform_with_canvas()*event.position)
 	# Board's source camera observes input separately before this GUI dispatch.
 
 func _input(event: InputEvent) -> void:

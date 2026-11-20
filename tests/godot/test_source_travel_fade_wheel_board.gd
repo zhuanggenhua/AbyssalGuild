@@ -34,9 +34,8 @@ func run():
 		var wheel=InputEventMouseButton.new();wheel.button_index=MOUSE_BUTTON_WHEEL_UP;wheel.pressed=true;wheel.factor=.5;wheel.position=Vector2(40,40)
 		# Deliver through the viewport so the production fade input gate executes.
 		root.push_input(wheel,true)
-		check((b.camera_motion.target!=before),"target admission")
+		check(b.camera_motion.target==before and is_equal_approx(b._camera_scroll_sample,.5),"accept raw wheel but wait for departing Update")
 		var expected=before+(-b.camera.global_basis.z)*.5*float(b.camera_motion.settings.zoomSpeed)
-		check(b.camera_motion.target.is_equal_approx(expected),"unchanged existing wheel conversion")
 		var middle := InputEventMouseButton.new()
 		middle.button_index = MOUSE_BUTTON_MIDDLE; middle.pressed = true
 		root.push_input(middle, true)
@@ -46,6 +45,7 @@ func run():
 		root.push_input(left, true)
 		check(b.dragging < 0 and not b._text_button_allowed(b.day_clock), "card and HUD input remain blocked")
 		b._process(.1)
+		check(b.camera_motion.target.is_equal_approx(expected),"unchanged existing wheel conversion once on Update")
 		check((b.camera.position!=position),"visible camera motion before black")
 		check(b.session==owner and is_equal_approx(b.scene_transition.alpha,.1),"old owner and early fade")
 		check(Codec.capture(owner)==saved,"wheel does not change saved model")
@@ -62,11 +62,11 @@ func run():
 			if mode=="unverified":b.catalog.data.provenance.source_commit="unknown"
 			wheel.pressed=mode!="release";wheel.factor=NAN if mode=="nan" else .5
 			before=b.camera_motion.target;root.push_input(wheel,true)
-			check(b.camera_motion.target==before,mode+" blocked")
+			check(b.camera_motion.target==before and b._camera_scroll_owner==0,mode+" blocked")
 			b.pause_overlay.hide();b.options_panel.hide();b.vendor_unlock.sequence.stage="idle";b.session.phase="playing";b.panning=false;b.dragging=-1;b.camera_motion.focus.clear();b.catalog.data.provenance.source_commit=original_commit
 		wheel.pressed=true;wheel.factor=.5;wheel.button_index=MOUSE_BUTTON_WHEEL_DOWN
 		before=b.camera_motion.target;root.push_input(wheel,true)
-		check(b.camera_motion.target!=before,"opposite wheel direction")
+		check(b.camera_motion.target==before and is_equal_approx(b._camera_scroll_sample,-.5),"opposite wheel direction queued")
 		# Diagnostic controller cancellation/restart: an old wheel grant
 		# cannot authorize smoothing in a new generation of the same owner.
 		var commit: Callable = b.scene_transition._commit
@@ -76,7 +76,9 @@ func run():
 		b._update_camera_motion(.05)
 		check(b.camera.position==frozen and b._fade_wheel_owner==0,"stale wheel generation rejected")
 		root.push_input(wheel,true)
-		check(b._fade_wheel_owner==owner.get_instance_id(),"fresh wheel admits new generation")
+		check(b._camera_scroll_owner==owner.get_instance_id() and b._camera_scroll_generation==b.scene_transition.generation,"fresh wheel admits new generation")
+		b._update_camera_motion(.05)
+		check(b._fade_wheel_owner==owner.get_instance_id() and b.camera_motion.target!=before,"new generation resolves only its own opposite movement")
 		b._process(1);check(b.session!=owner,"swap owns new camera")
 		var after=b.camera_motion.target;b._process(.01)
 		check(b._fade_wheel_owner==0,"fade permission reset after swap")

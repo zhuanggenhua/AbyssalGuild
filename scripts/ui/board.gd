@@ -1734,6 +1734,10 @@ func _unhandled_input(event: InputEvent) -> void:
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
 var _fade_wheel_owner: int = 0
 var _fade_wheel_generation: int = -1
+var _camera_scroll_sample: float = 0.0
+var _camera_scroll_owner: int = 0
+var _camera_scroll_generation: int = -1
+var _camera_scroll_during_fade: bool = false
 func _source_fade_wheel_allowed() -> bool:
 	return running and session.travel_pending and scene_transition.phase == "out" and session.phase == "playing" and session.scene_name in ["Main", "Island"] and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT and not vendor_unlock.is_active() and camera_motion.focus.is_empty() and not panning and not _has_card_drag() and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
 
@@ -1766,10 +1770,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if scene_transition.blocks_input():
-		if _source_fade_wheel_allowed() and event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and is_finite(event.factor):
-			if camera_motion.zoom(event.factor * (1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0), -camera.global_basis.z):
-				_fade_wheel_owner = session.get_instance_id()
-				_fade_wheel_generation = scene_transition.generation
+		if _source_fade_wheel_allowed(): _observe_camera_scroll(event, true)
 		get_viewport().set_input_as_handled()
 		return
 	if running and pause_overlay.visible and not options_panel.visible and not _navigation_modal_active():
@@ -1785,8 +1786,7 @@ func _input(event: InputEvent) -> void:
 		_record_card_pointer(event.position)
 	# Source HandleZoom never checks EventSystem: observe wheel before GUI, but
 	# do not consume it (the same event can also scroll a source-style panel).
-	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP,MOUSE_BUTTON_WHEEL_DOWN]:
-		_zoom_camera(event.factor * (1.0 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -1.0))
+	if _camera_input_enabled(): _observe_camera_scroll(event, false)
 	# Middle press bypasses GUI; real InputManager locks skip all HandlePan work.
 	if _camera_input_enabled():
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
@@ -2109,7 +2109,8 @@ func _journal_source_mouse_hit(point: Vector2) -> Dictionary:
 		return {}
 	var body: Control = journal_bodies[active_tab]
 	if not body.source_pointer_managed or _journal_has_later_blocker(body,point): return {}
-	return {"click":journal_rows[active_tab].source_receiver_at(point),"drag":body.get_instance_id()}
+	var id := body.get_instance_id()
+	return {"click":journal_rows[active_tab].source_receiver_at(point),"drag":id,"scroll":id}
 
 func _journal_has_later_blocker(control: Control, point: Vector2) -> bool:
 	var ancestor: Node = control.get_parent()
@@ -2128,8 +2129,9 @@ func _dispatch_journal_source_mouse(receipt: Dictionary, point: Vector2) -> void
 		var rows: Control = journal_rows.get(active_tab)
 		if rows!=null and rows.owns_source_receiver(target) and target.is_visible_in_tree():
 			target.click_source()
-	elif receipt.button==MOUSE_BUTTON_LEFT and target in journal_bodies.values():
-		target.source_drag(receipt.kind,point)
+	elif target in journal_bodies.values():
+		if receipt.kind=="scroll": target.scroll_ticks(receipt.ticks)
+		elif receipt.button==MOUSE_BUTTON_LEFT: target.source_drag(receipt.kind,point)
 
 ## Unity TextButton click requires the release raycast to still resolve to the
 ## row. Native GUI capture can deliver the release after the mask or a later
@@ -2873,8 +2875,35 @@ func _camera_input_enabled() -> bool:
 func _clamp_camera() -> void:
 	if session.board_bounds is Rect2: camera_motion.set_bounds(session.board_bounds)
 
-func _zoom_camera(scroll: float) -> void:
-	if _camera_input_enabled(): camera_motion.zoom(scroll, -camera.global_basis.z)
+func _observe_camera_scroll(event: InputEvent, during_fade: bool) -> void:
+	if not event is InputEventMouseButton or not event.pressed or event.device<0: return
+	# Read the same normalized physical wheel detent as the UI, but only Y;
+	# ScrollRect's sensitivity and X/Y arbitration belong to its own receiver.
+	var dy: float = JournalPointerInput.wheel_ticks(event).y
+	if dy==0.0: return
+	var owner := session.get_instance_id()
+	var generation: int = scene_transition.generation
+	if _camera_scroll_owner!=owner or _camera_scroll_generation!=generation or _camera_scroll_during_fade!=during_fade:
+		_camera_scroll_sample=0.0
+		_camera_scroll_owner=owner
+		_camera_scroll_generation=generation
+		_camera_scroll_during_fade=during_fade
+	_camera_scroll_sample+=dy
+
+func _flush_camera_scroll(input_enabled: bool) -> void:
+	var scroll := _camera_scroll_sample
+	var owner := _camera_scroll_owner
+	var generation := _camera_scroll_generation
+	var during_fade := _camera_scroll_during_fade
+	_camera_scroll_sample=0.0
+	_camera_scroll_owner=0
+	if owner!=session.get_instance_id() or generation!=scene_transition.generation or not is_finite(scroll): return
+	if during_fade:
+		if _source_fade_wheel_allowed() and camera_motion.zoom(scroll, -camera.global_basis.z):
+			_fade_wheel_owner=owner
+			_fade_wheel_generation=generation
+	elif input_enabled:
+		camera_motion.zoom(scroll, -camera.global_basis.z)
 
 func _focus_camera(target: Vector2, duration: float = 0.5) -> void:
 	_focus_camera_position(Vector3(target.x,0,target.y), duration)
@@ -2891,6 +2920,10 @@ func _update_camera_motion(delta: float) -> void:
 	if enabled and panning and camera_pointer.known:
 		camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
 		camera_drag_origin = camera_pointer.position
+	# CameraController.Update: final pan sample, one signed vertical sum,
+	# then unscaled SmoothDamp. Reject an oversize step rather than applying
+	# valid intermediate wheel events against a moving/clamped target.
+	_flush_camera_scroll(enabled)
 	var fade_wheel: bool = _fade_wheel_owner == session.get_instance_id() and _fade_wheel_generation == scene_transition.generation and _source_fade_wheel_allowed()
 	if not fade_wheel: _fade_wheel_owner = 0
 	camera.position = camera_motion.step(camera.position, delta, enabled or fade_wheel)

@@ -13,9 +13,13 @@ func reset() -> void:
 	_eligible = false
 
 func advance(point: Vector2, moved: bool, edges: Dictionary, click_receiver: int,
-		down_receiver: int, drag_receiver: int, threshold: float, ignored: Array = []) -> Array[Dictionary]:
+		down_receiver: int, drag_receiver: int, threshold: float, ignored: Array = [], wheel := Vector2.ZERO, scroll_receiver := 0) -> Array[Dictionary]:
 	var dispatch: Array[Dictionary] = []
 	for button in BUTTONS:
+		# Unity dispatches the wheel once after left drag, and before
+		# restoring the right button state. Reuse the original raycast.
+		if button==MOUSE_BUTTON_RIGHT and scroll_receiver!=0 and wheel!=Vector2.ZERO:
+			dispatch.append({"kind":"scroll","receiver":scroll_receiver,"ticks":wheel})
 		if button in ignored: _eligible = false
 		var edge: Vector2i = edges.get(button, Vector2i.ZERO)
 		if edge.x != 0:

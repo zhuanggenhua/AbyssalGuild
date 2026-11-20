@@ -54,7 +54,7 @@ func pan(pixel_delta: Vector2, current_height: float) -> void:
 	clamp_target()
 
 func zoom(scroll: float, forward: Vector3) -> bool:
-	if absf(scroll) <= 0.01 or -forward.y <= 0.0001: return false
+	if not is_finite(scroll) or not forward.is_finite() or absf(scroll) <= 0.01 or -forward.y <= 0.0001: return false
 	var candidate: Vector3 = target + forward * scroll * float(settings.zoomSpeed)
 	var distance: float = candidate.y / -forward.y
 	if distance < float(settings.minDistance) or distance > float(settings.maxDistance): return false
