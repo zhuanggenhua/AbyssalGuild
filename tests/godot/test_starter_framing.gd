@@ -132,11 +132,13 @@ func run() -> void:
 		check(not fully_visible(board.camera, position, size), "edge output is initially cropped at %s" % dimensions)
 		var center := size * 0.5
 		button(MOUSE_BUTTON_MIDDLE, true, center)
+		board._update_camera_motion(1.0/60.0)
 		var motion := InputEventMouseMotion.new()
 		motion.position = center + Vector2(350, 0)
 		motion.relative = Vector2(350, 0)
 		motion.button_mask = MOUSE_BUTTON_MASK_MIDDLE
 		root.push_input(motion)
+		board._update_camera_motion(1.0/60.0)
 		button(MOUSE_BUTTON_MIDDLE, false, motion.position)
 		settle(board)
 		check(not board.panning and board.camera.position.x < -3.0, "Viewport middle pan moves left and releases")

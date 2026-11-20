@@ -22,8 +22,12 @@ func touch(index:int,down:bool,point:Vector2,canceled:bool=false)->void:
 func drag(index:int,point:Vector2)->void:
 	var event:=InputEventScreenDrag.new();event.index=index;event.position=point;event.relative=Vector2(10,0)
 	await deliver(event)
-func mouse(button:int,down:bool,point:Vector2)->void:
+func mouse(button:int,down:bool,point:Vector2, paired:bool=false)->void:
 	var event:=InputEventMouseButton.new();event.button_index=button;event.pressed=down;event.position=point;event.device=0
+	if paired:
+		var first: InputEventMouseButton=event.duplicate()
+		first.pressed=true
+		Input.parse_input_event(first);Input.flush_buffered_events()
 	await deliver(event)
 func deliver(event:InputEvent)->void:
 	Input.parse_input_event(event);Input.flush_buffered_events()
@@ -76,7 +80,7 @@ func run()->void:
 	await touch(1,true,start);await touch(2,true,start+Vector2(40,0))
 	await touch(1,false,start+Vector2(10,0),true)
 	check(board.panning,"first-contact cancellation with another held keeps orphan pressed")
-	await mouse(MOUSE_BUTTON_LEFT,false,start)
+	await mouse(MOUSE_BUTTON_LEFT,false,start,true)
 	check(not board.panning,"real left release still stops touch-originated camera pan")
 	await mouse(MOUSE_BUTTON_MIDDLE,true,start)
 	check(board.panning,"real middle press remains independent of orphan")
@@ -90,7 +94,7 @@ func run()->void:
 	check(board.panning and board.camera_motion.target==frozen,"InputManager lock skips release and movement without resetting held pan")
 	board.session.phase="playing";board._update_camera_motion(1.0/60)
 	check(board.panning and board.camera_drag_origin.is_equal_approx(start+Vector2(10,0)),"unlock samples retained primary position without replaying locked release")
-	await mouse(MOUSE_BUTTON_LEFT,false,start)
+	await mouse(MOUSE_BUTTON_LEFT,false,start,true)
 	check(not board.panning,"new unlocked real release ends retained lock-time pan")
 	# Preserve existing native GUI admission. Do not invent a touch raycaster.
 	var panel := Control.new();panel.position=Vector2(120,120);panel.size=Vector2(100,100);panel.mouse_filter=Control.MOUSE_FILTER_STOP
@@ -101,7 +105,12 @@ func run()->void:
 	check(not board.panning,"secondary and new-third blank touches cannot admit a GUI-origin orphan")
 	await touch(2,false,start);await touch(3,false,start+Vector2(80,0))
 	check(not board.panning,"GUI-origin orphan finishes without creating a camera drag")
-	panel.queue_free()
+	panel.queue_free();await process_frame
+	Input.emulate_mouse_from_touch=false
+	await touch(6,true,start)
+	check(board.panning,"native primary does not require emulated mouse press")
+	await touch(6,false,start)
+	check(not board.panning,"native-only primary release ends pan")
 	check(board.session.cards.is_empty() and not board.session.drag.active() and board.dragging==-1,"camera trace never creates cards or held stacks")
 	board._show_title();board.queue_free();await process_frame;await create_timer(.2).timeout
 	print("Primary touch camera board: %d/%d passed"%[checks-failures,checks])

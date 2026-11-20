@@ -14,6 +14,7 @@ func check(ok:bool,label:String)->void:
 func _init():call_deferred("run")
 func deliver(event:InputEvent)->void:
  Input.parse_input_event(event);Input.flush_buffered_events();await process_frame
+ board._update_camera_motion(.016)
 func mouse(button:int,pressed:bool,point:Vector2)->void:
  var event:=InputEventMouseButton.new();event.button_index=button;event.pressed=pressed;event.position=point
  await deliver(event)

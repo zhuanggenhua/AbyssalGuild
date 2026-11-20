@@ -374,6 +374,7 @@ func _restore_title_world() -> void:
 	camera.v_offset = 0
 	camera_motion.configure(camera.position)
 	panning = false
+	camera_pointer.take_pan_edges()
 
 func _label(text: String, parent: Node, size: int = 16) -> Label:
 	var label := Label.new()
@@ -951,6 +952,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	visual_assets.apply_source_camera(camera, session.scene_name)
 	camera_motion.configure(camera.position, CameraMotion.source_settings(catalog.data, session.scene_name))
 	panning = false
+	camera_pointer.take_pan_edges()
 	source_flat_environment_bound = visual_assets.apply_source_light(source_light, session.scene_name)
 	source_flat_environment_bound = visual_assets.apply_source_environment(world_environment, session.scene_name) and source_flat_environment_bound
 	_replace_scene_background(session.scene_name)
@@ -1719,15 +1721,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
 				var hit: Dictionary = _pick_target(event.position)
-				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event) and int(hit.card_id) < 0:
-					panning = true
-					camera_drag_origin = get_viewport().get_final_transform() * event.position
 				# Native touch remains authoritative for card receivers. Keep
-				# touch-emulated mouse on the existing panel/blank/camera path.
+				# touch-emulated mouse on the existing panel/blank path.
 				if event.device != InputEvent.DEVICE_ID_EMULATION or int(hit.card_id) < 0:
 					_begin_card_press(hit, event.position, _source_equipment_outside!=null)
 			else:
-				if _camera_input_enabled() and not camera_pointer.suppress_emulated_camera_event(event): panning = false
 				if event.device != InputEvent.DEVICE_ID_EMULATION or pressed_panel >= 0:
 					_finish_drag(event.position)
 
@@ -1787,16 +1785,6 @@ func _input(event: InputEvent) -> void:
 	# Source HandleZoom never checks EventSystem: observe wheel before GUI, but
 	# do not consume it (the same event can also scroll a source-style panel).
 	if _camera_input_enabled(): _observe_camera_scroll(event, false)
-	# Middle press bypasses GUI; real InputManager locks skip all HandlePan work.
-	if _camera_input_enabled():
-		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
-			panning = true
-			camera_drag_origin = get_viewport().get_final_transform() * event.position
-		if camera_event.released or (event is InputEventMouseButton and event.button_index in [MOUSE_BUTTON_LEFT,MOUSE_BUTTON_MIDDLE] and not event.pressed and not camera_pointer.suppress_emulated_camera_event(event)):
-			panning = false
-		if camera_event.sample and panning:
-			camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
-			camera_drag_origin = camera_pointer.position
 	if touch_up:
 		get_viewport().set_input_as_handled()
 		return
@@ -2514,6 +2502,7 @@ func _notification(what: int) -> void:
 		return
 	if what in [NOTIFICATION_WM_MOUSE_EXIT, NOTIFICATION_WM_WINDOW_FOCUS_OUT]:
 		if what==NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+			camera_pointer.take_pan_edges()
 			journal_pointer.reset()
 			for body in journal_bodies.values():
 				if body.source_pointer_managed and not body.pending_drag: body.motion.end_drag()
@@ -2910,16 +2899,33 @@ func _focus_camera(target: Vector2, duration: float = 0.5) -> void:
 
 func _focus_camera_position(source_position: Vector3, duration: float = 0.5) -> void:
 	panning = false
+	camera_drag_origin = camera_pointer.position
 	camera_motion.move_to(camera.position, Vector3(source_position.x,source_position.y,-source_position.z), -camera.global_basis.z, duration)
+
+# Source EventSystem can report both GUI and physics hits. Only use the
+# admitted Godot HUD and card pickers here; this is not a PhysX/cache replay.
+func _camera_left_blocked() -> bool:
+	var screen: Vector2 = get_viewport().get_final_transform().affine_inverse() * camera_pointer.position
+	return _hud_blocks_panel_click(hud,screen) or int(_pick_target(screen).card_id)>=0
 
 func _update_camera_motion(delta: float) -> void:
 	_clamp_camera()
 	var enabled: bool = _camera_input_enabled()
-	# Source early-return under input locks preserves dragOrigin/isDragging.
-	# On unlock, sample the accumulated pointer delta even without a new motion.
-	if enabled and panning and camera_pointer.known:
-		camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
-		camera_drag_origin = camera_pointer.position
+	var edges: Dictionary = camera_pointer.take_pan_edges()
+	# InputManager skips HandlePan in a locked update: discard that update's
+	# edge bits but retain drag/origin and the shared pointer's last position.
+	if enabled:
+		# Start (left gated, middle unconditional), then either release.
+		if (edges.left_pressed and not _camera_left_blocked()) or edges.middle_pressed:
+			panning = true
+			camera_drag_origin = camera_pointer.position
+		if edges.released: panning = false
+		# All motion this frame resolves to one final physical sample and
+		# one clamp. A start+motion frame has zero displacement; a release
+		# frame cannot move even when motion arrived before the release.
+		if panning and camera_pointer.known:
+			camera_motion.pan(camera_pointer.position - camera_drag_origin,camera.position.y)
+			camera_drag_origin = camera_pointer.position
 	# CameraController.Update: final pan sample, one signed vertical sum,
 	# then unscaled SmoothDamp. Reject an oversize step rather than applying
 	# valid intermediate wheel events against a moving/clamped target.
@@ -3800,6 +3806,7 @@ func _request_scene_change(action: Callable) -> bool:
 	if quit_dispatched or (is_instance_valid(source_title_quit) and source_title_quit.visible) or not scene_transition.begin(action): return false
 	_source_inbound_close_receipt = {}
 	panning = false
+	camera_pointer.take_pan_edges()
 	pending_quit = ""
 	_clear_card_hover()
 	if is_instance_valid(craft_progress): craft_progress.reset()
