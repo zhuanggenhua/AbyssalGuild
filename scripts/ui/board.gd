@@ -1735,6 +1735,8 @@ func _unhandled_input(event: InputEvent) -> void:
 					_finish_drag(event.position)
 
 # Releases over a panel still terminate a drag. GUI should never leave cards attached.
+enum OutboundCamera { NONE, PORTAL, PAUSE_TITLE }
+var _outbound_camera_kind := OutboundCamera.NONE
 var _outbound_mouse_hold: Dictionary = {}
 var _outbound_camera_owner: int = 0
 var _outbound_camera_generation: int = -1
@@ -1742,20 +1744,25 @@ var _camera_scroll_sample: float = 0.0
 var _camera_scroll_owner: int = 0
 var _camera_scroll_generation: int = -1
 var _camera_scroll_during_fade: bool = false
-# An ordinary portal externally pauses the clock, not InputManager. Only the
-# verified departing owner/phase uses this branch; the full-screen fade still
-# consumes new UI/world presses and blocks CameraController's fresh left clause.
-func _source_ordinary_outbound_current() -> bool:
-	return _outbound_camera_owner == session.get_instance_id() \
+# Both authored calls use TravelSequence, which pauses time but does not lock
+# InputManager. Keep each cause separate: only a verified portal can carry a card.
+func _source_outbound_world_current() -> bool:
+	return _outbound_camera_kind != OutboundCamera.NONE and _outbound_camera_owner == session.get_instance_id() \
 		and _outbound_camera_generation == scene_transition.generation \
-		and running and session.travel_pending and scene_transition.phase == "out" \
-		and session.phase == "playing" and session.scene_name in ["Main", "Island"] \
+		and running and scene_transition.phase == "out" and session.phase == "playing" \
+		and session.scene_name in ["Main", "Island"] \
 		and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT \
-		and not pause_overlay.visible and not options_panel.visible and not _navigation_modal_active()
+		and not options_panel.visible and not _navigation_modal_active()
+
+func _source_ordinary_outbound_current() -> bool:
+	return _source_outbound_world_current() and _outbound_camera_kind == OutboundCamera.PORTAL \
+		and session.travel_pending and not pause_overlay.visible
 
 func _source_outbound_camera_allowed() -> bool:
-	return _source_ordinary_outbound_current() and not vendor_unlock.is_active() \
-		and camera_motion.focus.is_empty() and not _has_card_drag()
+	if vendor_unlock.is_active() or not camera_motion.focus.is_empty() or _has_card_drag(): return false
+	if _outbound_camera_kind == OutboundCamera.PAUSE_TITLE:
+		return _source_outbound_world_current() and _source_pause_title_open() and not session.travel_pending
+	return _source_ordinary_outbound_current()
 
 func _ordinary_portal_mouse_id() -> int:
 	var id: int = _mouse_drag.id
@@ -1790,6 +1797,7 @@ func _observe_outbound_mouse_card(event: InputEvent) -> void:
 		_finish_card_drag(_mouse_drag,Vector2(rendered.x,-rendered.z))
 
 func _clear_outbound_camera() -> void:
+	_outbound_camera_kind = OutboundCamera.NONE
 	_outbound_mouse_hold = {}
 	_outbound_camera_owner = 0
 	_outbound_camera_generation = -1
@@ -2493,6 +2501,7 @@ func _confirm_game_over_return() -> void:
 	title_status.text = "Ended game archived locally at %s. No save files were permanently deleted." % str(result.archive)
 
 func _show_title() -> void:
+	_clear_outbound_camera()
 	_source_equipment_outside = null
 	_title_overlay_open_owner.clear()
 	_title_options_open_owner.clear()
@@ -3503,7 +3512,7 @@ func _build_pause_options(layer: CanvasLayer) -> void:
 	pause_controls = [
 		_button("Continue [Escape]", box, _continue_pause_menu, true),
 		_button("Options", box, _open_options, true),
-		_button("Save & return to title", box, _request_return_title, true),
+		_button("Save & return to title", box, _request_return_title.bind(true), true),
 	]
 	pause_overlay.hide()
 	options_panel = OptionsPanel.new()
@@ -3863,12 +3872,13 @@ func _sync_scene_fader() -> void:
 	scene_shade.visible = scene_transition.active()
 	scene_shade.mouse_filter = Control.MOUSE_FILTER_STOP if scene_transition.blocks_input() else Control.MOUSE_FILTER_IGNORE
 
-func _request_scene_change(action: Callable, source_portal_camera: bool = false) -> bool:
+func _request_scene_change(action: Callable, camera_kind: OutboundCamera = OutboundCamera.NONE) -> bool:
 	var previous_generation: int = scene_transition.generation
 	if quit_dispatched or (is_instance_valid(source_title_quit) and source_title_quit.visible) or not scene_transition.begin(action): return false
 	_source_inbound_close_receipt = {}
 	_clear_outbound_camera()
-	if source_portal_camera:
+	if camera_kind != OutboundCamera.NONE:
+		_outbound_camera_kind = camera_kind
 		_outbound_camera_owner = session.get_instance_id()
 		_outbound_camera_generation = scene_transition.generation
 		# InputSystem wheel delta belongs to the dynamic frame, not the
@@ -3894,7 +3904,7 @@ func _request_continue_game() -> void:
 	if data_error != OK or running or selected_slot <= 0: return
 	_request_scene_change(_commit_continue_game.bind(session, selected_slot))
 
-func _request_return_title() -> void:
+func _request_return_title(from_pause: bool = false) -> void:
 	if not running or scene_transition.active(): return
 	if session.phase == "game_over":
 		_return_title()
@@ -3903,7 +3913,12 @@ func _request_return_title() -> void:
 	if not result.ok:
 		notice.text = "Could not save; session kept open: " + str(result.get("error", "Unknown error"))
 		return
-	_request_scene_change(_commit_title.bind(session))
+	# Only the mounted source Pause receiver can admit the departing camera.
+	# Save and all general scene guards still run before any motion is allowed.
+	var camera_kind := OutboundCamera.NONE
+	if from_pause and _source_pause_title_open() and session.phase == "playing" and not session.travel_pending:
+		camera_kind = OutboundCamera.PAUSE_TITLE
+	_request_scene_change(_commit_title.bind(session), camera_kind)
 
 func _commit_new_game(owner, requested_duration: int, requested_friendly: bool) -> void:
 	if session != owner or running: return
@@ -3972,7 +3987,8 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 		and source_recipe.get("script_class") == "TravelRecipe" \
 		and source_recipe.get("fields", {}).get("targetScenes", []) == ["Main","Island"] \
 		and candidate.scene_name == ("Island" if session.scene_name == "Main" else "Main")
-	var accepted: bool = _request_scene_change(_commit_travel.bind(session, candidate, provenance), source_portal_camera)
+	var accepted: bool = _request_scene_change(_commit_travel.bind(session, candidate, provenance),
+		OutboundCamera.PORTAL if source_portal_camera else OutboundCamera.NONE)
 	if accepted and source_portal_camera and admitted_held >= 0:
 		_outbound_mouse_hold = {"id":admitted_held,"card":session.cards[admitted_held].get_instance_id()}
 	if accepted and not close_receipt.is_empty():
@@ -4020,7 +4036,30 @@ func _exit_tree() -> void:
 	scene_transition.cancel()
 	session.travel_pending = false
 
+var _source_pause_title_mount: Dictionary = {}
+
+func _source_pause_title_open() -> bool:
+	if _source_pause_title_mount.is_empty() or not running or not source_pause_configured or session.catalog != catalog \
+			or session.scene_name not in ["Main","Island"] or not is_same(catalog.data, _source_pause_title_mount.data) \
+			or catalog.data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT \
+			or not pause_overlay.is_visible_in_tree() or options_panel.visible or _navigation_modal_active() or quit_dispatched:
+		return false
+	var control: Button = pause_controls[2]
+	var host = _source_pause_title_mount.host
+	return is_instance_valid(host) and control.get_parent() == host and control.is_visible_in_tree()
+
+func _source_director_targets_title(data: Dictionary) -> bool:
+	for prefab in data.get("referenced_prefabs", []):
+		if prefab.get("name") != "GameDirector" or prefab.get("guid") != "9bcf5807ac0de3448a2c57afb62cc60f": continue
+		for doc in prefab.get("documents", []):
+			if str(doc.get("file_id")) != "689445094593624249" or doc.get("script_class") != "GameDirector": continue
+			var fields: Dictionary = doc.get("fields", {})
+			return fields.get("m_Enabled") == 1 and fields.get("titleScene") == "Title" \
+				and fields.get("m_Script", {}).get("guid") == "5ae4d12f9dca0574c94eaecba7f80c67"
+	return false
+
 func _configure_source_pause() -> void:
+	_source_pause_title_mount.clear()
 	_source_options_open_owner.clear()
 	_source_options_owner_cache.clear()
 	source_pause_configured = false
@@ -4038,7 +4077,9 @@ func _configure_source_pause() -> void:
 		var button: Button = pause_controls[i]
 		if candidate.mount_path(path,button):
 			button.text = str(candidate.layout.field(candidate.layout.resolve(path),"m_text",button.text))
-			_admit_source_pause_pointer(catalog.data, candidate, i)
+			var authored := _admit_source_pause_pointer(catalog.data, candidate, i)
+			if i == 2 and authored and _source_director_targets_title(catalog.data):
+				_source_pause_title_mount = {"data": catalog.data, "host": button.get_parent()}
 
 ## PauseMenu.Awake wires its three own TextButtons; no filtering by mouse
 ## button in the original PointerClick. Do not widen fallback/safety targets.
