@@ -62,3 +62,19 @@ consumption and destination remaps, and a new write only after ordinary
 Pause → Title. The fixture starts from an isolated game using the source
 definitions; it does not represent a natural full campaign or test an entire
 later campaign save.
+
+## Equipped traveler to an already visited board
+
+Unity's locked Grand Portal predicate and consumption use the card's base
+definition, so a transformed Villager can travel. The original removes the
+portal and wearer from the departure stacks before saving. The wearer's
+equipment (including the class item and original definition) is serialized
+through Traveler CardData, not as independent board stacks.
+
+The Godot departure checkpoint now admits this case only when the real staged
+destination has a distinct matching card for each traveler and equipped item
+and preserves slot, owner, class and card state. Only the actual ingredients
+lose a use. The departure file excludes the cohort; merely arriving does not
+rewrite it. This does not grant additional privileges for an OS close or a
+pointer captured during outgoing fade. Equipped travel to a first-time board
+and overlapping capture/combat settlement remain outside this normalization.

@@ -33,36 +33,65 @@ static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dicti
 		expected[guid] = true
 	var ids: Array = stack.card_ids.duplicate()
 	var remap: Dictionary = accepted.get("traveler_ids", {})
-	if remap.size() != ids.size(): return false
 	var returned := false
+	var with_equipment := false
 	for id in ids:
 		if not source.cards.has(id) or not remap.has(id): return false
 		var card = source.cards[id]
-		if card.stack_id != stack_id or not expected.has(card.definition_guid) or card.base_definition_guid != card.definition_guid or card.uses_left > 1: return false
-		if source.equipment.owners.has(id) or source.equipment.equipped.has(id): return false
+		if card.stack_id != stack_id or not expected.has(card.base_definition_guid) or card.uses_left > 1: return false
+		if source.equipment.owners.has(id): return false
+		var items: Dictionary = source.equipment.equipped.get(id, {})
+		if not items.is_empty():
+			if int(source.catalog.fields(card.definition_guid).get("category", -1)) != 2 or captured_hold >= 0: return false
+			with_equipment = true
+		if card.definition_guid != card.base_definition_guid and (items.is_empty() \
+				or source.equipment.originals.get(id, "") != card.base_definition_guid \
+				or source.equipment.class_items.get(id, -1) not in items.values()): return false
 		returned = returned or card.uses_left <= 0
-		expected.erase(card.definition_guid)
-	if not returned: return true
-	# A returned original pair may be used again. Require the live staged
-	# traveler map, not just a permissive numeric range or a quit receipt.
+		expected.erase(card.base_definition_guid)
+	if not returned and not with_equipment: return remap.size() == ids.size()
+	# Repeated journeys and equipped travelers rely on the actual staged map.
+	# Limit equipment admission to an already validated saved destination;
+	# no extra close/held-window permissions arise from the wider checkpoint.
 	if replay_candidate == null or replay_candidate == source or replay_candidate.catalog != source.catalog \
 			or replay_candidate.scene_name != accepted.scene or not source.campaign.saved_scenes.has(accepted.scene): return false
 	var seen := {}
+	var count := ids.size()
 	for id in ids:
-		var next_id: Variant = remap[id]
-		if not next_id is int or seen.has(next_id) or not replay_candidate.cards.has(next_id): return false
-		var prior = source.cards[id]
-		var next = replay_candidate.cards[next_id]
-		if next.definition_guid != prior.definition_guid or next.base_definition_guid != prior.base_definition_guid \
-				or next.uses_left != prior.uses_left-1: return false
-		seen[next_id] = true
+		if not _matches_transfer(source, replay_candidate, remap, seen, id, true): return false
+		var owner: int = remap[id]
+		var items: Dictionary = source.equipment.equipped.get(id, {})
+		var moved_items := {}
+		for slot in items:
+			var item: int = items[slot]
+			if source.equipment.owners.get(item, -1) != id \
+					or not _matches_transfer(source, replay_candidate, remap, seen, item, false) \
+					or replay_candidate.equipment.owners.get(remap[item], -1) != owner: return false
+			moved_items[slot] = remap[item]
+			count += 1
+		if replay_candidate.equipment.equipped.get(owner, {}) != moved_items: return false
+		var class_item: int = source.equipment.class_items.get(id, -1)
+		if replay_candidate.equipment.originals.get(owner, "") != source.equipment.originals.get(id, "") \
+				or replay_candidate.equipment.class_items.get(owner, -1) != remap.get(class_item, -1): return false
+	return remap.size() == count
+
+static func _matches_transfer(source, candidate, remap: Dictionary, seen: Dictionary, id: int, consumes_use: bool) -> bool:
+	var next_id: Variant = remap.get(id)
+	if not next_id is int or seen.has(next_id) or not source.cards.has(id) or not candidate.cards.has(next_id): return false
+	var prior = source.cards[id]
+	var next = candidate.cards[next_id]
+	if next.definition_guid != prior.definition_guid or next.base_definition_guid != prior.base_definition_guid \
+			or next.uses_left != prior.uses_left - int(consumes_use) or next.health != prior.health \
+			or next.nutrition != prior.nutrition or next.stored_coins != prior.stored_coins: return false
+	seen[next_id] = true
 	return true
 
 ## The separate close windows have only been validated for the fresh pair.
 static func all_fresh(source, stack_id: int) -> bool:
 	if not source.stacks.has(stack_id): return false
 	for id in source.stacks[stack_id].card_ids:
-		if not source.cards.has(id) or source.cards[id].uses_left != 1: return false
+		if not source.cards.has(id) or source.cards[id].uses_left != 1 \
+				or not source.equipment.equipped.get(id, {}).is_empty(): return false
 	return true
 
 static func capture(source, stack_id: int, recipe_guid: String, accepted: Dictionary, captured_hold: int = -1, replay_candidate = null) -> Dictionary:
@@ -70,7 +99,11 @@ static func capture(source, stack_id: int, recipe_guid: String, accepted: Dictio
 	var ids: Array = source.stacks[stack_id].card_ids.duplicate()
 	var snapshot: Dictionary = source.campaign.capture().duplicate(true)
 	var state: Dictionary = snapshot.scenes[snapshot.current_scene].session
-	state.cards = state.cards.filter(func(card): return card.id not in ids)
+	var migrating_ids := ids.duplicate()
+	for id in ids:
+		migrating_ids.append_array(source.equipment.equipped.get(id, {}).values())
+	state.cards = state.cards.filter(func(card): return card.id not in migrating_ids)
+	state.equipment.wearers = state.equipment.wearers.filter(func(row): return row.wearer not in ids)
 	state.stacks = state.stacks.filter(func(row): return row.id != stack_id)
 	state.crafting.activation_order = state.crafting.activation_order.filter(func(id): return id != stack_id)
 	return snapshot

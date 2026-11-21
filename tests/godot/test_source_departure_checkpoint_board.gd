@@ -1,5 +1,6 @@
 extends SceneTree
 const Board=preload("res://scripts/ui/board.gd")
+const Departure=preload("res://scripts/ui/source_departure_checkpoint.gd")
 class SilentFeedback extends "res://scripts/ui/audio_feedback.gd":
 	func play_event(_kind:String)->bool:return false
 	func play_music()->bool:return false
@@ -112,5 +113,44 @@ func run():
 			continue
 		b.catalog.data.provenance.source_commit=old_source
 		b.queue_free();await process_frame
+	await _equipped_revisit()
 	print("Source departure checkpoint: ",checks," failures ",failures)
 	quit(1 if failures else 0)
+
+func _equipped_revisit() -> void:
+	var b=make_board("user://normalized-gear-%d"%Time.get_ticks_usec())
+	await process_frame
+	b.start_new(); b.set_process(false)
+	b.vendor_unlock.cancel(); b.session.cycle.reset(); b.session.phase="playing"; b.session.paused=false
+	for id in b.session.cards.keys(): b.session._remove_card(id)
+	b.session.spawn_target_selector=Callable(); b.session.spawn_layout_resolver=Callable()
+	pair(b,"Grand Portal",5); b.session.crafting.advance(5); b._process(1); b._process(1)
+	check(b.session.scene_name=="Island","equipped test starts at real prior arrival")
+	for id in b.session.cards.keys(): b.session._remove_card(id)
+	var portal=pair(b,"Grand Portal",5)
+	var pid: int=portal.card_ids[0]
+	var traveler: int=portal.card_ids[1]
+	var sword: int=b.session.spawn_card(b.catalog.find_by_name("Sword"),Vector2(0,0),-1,{"refuse_attach":true})
+	check(b.session.equipment.equip(traveler,sword),"actual class item changes traveler definition")
+	var role: String=b.session.cards[traveler].definition_guid
+	var base: String=b.session.cards[traveler].base_definition_guid
+	check(role!=base and not Departure.all_fresh(b.session,portal.id),"equipped cohort not eligible for fresh close receipt")
+	var other: int=b.session.spawn_card(b.catalog.find_by_name("Wood"),Vector2(3,0),-1,{"refuse_attach":true})
+	b.session.crafting.advance(5)
+	var checkpoint=raw(b)
+	check(b.scene_transition.active() and checkpoint.current_scene=="Island","equipped return starts with Island departure save")
+	var remaining: Array=checkpoint.scenes.Island.session.cards.map(func(row): return int(row.id))
+	check(remaining==[other] and checkpoint.scenes.Island.session.equipment.wearers.is_empty(),"departure save excludes transformed traveler, portal and linked gear only")
+	check(b.session.cards.has(sword) and b.session.equipment.owners.get(sword)==traveler,"live departure equipment unchanged before fade")
+	var bytes:=FileAccess.get_file_as_string(b._active_slot_path())
+	b._process(1); b._process(1)
+	check(b.session.scene_name=="Main" and FileAccess.get_file_as_string(b._active_slot_path())==bytes,"equipped arrival does not auto-save")
+	var ids: Array=b.session.cards.keys().filter(func(id): return b.session.cards[id].definition_guid==role)
+	check(ids.size()==1,"unique transformed traveler at destination")
+	if ids.size()==1:
+		var owner: int=ids[0]
+		var item: int=b.session.equipment.class_items.get(owner,-1)
+		check(b.session.equipment.originals.get(owner)==base and b.session.equipment.owners.get(item)==owner and b.session.cards.has(item),"original class and equipment owner retained")
+		check(b.session.cards[owner].uses_left==0 and b.session.cards[item].uses_left==1,"deduct travel use but not equipment use")
+	b.queue_free()
+	await process_frame
