@@ -3986,13 +3986,14 @@ func _request_travel(stack_id: int, recipe_guid: String) -> bool:
 	if result.ok:
 		# Retain exact returned IDs before checkpoint replaces this dictionary.
 		provenance = SourceTravelLayout.seal(candidate, result, provenance)
-		var snapshot: Dictionary = preload("res://scripts/ui/source_departure_checkpoint.gd").capture(session, stack_id, recipe_guid, result, captured_hold)
+		var departure := preload("res://scripts/ui/source_departure_checkpoint.gd")
+		var snapshot: Dictionary = departure.capture(session, stack_id, recipe_guid, result, captured_hold, candidate)
 		# A captured non-traveler shares the verified departing save, but
 		# must not grant the separate inbound close/tail authorization.
 		provenance["source_arrival_no_save"] = not snapshot.is_empty()
 		if not snapshot.is_empty():
-			if captured_hold < 0: close_accepted = result.duplicate(true)
-			else: admitted_held = captured_hold
+			if captured_hold >= 0: admitted_held = captured_hold
+			elif departure.all_fresh(session, stack_id): close_accepted = result.duplicate(true)
 		if snapshot.is_empty():
 			result = _departure_checkpoint()
 		else:

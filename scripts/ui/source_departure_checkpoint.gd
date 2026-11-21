@@ -1,9 +1,9 @@
 extends RefCounted
-## First accepted travel checkpoint only. Never changes the live owner or arrival.
+## Authored departure checkpoint before fade. Never changes the live owner or arrival.
 const Codec = preload("res://scripts/model/save_codec.gd")
 const Travel = preload("res://scripts/ui/source_travel_layout.gd")
 const Admission = preload("res://scripts/ui/source_restore_admission.gd")
-static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dictionary, captured_hold: int = -1) -> bool:
+static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dictionary, captured_hold: int = -1, replay_candidate = null) -> bool:
 	if not accepted.get("ok", false) or source.catalog.data.get("provenance", {}).get("source_commit", "") != Admission.SOURCE_COMMIT: return false
 	var recipe: Dictionary = source.catalog.get_definition(recipe_guid)
 	if recipe_guid != Travel.RECIPE_GUID or recipe.get("source_sha256", "") != Travel.RECIPE_SHA or recipe.get("script_class") != "TravelRecipe": return false
@@ -34,16 +34,39 @@ static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dicti
 	var ids: Array = stack.card_ids.duplicate()
 	var remap: Dictionary = accepted.get("traveler_ids", {})
 	if remap.size() != ids.size(): return false
+	var returned := false
 	for id in ids:
 		if not source.cards.has(id) or not remap.has(id): return false
 		var card = source.cards[id]
-		if card.stack_id != stack_id or not expected.has(card.definition_guid) or card.base_definition_guid != card.definition_guid or card.uses_left != 1: return false
+		if card.stack_id != stack_id or not expected.has(card.definition_guid) or card.base_definition_guid != card.definition_guid or card.uses_left > 1: return false
 		if source.equipment.owners.has(id) or source.equipment.equipped.has(id): return false
+		returned = returned or card.uses_left <= 0
 		expected.erase(card.definition_guid)
+	if not returned: return true
+	# A returned original pair may be used again. Require the live staged
+	# traveler map, not just a permissive numeric range or a quit receipt.
+	if replay_candidate == null or replay_candidate == source or replay_candidate.catalog != source.catalog \
+			or replay_candidate.scene_name != accepted.scene or not source.campaign.saved_scenes.has(accepted.scene): return false
+	var seen := {}
+	for id in ids:
+		var next_id: Variant = remap[id]
+		if not next_id is int or seen.has(next_id) or not replay_candidate.cards.has(next_id): return false
+		var prior = source.cards[id]
+		var next = replay_candidate.cards[next_id]
+		if next.definition_guid != prior.definition_guid or next.base_definition_guid != prior.base_definition_guid \
+				or next.uses_left != prior.uses_left-1: return false
+		seen[next_id] = true
 	return true
 
-static func capture(source, stack_id: int, recipe_guid: String, accepted: Dictionary, captured_hold: int = -1) -> Dictionary:
-	if not admitted(source, stack_id, recipe_guid, accepted, captured_hold): return {}
+## The separate close windows have only been validated for the fresh pair.
+static func all_fresh(source, stack_id: int) -> bool:
+	if not source.stacks.has(stack_id): return false
+	for id in source.stacks[stack_id].card_ids:
+		if not source.cards.has(id) or source.cards[id].uses_left != 1: return false
+	return true
+
+static func capture(source, stack_id: int, recipe_guid: String, accepted: Dictionary, captured_hold: int = -1, replay_candidate = null) -> Dictionary:
+	if not admitted(source, stack_id, recipe_guid, accepted, captured_hold, replay_candidate): return {}
 	var ids: Array = source.stacks[stack_id].card_ids.duplicate()
 	var snapshot: Dictionary = source.campaign.capture().duplicate(true)
 	var state: Dictionary = snapshot.scenes[snapshot.current_scene].session

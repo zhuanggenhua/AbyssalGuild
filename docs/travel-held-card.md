@@ -43,3 +43,22 @@ releases one authored result, leaving the already saved departure and staged
 destination/RNG untouched. This verifies native Godot factory/receiver state,
 not identical Unity/Godot PRNG sequences or new-card airborne artwork and
 physical input parity.
+
+## Reused authored portal and departure save
+Returning from a valid earlier trip does not refill either traveler.
+Original CardInstance.Use decrements the authored single use on every trip;
+the director carries the consumed values forward (1 → 0 → -1 and onward).
+For the exact Grand Portal pair with ordinary undisguised, unequipped
+travelers and a previously visited destination, the same departure-only
+checkpoint applies. A real staging map must identify both new cards uniquely,
+preserve their base/current definitions and show precisely one use decremented
+per traveler. This also admits a fresh Villager traveling with a reused portal.
+The separately tested native close windows still require the fresh pair.
+
+The native scenario actually drags the traveler onto the portal on each of
+three legs. It verifies the excluded travelers and retained bystanders at
+the departure write, identical file bytes after settled arrival, exact
+consumption and destination remaps, and a new write only after ordinary
+Pause → Title. The fixture starts from an isolated game using the source
+definitions; it does not represent a natural full campaign or test an entire
+later campaign save.

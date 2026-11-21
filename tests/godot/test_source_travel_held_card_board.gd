@@ -1,6 +1,7 @@
 extends SceneTree
 ## Actual viewport/collider route with injected mouse records, not hardware.
 const Board = preload("res://scripts/ui/board.gd")
+const Departure = preload("res://scripts/ui/source_departure_checkpoint.gd")
 const DragInput = preload("res://scripts/ui/card_drag_input.gd")
 const Codec = preload("res://scripts/model/save_codec.gd")
 class QuietAudio extends "res://scripts/ui/audio_feedback.gd":
@@ -445,6 +446,134 @@ func pack_exercise(scene_name: String, prior_draws: int) -> void:
 	b.queue_free()
 	await process_frame
 
+func rows_for(snapshot: Dictionary, scene_name: String) -> Dictionary:
+	var by_id := {}
+	for item: Dictionary in snapshot.scenes[scene_name].session.cards:
+		by_id[int(item.id)]=item
+	return by_id
+
+func picked_id(session, guid: String) -> int:
+	for card in session.cards.values():
+		if card.definition_guid==guid: return card.id
+	return -1
+
+func repeated_trip() -> void:
+	var b := Board.new()
+	b.feedback.free()
+	b.feedback=QuietAudio.new()
+	var base := "user://source-repeated-portal-%d"%Time.get_ticks_usec()
+	b.slot_root=base+"/slots"; b.options_path=base+"/options.json"; b.legacy_paths.clear()
+	root.add_child(b)
+	await process_frame
+	check(b.data_error==OK,"original repeated portal fixture has licensed data")
+	if b.data_error!=OK: b.queue_free(); return
+	b.start_new()
+	b.set_process(false)
+	clear_board(b)
+	var portal:=spawn(b,"Grand Portal",Vector2(2,-.9))
+	var villager:=spawn(b,"Villager",Vector2(-1,-.9))
+	var portal_guid: String=b.session.cards[portal].definition_guid
+	var villager_guid: String=b.session.cards[villager].definition_guid
+	var bystander:=spawn(b,"Wood",Vector2(-2,1.8))
+	var spare:=spawn(b,"Villager",Vector2(.4,1.8))
+	var previous_villager := -1
+	for trip in range(3):
+		var old=b.session
+		var origin: String=old.scene_name
+		var mixed := trip==2
+		if mixed:
+			previous_villager=villager
+			villager=spare # Main's already persisted, unused, original Villager.
+		var villager_uses := 1 if mixed else 1-trip
+		b.camera.position=Vector3(0,12,1)
+		b.camera_motion.configure(b.camera.position)
+		b._clamp_camera()
+		b._refresh()
+		await physics_frame
+		await process_frame
+		var from:=reachable(b,villager)
+		var to:=reachable(b,portal)
+		check(from.is_finite() and to.is_finite(),"actual returned traveler and portal colliders on leg %d"%(trip+1))
+		if not from.is_finite() or not to.is_finite(): b.queue_free(); return
+		check(old.cards[portal].uses_left==1-trip and old.cards[villager].uses_left==villager_uses,
+			"repeated fixture reuses actual returned travelers, no reset")
+		pointer(from)
+		pointer(from,true)
+		pointer(to)
+		b._process(.035)
+		pointer(to,false)
+		var stack_id: int=old.cards[portal].stack_id
+		check(old.stacks[stack_id].card_ids==[portal,villager] and not old.stacks[stack_id].recipe_guid.is_empty(),
+			"native drag restacks the exact returned pair and begins authored recipe")
+		if old.stacks[stack_id].recipe_guid.is_empty(): b.queue_free(); return
+		var rng_state := str(old.rng.state)
+		check(old.crafting.advance(5) and old.travel_pending and b.scene_transition.phase=="out",
+			"same authored route completes and begins fade")
+		if b.scene_transition.phase!="out": b.queue_free(); return
+		var arguments: Array=b.scene_transition._commit.get_bound_arguments()
+		var candidate=arguments[1]
+		var after_ids:=[picked_id(candidate,portal_guid),-1]
+		for card in candidate.cards.values():
+			if card.definition_guid==villager_guid and card.uses_left==villager_uses-1: after_ids[1]=card.id
+		check(after_ids[0]>=0 and after_ids[1]>=0 and candidate.cards[after_ids[0]].uses_left==-trip
+			and candidate.cards[after_ids[1]].uses_left==villager_uses-1,
+			"both staged traveler uses decrement exactly once")
+		if after_ids[0]<0 or after_ids[1]<0: b.queue_free(); return
+		var file: String=b._active_slot_path()
+		var sha:=FileAccess.get_sha256(file)
+		var raw: Variant=JSON.parse_string(FileAccess.get_file_as_string(file))
+		var indexes:=rows_for(raw,origin)
+		check(raw.current_scene==origin and not indexes.has(portal) and not indexes.has(villager)
+			and raw.scenes[origin].session.rng_state==rng_state and (origin!="Main" or indexes.has(bystander)),
+			"old slot captures after consumption, retains bystanders and old RNG")
+		if mixed: check(indexes.has(previous_villager),"an unused villager can transfer with a reused portal without moving the previous traveler")
+		if trip>0:
+			check(b._source_close_receipt.is_empty(),"repeat save does not grant fresh-only incoming close")
+			var mapped: Dictionary=arguments[2].get("remap",{})
+			check(mapped.get(portal)==after_ids[0] and mapped.get(villager)==after_ids[1],
+				"the real staging remap proves exact card identity, not nearest matching definition")
+			var proof := {"ok":true,"scene":candidate.scene_name,"traveler_ids":mapped.duplicate()}
+			check(Departure.admitted(old,stack_id,old.stacks[stack_id].recipe_guid,proof,-1,candidate)
+				and not Departure.admitted(old,stack_id,old.stacks[stack_id].recipe_guid,proof),
+				"returned ingredients require the actual staged candidate")
+			proof.traveler_ids[villager]=after_ids[0]
+			check(not Departure.admitted(old,stack_id,old.stacks[stack_id].recipe_guid,proof,-1,candidate),
+				"duplicate or mismatched traveler remap rejects wider checkpoint")
+		b._process(1)
+		check(b.session==candidate and b.scene_transition.phase=="in" and FileAccess.get_sha256(file)==sha,
+			"arrival swaps to staged scene without a second checkpoint")
+		if trip>0: check(b._source_inbound_close_receipt.is_empty(),"arrival does not widen fresh-only close")
+		b._process(1)
+		await process_frame
+		check(not b.scene_transition.active() and FileAccess.get_sha256(file)==sha
+			and b.session.cards.has(after_ids[0]) and b.session.cards.has(after_ids[1]),
+			"settled arrival retains exact IDs and departure bytes")
+		b.session.spawn_target_selector=Callable()
+		b.session.spawn_layout_resolver=Callable()
+		portal=after_ids[0]; villager=after_ids[1]
+	# After the saved departure-only behavior has been checked, an explicit
+	# Save & Title can save the live destination by the actual pause button.
+	var e:=InputEventKey.new()
+	e.keycode=KEY_ESCAPE; e.physical_keycode=KEY_ESCAPE; e.pressed=true
+	root.push_input(e,true)
+	e=e.duplicate(); e.pressed=false
+	root.push_input(e,true)
+	await process_frame
+	var title: Control=b.pause_controls[2]
+	var at: Vector2=title.get_global_transform_with_canvas()*(title.size*.5)
+	pointer(at)
+	pointer(at,true)
+	pointer(at,false)
+	check(b.scene_transition.phase=="out","Pause Title saves and begins fade")
+	b._process(1)
+	b._process(1)
+	check(not b.running and not b.scene_transition.active(),"ordinary Pause Title returns from live Island")
+	var disk: Variant=JSON.parse_string(FileAccess.get_file_as_string(b.slots.slot_path(1)))
+	check(disk is Dictionary and disk.current_scene=="Island" and rows_for(disk,"Island").has(portal)
+		and rows_for(disk,"Island").has(villager),"explicit Save records exactly the arrived traveler IDs")
+	b.queue_free()
+	await process_frame
+
 func run() -> void:
 	root.size=Vector2i(1240,820)
 	await exercise("Main",true)
@@ -457,5 +586,6 @@ func run() -> void:
 	await pack_exercise("Main",3)
 	await pack_exercise("Island",0)
 	await pack_exercise("Island",4)
-	print("Source fade held cards, Wooden Chest and regional packs: %d checks, %d failures"%[checks,failures])
+	await repeated_trip()
+	print("Source fade captures and repeated portal durability: %d checks, %d failures"%[checks,failures])
 	quit(int(failures>0))
