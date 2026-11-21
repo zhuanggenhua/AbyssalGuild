@@ -34,6 +34,7 @@ static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dicti
 	var ids: Array = stack.card_ids.duplicate()
 	var remap: Dictionary = accepted.get("traveler_ids", {})
 	var returned := false
+	var fresh_inputs := true
 	var with_equipment := false
 	for id in ids:
 		if not source.cards.has(id) or not remap.has(id): return false
@@ -48,13 +49,16 @@ static func admitted(source, stack_id: int, recipe_guid: String, accepted: Dicti
 				or source.equipment.originals.get(id, "") != card.base_definition_guid \
 				or source.equipment.class_items.get(id, -1) not in items.values()): return false
 		returned = returned or card.uses_left <= 0
+		fresh_inputs = fresh_inputs and card.uses_left == 1
 		expected.erase(card.base_definition_guid)
 	if not returned and not with_equipment: return remap.size() == ids.size()
 	# Repeated journeys and equipped travelers rely on the actual staged map.
-	# Limit equipment admission to an already validated saved destination;
-	# no extra close/held-window permissions arise from the wider checkpoint.
+	# The authored forward portal also consumes a fresh equipped pair on a
+	# first visit. This never grants the separate close or held-window receipts.
 	if replay_candidate == null or replay_candidate == source or replay_candidate.catalog != source.catalog \
-			or replay_candidate.scene_name != accepted.scene or not source.campaign.saved_scenes.has(accepted.scene): return false
+			or replay_candidate.scene_name != accepted.scene: return false
+	if not source.campaign.saved_scenes.has(accepted.scene) and not (with_equipment and fresh_inputs \
+			and source.scene_name == "Main" and accepted.scene == "Island"): return false
 	var seen := {}
 	var count := ids.size()
 	for id in ids:

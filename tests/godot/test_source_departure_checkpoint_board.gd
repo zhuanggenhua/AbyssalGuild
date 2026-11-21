@@ -1,5 +1,6 @@
 extends SceneTree
 const Board=preload("res://scripts/ui/board.gd")
+const Session=preload("res://scripts/model/game_session.gd")
 const Departure=preload("res://scripts/ui/source_departure_checkpoint.gd")
 class SilentFeedback extends "res://scripts/ui/audio_feedback.gd":
 	func play_event(_kind:String)->bool:return false
@@ -113,9 +114,106 @@ func run():
 			continue
 		b.catalog.data.provenance.source_commit=old_source
 		b.queue_free();await process_frame
+	await _equipped_first_visit()
 	await _equipped_revisit()
 	print("Source departure checkpoint: ",checks," failures ",failures)
 	quit(1 if failures else 0)
+
+func _equipped_first_visit() -> void:
+	var b=make_board("user://first-trip-gear-%d"%Time.get_ticks_usec())
+	await process_frame
+	b.start_new(); b.set_process(false)
+	b.vendor_unlock.cancel(); b.session.cycle.reset(); b.session.phase="playing"; b.session.paused=false
+	for id in b.session.cards.keys(): b.session._remove_card(id)
+	b.session.spawn_target_selector=Callable(); b.session.spawn_layout_resolver=Callable()
+	var portal=pair(b,"Grand Portal",5)
+	var pid: int=portal.card_ids[0]
+	var traveler: int=portal.card_ids[1]
+	var club: int=b.session.spawn_card("c7c554e773779c44b935ac769f24c3aa",Vector2(0,0),-1,{"refuse_attach":true})
+	if not b.session.equipment.equip(traveler,club):
+		check(false,"first trip uses actual class gear")
+		b.queue_free()
+		await process_frame
+		return
+	check(true,"first trip uses actual class gear")
+	b.session.cards[traveler].health=17
+	var wood=pair(b,"Wood",-5)
+	b.session.crafting.advance(2)
+	var source=b.session
+	check(not source.campaign.saved_scenes.has("Island") and not Departure.all_fresh(source,portal.id),
+		"first equipped trip does not qualify for fresh close receipt")
+	var recipe: String=portal.recipe_guid
+	var before: float=portal.progress
+	portal.progress=float(source.catalog.fields(recipe).craftingDuration)
+	var candidate := Session.new()
+	candidate.configure(source.catalog)
+	check(candidate.campaign.restore(source.campaign.capture()).ok,"first trip disposable replay staged from authentic board")
+	var accepted: Dictionary=candidate.campaign.travel(portal.id,recipe)
+	if not accepted.ok or not accepted.traveler_ids.has(traveler) or not accepted.traveler_ids.has(club):
+		check(false,"first trip returns an authentic typed traveler/gear remap")
+		b.queue_free()
+		await process_frame
+		return
+	check(Departure.admitted(source,portal.id,recipe,accepted,-1,candidate),"strict admit actual first equipped remap")
+	check(not Departure.admitted(source,portal.id,recipe,accepted,wood.card_ids[0],candidate),
+		"equipped first checkpoint cannot acquire the separate held-card receipt")
+	check(not Departure.admitted(source,portal.id,recipe,accepted,-1,source)
+		and not Departure.admitted(source,portal.id,recipe,accepted,-1,null),
+		"first equipped departure requires separate correct destination")
+	var moved: int=accepted.traveler_ids[traveler]
+	var moved_club: int=accepted.traveler_ids[club]
+	var damaged: Dictionary=accepted.duplicate(true)
+	damaged.traveler_ids[club]=moved
+	check(not Departure.admitted(source,portal.id,recipe,damaged,-1,candidate),"duplicate typed remap rejected")
+	candidate.cards[moved].health=16
+	check(not Departure.admitted(source,portal.id,recipe,accepted,-1,candidate),"changed HP rejected")
+	candidate.cards[moved].health=17
+	candidate.equipment.owners.erase(moved_club)
+	check(not Departure.admitted(source,portal.id,recipe,accepted,-1,candidate),"changed gear owner rejected")
+	candidate.equipment.owners[moved_club]=moved
+	candidate.equipment.class_items.erase(moved)
+	check(not Departure.admitted(source,portal.id,recipe,accepted,-1,candidate),"changed class item rejected")
+	candidate.equipment.class_items[moved]=moved_club
+	# A truly reused first pair still follows the pre-existing fallback, even
+	# if presented with a matching staged use count.
+	source.cards[pid].uses_left=0
+	candidate.cards[accepted.traveler_ids[pid]].uses_left=-1
+	check(not Departure.admitted(source,portal.id,recipe,accepted,-1,candidate),"no broadened first visit for spent inputs")
+	source.cards[pid].uses_left=1
+	portal.progress=before
+	b.session.crafting.advance(5)
+	check(b.scene_transition.active() and b._source_close_receipt.is_empty() and b._outbound_mouse_hold.is_empty(),
+		"equipped first travel starts without close or held receipts")
+	var slot: String=b._active_slot_path()
+	var primary := FileAccess.get_sha256(slot)
+	var backup := FileAccess.get_sha256(slot+".bak")
+	var departure=raw(b)
+	var state: Dictionary=departure.scenes.Main.session
+	check(departure.current_scene=="Main" and not departure.scenes.has("Island")
+		and not primary.is_empty() and not backup.is_empty(),"first equipped departure writes valid Main primary/backup")
+	check(state.cards.map(func(row): return int(row.id))==Array(wood.card_ids)
+		and state.equipment.wearers.is_empty() and int(portal.id) not in state.crafting.activation_order
+		and state.stacks.size()==1 and state.stacks[0].progress==wood.progress,
+		"saved checkpoint excludes consumed pair and embedded gear, preserves adjacent active craft")
+	check(source.cards.has(pid) and source.equipment.owners.get(club)==traveler,
+		"pre-fade live origin is not mutated by disk checkpoint")
+	b._process(1);b._process(1)
+	check(b.session.scene_name=="Island" and FileAccess.get_sha256(slot)==primary and FileAccess.get_sha256(slot+".bak")==backup,
+		"while live Island on first equipped visit, neither primary nor backup writes")
+	var warriors: Array=b.session.cards.keys().filter(func(id): return b.session.cards[id].definition_guid==b.catalog.find_by_name("Warrior"))
+	check(warriors.size()==1,"one transformed class restored on Island")
+	if warriors.size()==1:
+		var owner: int=warriors[0]
+		var item: int=b.session.equipment.class_items.get(owner,-1)
+		check(b.session.cards[owner].health==17 and b.session.cards[owner].uses_left==0
+			and b.session.equipment.originals.get(owner)==b.catalog.find_by_name("Villager")
+			and b.session.equipment.owners.get(item)==owner and b.session.cards[item].uses_left==1,
+			"actual first destination retains HP, original class, equipped owner and use counts")
+	b._save_game()
+	check(raw(b).current_scene=="Island" and FileAccess.get_sha256(slot+".bak")==primary,
+		"normal explicit save is first Island disk write and preserves departure backup")
+	b.queue_free()
+	await process_frame
 
 func _equipped_revisit() -> void:
 	var b=make_board("user://normalized-gear-%d"%Time.get_ticks_usec())
