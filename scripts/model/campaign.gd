@@ -50,21 +50,16 @@ func _random_position(session) -> Vector2:
 		point = Vector3(session.rng.randf_range(-1, 1), session.rng.randf_range(-1, 1), session.rng.randf_range(-1, 1))
 	return Vector2(point.x, point.z)
 
-func _new_scene(scene_name: String, next_id: int, departure):
-	var session = _temporary(scene_name)
-	session._next_id = next_id
-	session.day_duration = _session.get_ref().day_duration
-	# Held checkpoint settlement can discover recipes without mutating live state.
-	# Use that staged departure before destination Discover quests activate.
-	session.discovered_recipes = departure.discovered_recipes.duplicate()
-	session.collection.apply_state(departure.collection.stage_state(departure.collection.save_state()))
+func _initialize_unvisited_scene(session, scene_name: String) -> void:
+	# Unity restores travelers before SceneDataReady. Its quest root activation
+	# and default spawn are separate callbacks; keep our existing root-before-
+	# default order here without treating it as a Unity subscriber-order claim.
 	session.quest_tracker.start_new_game(session)
 	var defaults := _defaults(scene_name)
 	var center: Dictionary = defaults.get("defaultSpawnPosition", {})
 	for reference in defaults.get("defaultSpawnCards", []):
 		var position := Vector2(float(center.get("x", 0)), float(center.get("z", 0))) + _random_position(session) * float(defaults.get("defaultSpawnRadius", 1))
 		session.spawn_card(session.catalog.ref_guid(reference), position, -1, {"refuse_attach": session.catalog.get_definition(session.catalog.ref_guid(reference)).get("script_class", "") != "PackDefinition"})
-	return session
 
 ## Fully staged transaction: no live mutation or public event on rejection.
 func travel(stack_id: int, recipe_guid: String) -> Dictionary:
@@ -101,20 +96,20 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 		source._remove_card(id)
 	var baseline := Codec.capture(source)
 	var destination = _temporary(target)
-	if saved_scenes.has(target):
+	var visited := saved_scenes.has(target)
+	if visited:
 		loaded = Codec.restore(destination, saved_scenes[target])
 		if not loaded.ok:
 			return loaded
-		# Unity restores saved quest progress during OnSceneDataReady, after
-		# SpawnTravelers; QuestManager subscribes to gameplay only in Start.
-		# Keep all factory/cycle/AI events and RNG intact, but do not process
-		# arrival creation as gameplay for this private saved-scene tracker.
-		destination.event_occurred.disconnect(destination._track_quest_event)
 	else:
-		destination = _new_scene(target, source._next_id, source)
+		destination.day_duration = live.day_duration
+	# QuestManager subscribes to gameplay in Start, after SpawnTravelers and
+	# OnSceneDataReady. Keep staging factory, cycle and AI events intact; only
+	# suspend the quest listener. New roots still evaluate Have/Discover directly.
+	destination.event_occurred.disconnect(destination._track_quest_event)
 	destination._next_id = maxi(destination._next_id, source._next_id)
-	# Revisited scenes share the same committed knowledge as the frozen source,
-	# not the pre-settlement live globals. Both merges remain isolated until commit.
+	# Both paths take committed departure knowledge, including recipes learned
+	# by held checkpoint settlement. Merge before activating new roots.
 	destination.discovered_recipes.merge(source.discovered_recipes, true)
 	destination.collection.merge_state(source.collection.stage_state(source.collection.save_state()))
 	var remap := {}
@@ -139,8 +134,9 @@ func travel(stack_id: int, recipe_guid: String) -> Dictionary:
 		if record.class_item != -1:
 			destination.equipment.originals[wearer] = record.original
 			destination.equipment.class_items[wearer] = remap[record.class_item]
-	if saved_scenes.has(target):
-		destination.event_occurred.connect(destination._track_quest_event)
+	if not visited:
+		_initialize_unvisited_scene(destination, target)
+	destination.event_occurred.connect(destination._track_quest_event)
 	var snapshot := Codec.capture(destination)
 	var valid := Codec._stage(destination, snapshot)
 	if not valid.ok:

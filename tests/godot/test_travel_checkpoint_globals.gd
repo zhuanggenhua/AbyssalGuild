@@ -142,17 +142,21 @@ func test_first_visit() -> void:
 	if not result.ok: return
 	check(not session.drag.active(), "commit clears old scene hold")
 	assert_globals(session)
-	check(session.quest_tracker.definitions.size() == 4 and session.quest_tracker.completed_ids.keys() == ["island-discover", "island-obtain", "island-have"], "new destination sees staged discovery before default spawn and travelers")
-	check(session.quest_tracker.save_state().QuestProgress == 75, "destination uses its own unequal quest denominator")
+	check(session.quest_tracker.definitions.size() == 4 and session.quest_tracker.completed_ids.keys() == ["island-discover"], "new destination replays staged Discover, not initial Obtain")
+	check(session.quest_tracker.save_state().QuestProgress == 25, "destination uses its own quest denominator without counting startup defaults")
 	var main: Dictionary = session.campaign.saved_scenes.Main.session
 	check(main.quests.CompletedQuests == ["main-discover"] and main.quests.QuestProgress == 50, "inactive source uses source quest definitions and settlement effects")
 	check(main.discovered_recipes.has("tail-id") and main.collection.seen_items.has("tail-id"), "source baseline retains same staged global knowledge")
 	check(main.cards.size() == 4 and main.stacks.size() == 2, "source baseline keeps held split and excludes travelers")
 	check(session.cards[result.traveler_ids[ids.hero]].health == 7 and session.cards[result.traveler_ids[ids.hero]].nutrition == 3 and session.cards[result.traveler_ids[ids.hero]].uses_left == 0, "traveler stats and post-consume uses preserved")
 	var trace: Array = session.campaign.trace.filter(func(entry): return entry.begins_with("Island:"))
-	check(trace == ["Island:activate:island-discover", "Island:activate:island-obtain", "Island:complete:island-discover", "Island:activate:island-day", "Island:activate:island-have", "Island:complete:island-obtain", "Island:complete:island-have"], "staged quest activation and recursive completion keep their ordering")
-	check(events == ["activate:island-day", "changed", "scene_changed"], "commit restores only destination active quests before changed and scene_changed")
-	assert_roundtrip(session, "first visit")
+	check(trace == ["Island:activate:island-discover", "Island:activate:island-obtain", "Island:complete:island-discover", "Island:activate:island-day"], "Discover unlocks Obtain before first gameplay acquisition")
+	check(events == ["activate:island-obtain", "activate:island-day", "changed", "scene_changed"], "commit restores only destination active quests before changed and scene_changed")
+	assert_roundtrip(session, "first visit before first actual acquisition")
+	session.spawn_card("default")
+	check(session.quest_tracker.completed_ids.keys() == ["island-discover", "island-obtain", "island-have"],
+		"later real acquisition completes Obtain and activated Have sees existing traveler")
+	assert_roundtrip(session, "first visit after actual acquisition")
 	# Saving has no corrective effect: arrival is already globally consistent.
 	var path := "user://travel_checkpoint_globals.json"
 	check(session.campaign.save_file(path).ok, "committed campaign saves")

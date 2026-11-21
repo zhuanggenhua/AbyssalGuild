@@ -78,3 +78,19 @@ lose a use. The departure file excludes the cohort; merely arriving does not
 rewrite it. This does not grant additional privileges for an OS close or a
 pointer captured during outgoing fade. Equipped travel to a first-time board
 and overlapping capture/combat settlement remain outside this normalization.
+
+## Unvisited Island startup
+
+The locked Unity GameDirector restores incoming travelers (including their
+equipment) before calling SceneDataReady. Godot now does the same for a
+first visit rather than constructing the default Island pack first. The
+private staged quest tracker does not process startup creation as gameplay
+acquisition; activated Have quests may inspect the restored board and
+Discover quests can replay the committed departure's known recipes. Later
+live acquisition still advances Obtain. This does not assert a relative
+Unity order between the two independent initial quest/default callbacks or
+match Unity's random coordinates. Revisited destinations retain saved quests.
+
+This change does not broaden equipped first-visit save admission. That path
+still uses the migration's arrival-save fallback; the visited-destination
+departure checkpoint remains unchanged.

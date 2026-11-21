@@ -81,6 +81,24 @@ func run_case(place: String, saved: bool):
 		check(not s.quest_tracker.completed_ids.has(place + "1"), "nonmatching real acquisition not Obtain")
 		s.spawn_card("hero")
 		check(s.quest_tracker.completed_ids.has(place + "1"), "matching real acquisition still triggers Obtain")
+	else:
+		var creation: Array = s.campaign.events.filter(
+			func(e): return e[0] == place and e[1] == "card_created").map(func(e): return e[2].base_definition_guid)
+		check(creation == ["portal", "hero", "default"], place + " first arrival registers travelers before scene defaults")
+		check(arrival.session.quests.ActiveQuests == [
+			{"QuestId": place + "0", "CurrentAmount": 1},
+			{"QuestId": place + "1", "CurrentAmount": 0}], place + " first Have sees restored traveler but Obtain does not replay")
+		var roundtrip = make_session(c, place, 0)
+		check(roundtrip.campaign.restore(s.campaign.capture()).ok, "first arrival save reloads")
+		check(roundtrip.quest_tracker.save_state() == arrival.session.quests, "first arrival journal persists")
+		s.spawn_card("hero")
+		check(s.quest_tracker.completed_ids.has(place + "0"), "later matching creation completes Have")
+		check(not s.quest_tracker.completed_ids.has(place + "1")
+			and s.quest_tracker.active_quests.any(func(q): return q.id == place + "1" and q.current_amount == 1),
+			"later first real acquisition increments Obtain only once")
+		s.spawn_card("hero")
+		check(s.quest_tracker.completed_ids.has(place + "1"), "later second real acquisition completes Obtain")
+
 
 func _init(): call_deferred("run")
 func run():
