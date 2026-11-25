@@ -121,6 +121,8 @@ func run() -> void:
 	check(not board.session.cards.has(coin) and board.session.vendor_payments.get(str(vendor.pack_guid),0) == 1,"actual pointer release pays vendor installment rather than dropping below header")
 	check(board.feedback.events == ["CardDrop","Puff","CashRegister"], "real pointer settlement requests drop, zone puff and installment audio exactly once")
 	await ordinary_pointer_rank(board,vendor_point)
+	await final_slot_receiver(board)
+	await grounded_repeat(board)
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
 	print("Card drag board: %d/%d passed" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)
@@ -164,11 +166,38 @@ func ordinary_pointer_rank(board: WitnessBoard, vendor_point: Vector2) -> void:
 	for id in board.session.cards.keys(): board.session._remove_card(id)
 	var click_pack: int=board.session.spawn_card(board.OUTBOUND_STARTER_PACK,Vector2.ZERO,-1,{"refuse_attach":true})
 	var uses: int=board.session.cards[click_pack].uses_left
+	var draw_samples: Array = []
+	var puffs: Array[Vector3] = []
+	var pack_stack: int=board.session.cards[click_pack].stack_id
+	board.session.spawn_target_selector=func(spawned: int, _ignored: int) -> int:
+		draw_samples.append([board.session.cards[spawned].position,board.session.spawn_query_height,
+			board.session.cards[click_pack].uses_left,board.layout_locks.has(pack_stack)])
+		return -1
+	var capture_puff:=func(kind: String,payload: Dictionary):
+		if kind=="puff_requested" and payload.card_id==click_pack: puffs.append(payload.position)
+	board.session.event_occurred.connect(capture_puff)
 	board._refresh()
 	await physics_frame; await physics_frame
 	press(board,click_pack)
 	release(board)
 	check(board.session.cards[click_pack].uses_left==uses-1 and board.release_queries.is_empty(),"no-motion pack click still draws once")
+	check(draw_samples.size()==1 and draw_samples[0][0].is_equal_approx(Vector2.ZERO) and is_equal_approx(draw_samples[0][1],height+.1)
+		and draw_samples[0][2]==uses and draw_samples[0][3],"native pack uses actual lifted target plus authored draw offset before using the slot")
+	check(is_zero_approx(board.session.card_target_position_3d(click_pack).y) and puffs.is_empty(),"nonfinal native pack returns to grounded target without a destruction puff")
+	for id in board.session.cards.keys():
+		if id!=click_pack: board.session._remove_card(id)
+	board.session.cards[click_pack].uses_left=1
+	board._refresh()
+	await physics_frame; await physics_frame
+	press(board,click_pack)
+	var final_held: Vector2=board.session.card_target_position(click_pack)
+	release(board)
+	check(not board.session.cards.has(click_pack) and draw_samples.size()==2
+		and is_equal_approx(draw_samples[1][1],height+.1) and draw_samples[1][2]==1 and draw_samples[1][3],
+		"final slot still draws once from the held target before destroying the pack")
+	check(puffs.size()==1 and puffs[0].is_equal_approx(Vector3(final_held.x,height,final_held.y)),"final native pack puff uses the not-yet-grounded held pose")
+	board.session.event_occurred.disconnect(capture_puff)
+	board.session.spawn_target_selector=Callable()
 	for id in board.session.cards.keys(): board.session._remove_card(id)
 	var base:=Vector2(-1.5,-1.5)
 	var drag_id: int=board.session.spawn_card(wood,base-Vector2(1.5,0),-1,{"refuse_attach":true})
@@ -214,3 +243,93 @@ func ordinary_pointer_rank(board: WitnessBoard, vendor_point: Vector2) -> void:
 	motion(board,base-board.drag_anchor)
 	release(board)
 	check(board.session.cards[drag_id].stack_id==b_stack,"ordinary native release chooses the closest live member of an admitted stack")
+
+## Starter's authored fourth draw is always Wood. Only the normal Godot
+## pre-placement spawn selector is observed; no Unity collider result assumed.
+func final_slot_receiver(board: WitnessBoard) -> void:
+	var wood: String = board.catalog.find_by_name("Wood")
+	for sample in [[1.370,true,false],[1.387,false,false],[1.405,false,false],[1.387,false,true]]:
+		for id in board.session.cards.keys(): board.session._remove_card(id)
+		board.session.spawn_target_selector = Callable()
+		var wood_position := Vector2(sample[0],0)
+		var receiver: int = board.session.spawn_card(wood,wood_position,-1,{"refuse_attach":true})
+		var receiver_stack: int = board.session.cards[receiver].stack_id
+		var starter: int = board.session.spawn_card(board.OUTBOUND_STARTER_PACK,Vector2.ZERO,-1,{"refuse_attach":true})
+		board.session.cards[starter].uses_left = 1
+		board.layout_key = board._layout_signature()
+		board._refresh()
+		board._sync_views(1.0)
+		await physics_frame; await physics_frame
+		var samples: Array = []
+		board.session.spawn_target_selector = func(spawned: int, ignored: int) -> int:
+			var winner := board._select_spawn_target(spawned,ignored)
+			samples.append([spawned,board.session.cards[spawned].base_definition_guid,
+				board.session.cards[spawned].position,board.session.spawn_query_height,
+				board.session.card_target_position(receiver),winner])
+			return winner
+		if sample[2]:
+			var point: Vector2 = board.camera.unproject_position(board.views[starter].global_position)
+			touch(point,true)
+			check(board.session.drag.active_for(starter), "native touch captures real Starter")
+			touch(point,false)
+		else:
+			press(board,starter)
+			check(board.drag_grant==starter, "physical press captures real Starter at X="+str(sample[0]))
+			release(board)
+		check(samples.size()==1 and not board.session.cards.has(starter),
+			"only the final authored Starter slot draws once and destroys pack")
+		if samples.size()!=1: continue
+		var row: Array = samples[0]
+		var expected: int = receiver_stack if sample[1] else -1
+		check(row[1]==wood and row[2].is_equal_approx(Vector2.ZERO) and is_equal_approx(row[3],.2)
+			and row[4].is_equal_approx(wood_position),
+			"pre-resolution query is the authored Wood at held X/Z plus 0.2 Y at X="+str(sample[0]))
+		check(row[5]==expected and (board.session.cards[row[0]].stack_id==receiver_stack)==sample[1],
+			"real Godot spawn/merge boundary at X="+str(sample[0])+"; winner="+str(row[5]))
+	board.session.spawn_target_selector = Callable()
+
+func grounded_repeat(board: WitnessBoard) -> void:
+	var chest_guid: String = board.catalog.find_by_name("Card_Chest_WoodenChest")
+	for kind in [chest_guid,board.OUTBOUND_STARTER_PACK]:
+		var is_chest: bool = kind == chest_guid
+		for elapsed in [0.06,0.12]:
+			for id in board.session.cards.keys(): board.session._remove_card(id)
+			board.session.spawn_target_selector = Callable()
+			board.session.spawn_layout_resolver = board._resolve_layout
+			var item: int = board.session.spawn_card(kind,Vector2.ZERO,-1,{"refuse_attach":true})
+			var counter := "stored_coins" if is_chest else "uses_left"
+			if is_chest: board.session.cards[item].stored_coins = 3
+			var initial: int = board.session.cards[item].get(counter)
+			board.layout_key = board._layout_signature()
+			board._refresh()
+			board._sync_views(1.0)
+			await physics_frame; await physics_frame
+			var events: Array[String] = []
+			var observe:=func(name: String, payload: Dictionary):
+				if name=="card_created" or (name=="puff_requested" and payload.card_id==item): events.append(name)
+			board.session.event_occurred.connect(observe)
+			press(board,item)
+			release(board)
+			check(board.session.cards[item].get(counter)==initial-1
+				and board.session.card_target_position(item).is_equal_approx(Vector2.ZERO),
+				"first captured singleton click applies exactly once and restores unchanged XZ: "+counter)
+			var first_events:=events.duplicate()
+			board._sync_views(elapsed)
+			await physics_frame; await physics_frame
+			board.release_queries.clear()
+			press(board,item)
+			motion(board,Vector2(.013,0))
+			var down: Vector3=board._mouse_drag.start
+			release(board)
+			var early: bool = elapsed < .1
+			check(is_equal_approx(down.y,.016 if early else 0.0),
+				"repeat snapshots authored OutQuad height after %.0fms: %s, Y=%.5f"%[elapsed*1000,counter,down.y])
+			if early:
+				check(board.session.cards[item].get(counter)==initial-1 and events==first_events
+					and not board.release_queries.is_empty(),
+					".013 plus .016 is a drag, no second debit/draw or puff: "+counter)
+			else:
+				check(board.session.cards[item].get(counter)==initial-2 and events.size()==2*first_events.size(),
+					"settled repeat just .013 away clicks successfully: "+counter)
+			board.session.event_occurred.disconnect(observe)
+	board.session.spawn_layout_resolver = Callable()

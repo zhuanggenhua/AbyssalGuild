@@ -85,6 +85,7 @@ var card_motion = CardMotion.new()
 # Bounded source terminal departure presentation, retained at ground after tween.
 var _combat_slot_returns: Dictionary = {}
 var _terminal_landings: Dictionary = {}
+var _grounded_click_landings: Dictionary = {}
 var _terminal_landing_receipt: int = -1
 var combat_presentation = CombatPresentation.new()
 var equipment_display = EquipmentDisplay.new()
@@ -164,6 +165,7 @@ class BoardDrag extends RefCounted:
 	var start: Vector3 = Vector3.ZERO
 	var deferred_gear_pose: bool = false
 	var held_position_sampled: bool = false
+	var chest_grounded_at_press: bool = false
 var _mouse_drag := BoardDrag.new()
 var _touch_drags: Dictionary = {}
 var _touch_panel_presses: Dictionary = {}
@@ -917,6 +919,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	card_motion.reset()
 	_combat_slot_returns.clear()
 	_terminal_landings.clear()
+	_grounded_click_landings.clear()
 	_terminal_landing_receipt = -1
 	combat_presentation.reset()
 	camera.h_offset = 0
@@ -1149,6 +1152,7 @@ func _sync_views(real_delta: float = 0.0) -> void:
 		motion_records.append({"id":id,"identity":"%d:%s" % [card.get_instance_id(),card.definition_guid],"target":_combat_slot_returns[id].target,"current":views[id].position,"mode":"animated"})
 	var motion_poses: Dictionary = card_motion.sync(motion_records, real_delta, motion_settings)
 	for id in motion_poses: views[id].position = motion_poses[id]
+	_advance_grounded_click_landings(real_delta)
 	for id in _combat_slot_returns.keys():
 		if views[id].position == _combat_slot_returns[id].target: _combat_slot_returns.erase(id)
 	var durations := {0: 0.3, 1: 0.3, 2: session.combat.projectile_duration(2), 3: session.combat.projectile_duration(3)}
@@ -1532,8 +1536,11 @@ func _begin_card_drag(state: BoardDrag, id: int, pointer: Vector2) -> void:
 		state.deferred_gear_pose = true
 		_sync_views()
 		views[id].global_position = detached_pose
+	var click_landing_start: Variant = _grounded_click_press_position(id) if detached_pose == null else null
+	state.chest_grounded_at_press = detached_pose == null and not _grounded_click_landings.has(id) and _grounded_chest_press(id)
 	state.id = id if _can_drag_card(id) else -1
 	if state.id == id:
+		_grounded_click_landings.erase(id)
 		_terminal_landings.erase(id)
 		_combat_slot_returns.erase(id)
 	if state.id >= 0 and session.combat.membership.has(id):
@@ -1545,6 +1552,7 @@ func _begin_card_drag(state: BoardDrag, id: int, pointer: Vector2) -> void:
 			state.start = session.card_target_position_3d(id)
 			state.start.x = lifted.x
 			state.start.z = lifted.y
+			if click_landing_start is Vector3: state.start = click_landing_start
 			views[id].standard_drag_start = state.start
 		else:
 			state.start = views[id].standard_drag_start
@@ -2085,22 +2093,35 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 	# Unlike ChestLogic (rendered transform + width), PackInstance draws from
 	# the held stack target with its authored lift, then grounds the survivor.
 	var pack_target: Variant = null
-	if pack_click and outbound_pose is Vector2:
-		var height := float(CardDragInput.source_settings(catalog,session.scene_name).get("dragHeight",0.1))
-		pack_target = Vector3(held_target.x,height,held_target.y)
+	if pack_click:
+		if ordinary_attach_origin is Vector3:
+			pack_target = ordinary_attach_origin
+		elif outbound_pose is Vector2:
+			var height := float(CardDragInput.source_settings(catalog,session.scene_name).get("dragHeight",0.1))
+			pack_target = Vector3(held_target.x,height,held_target.y)
 	_set_board_card_position(id, held_target if pack_target is Vector3 else destination)
+	var click_landing: Dictionary = {}
 	if is_click:
 		if pack_click:
 			var pack_stack: int = session.cards[id].stack_id
+			click_landing = _grounded_click_landing_receipt(id,ordinary_attach_origin,held_target,"uses_left")
 			layout_locks[pack_stack] = true
 			session.open_pack(id, carried_press, pack_target)
 			layout_locks.erase(pack_stack)
 			click_handled = true
 		elif session.world._is_chest(id):
-			click_handled = _withdraw_chest(id, carried_press, Vector2(state.start.x, state.start.z) if carried_press else destination)
+			var chest_press := Vector2(state.start.x,state.start.z) if carried_press else destination
+			# Source restores the original 3D press pose, not an arbitrary ground target.
+			# Validate only the unchanged-XZ grounded subset.
+			if carried_press and state.chest_grounded_at_press and state.start.y == 0.0:
+				click_landing = _grounded_click_landing_receipt(id,ordinary_attach_origin,chest_press,"stored_coins")
+			click_handled = _withdraw_chest(id, carried_press, chest_press)
 	if click_handled:
 		# Native safety cleanup for source HandleClick's early-return pause leak.
 		session.drag.finish_standard_for(held_root)
+		if not click_landing.is_empty() and session.cards.has(id) and session.cards[id].get(click_landing.counter) == click_landing.before - 1:
+			_grounded_click_landings[id] = click_landing
+			if not _grounded_click_landing_current(id): _grounded_click_landings.erase(id)
 	else:
 		var trade: Dictionary = _try_trade_drop(id, destination, carried_press)
 		if trade.terminal:
@@ -2629,6 +2650,7 @@ func _show_title() -> void:
 	card_motion.reset()
 	_combat_slot_returns.clear()
 	_terminal_landings.clear()
+	_grounded_click_landings.clear()
 	_terminal_landing_receipt = -1
 	combat_presentation.reset()
 	camera.h_offset = 0
@@ -3013,6 +3035,71 @@ func _terminal_landing_current(id: int) -> bool:
 	if _card_drag_for(id) != null or session.combat.dragged.has(id) or session.combat.membership.has(id) or session.equipment.owners.has(id): return false
 	if int(session.cycle.presentation_state().get("card_id",-1)) == id or combat_presentation.sample_actor(id) != null: return false
 	return true
+
+# Do not infer source ground merely from the fallback target. Before any
+# stack split, require the ordinary motion/view and singleton target to agree.
+func _grounded_chest_press(id: int) -> bool:
+	if global_transform != Transform3D.IDENTITY or not session.world._is_chest(id): return false
+	var stack = session.stacks.get(session.cards[id].stack_id)
+	if stack == null or stack.card_ids != [id]: return false
+	var target: Vector3 = session.card_target_position_3d(id)
+	if target.y != 0.0: return false
+	var poses := _ordinary_receiver_live_positions(stack.id,[id],[target])
+	return poses.size() == 1 and poses[0].is_equal_approx(target)
+
+# PackInstance.OnClick flattens the held target after the draw. ChestLogic
+# instead restores the full original press pose after withdrawal. Only the
+# latter's unchanged-XZ grounded press shares the same vertical trajectory.
+func _grounded_click_landing_receipt(id: int, held: Variant, point: Vector2, counter: String) -> Dictionary:
+	if not held is Vector3 or Vector2(held.x,held.z) != point: return {}
+	var card = session.cards[id]
+	var stack = session.stacks.get(card.stack_id)
+	if stack == null or stack.card_ids != [id]: return {}
+	return {"card":card.get_instance_id(), "view":views[id].get_instance_id(), "stack":stack.get_instance_id(),
+		"point":point, "height":held.y, "counter":counter, "before":card.get(counter), "elapsed":0.0}
+
+# CardInstance.SetTargetAnimated DOMove starts at actual held Y, on real time.
+# Native card rendering has extra board clearance; never infer the source Y
+# from that blended display channel. The transaction admits a surviving
+# ordinary singleton only, and any ownership/target change ends the record.
+func _grounded_click_landing_current(id: int) -> bool:
+	if not _grounded_click_landings.has(id) or not running or not session.cards.has(id): return false
+	var owner: Dictionary = _grounded_click_landings[id]
+	var card = session.cards[id]
+	var stack = session.stacks.get(card.stack_id)
+	if stack == null or card.get_instance_id() != owner.card or stack.get_instance_id() != owner.stack: return false
+	if stack.card_ids != [id] or stack.position != owner.point or card.position != owner.point: return false
+	if session.drag.owns_stack(stack.id) or _card_drag_for(id) != null or session.combat.dragged.has(id) or layout_locks.has(stack.id): return false
+	if session.equipment.owners.has(id) or session.combat.membership.has(id) or int(session.cycle.presentation_state().get("card_id",-1)) == id: return false
+	if _terminal_landings.has(id) or _combat_slot_returns.has(id) or combat_presentation.sample_actor(id) != null: return false
+	if not views.has(id) or not is_instance_valid(views[id]) or views[id].is_queued_for_deletion(): return false
+	var view: Node3D = views[id]
+	return global_transform == Transform3D.IDENTITY and view.get_parent() == self and view.visible \
+		and view.get_instance_id() == owner.view and view.get_meta("definition_guid","") == card.definition_guid
+
+func _advance_grounded_click_landings(real_delta: float) -> void:
+	if _grounded_click_landings.is_empty(): return
+	var duration := float(CardDragInput.source_settings(catalog,session.scene_name).get("moveDuration",0.1))
+	for id in _grounded_click_landings.keys():
+		if not _grounded_click_landing_current(id):
+			_grounded_click_landings.erase(id)
+			continue
+		var owner: Dictionary = _grounded_click_landings[id]
+		owner.elapsed += maxf(real_delta,0) if is_finite(real_delta) else 0.0
+		if owner.elapsed >= duration: _grounded_click_landings.erase(id)
+
+func _grounded_click_press_position(id: int) -> Variant:
+	if not _grounded_click_landing_current(id): return null
+	var owner: Dictionary = _grounded_click_landings[id]
+	# Pointer offset still uses the native picker's projected point. Admit only
+	# if its XZ already agrees with the unchanged source landing destination.
+	var present: Vector3 = views[id].global_position
+	if not Vector2(present.x,-present.z).is_equal_approx(owner.point): return null
+	var settings := CardDragInput.source_settings(catalog,session.scene_name)
+	var duration := float(settings.get("moveDuration",0.1))
+	if duration <= 0: return null
+	var step := CardMotion.eased(clampf(owner.elapsed / duration,0,1),int(settings.get("moveEase",6)))
+	return Vector3(owner.point.x,lerpf(owner.height,0.0,step),owner.point.y)
 
 # Correct live XZ only where the ordinary source/display height mapping is known.
 # Ordinary roots add +0.06; drag/damped/combat owners do not share that contract.
