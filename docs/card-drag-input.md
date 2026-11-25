@@ -80,13 +80,22 @@ settling curve as the retained pack. The authored leading-card drag sets
 Y=0.1 instantaneously; the independent 0.1-second OutQuad movement leaves
 Y=0.016 at 60 ms. Do not subtract render clearance from the animated view.
 
-Godot measures this source-height curve only from a successful captured
-ordinary singleton click, with the same stack, card, view and layout
-destination. A changed owner/target or expired tween invalidates the sample.
-The pointer fixture confirms a second press after 60 ms with 0.013 world
-movement does not spend another coin or pack slot, while the 120 ms settled
-control does. Non-grounded or moved-target chest restoration and timed Unity
-Play Mode comparison are outside this bounded probe.
+Godot samples this curve only from a successful captured ordinary singleton
+click with the same stack, card, view and final layout target. A chest that
+is not moved by layout can retain the captured nonzero target height beyond
+the second tween. A changed owner or relocated layout target invalidates
+the sample. A sub-threshold sideways chest release also seeds lateral motion
+from the synchronous held point, before the view catches up. Native board
+clearance is independent of the press height used for classification.
+
+The headless pointer fixture covers grounded pack/chest controls; a third
+stationary chest press after 60 ms rejects at Y=.02944 while the 90 ms case
+withdraws at Y=.01684. A same-frame .012 sideways release starts its return
+at the held XZ, reaches .00192 X after .06 seconds, and another captured
+click restores that interpolated press origin. If layout actually translates
+the chest, the grounded control withdraws on a fresh .013 drag. These are
+not native Unity timing/rendered results; cold-save height and broader
+physics/tween ownership remain outside this check.
 
 Final ordinary pack and successful ordinary chest clicks now pass the sampled
 held Transform to the actual Puff node, even before the card view has caught

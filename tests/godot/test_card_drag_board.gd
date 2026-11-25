@@ -123,6 +123,10 @@ func run() -> void:
 	await ordinary_pointer_rank(board,vendor_point)
 	await final_slot_receiver(board)
 	await grounded_repeat(board)
+	await chest_elevated_repeat(board)
+	await chest_second_landing_click_window(board)
+	await chest_lateral_return(board)
+	await chest_layout_replaces_return(board)
 	await captured_click_puff(board)
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
 	print("Card drag board: %d/%d passed" % [checks-failures,checks])
@@ -333,6 +337,163 @@ func grounded_repeat(board: WitnessBoard) -> void:
 				check(board.session.cards[item].get(counter)==initial-2 and events.size()==2*first_events.size(),
 					"settled repeat just .013 away clicks successfully: "+counter)
 			board.session.event_occurred.disconnect(observe)
+	board.session.spawn_layout_resolver = Callable()
+
+# ChestLogic restores the full press vector, unlike PackInstance. Clicking
+# during the first tween can leave a small nonzero Y even after the second
+# tween ends. The third release must still measure that Y.
+func chest_elevated_repeat(board: WitnessBoard) -> void:
+	for id in board.session.cards.keys(): board.session._remove_card(id)
+	board.session.spawn_target_selector = board._select_spawn_target
+	board.session.spawn_layout_resolver = board._resolve_layout
+	var chest_guid: String = board.catalog.find_by_name("Card_Chest_WoodenChest")
+	var id: int = board.session.spawn_card(chest_guid,Vector2.ZERO,-1,{"refuse_attach":true})
+	board.session.cards[id].stored_coins = 4
+	board.layout_key = board._layout_signature()
+	board._refresh()
+	board._sync_views(1.0)
+	await physics_frame; await physics_frame
+	press(board,id)
+	release(board)
+	check(board.session.cards[id].stored_coins == 3 and not board.session.drag.active(),
+		"first grounded pointer click withdraws once and releases the grant")
+	board._sync_views(.06)
+	await physics_frame; await physics_frame
+	press(board,id)
+	var original_y: float = board._mouse_drag.start.y
+	check(is_equal_approx(original_y,.016),"second pointer click snapshots the first landing at .016 Y")
+	release(board)
+	check(board.session.cards[id].stored_coins == 2 and not board.session.drag.active(),
+		"vertical-only .016 displacement still permits a successful second click")
+	var coins: Array = board.session.cards.values().filter(func(card): return card.base_definition_guid == board.session.world.currency_guid)
+	check(coins.size() == 2 and coins[0].stack_id == coins[1].stack_id
+		and board.session.card_target_position(id) == Vector2.ZERO,
+		"original currency stacks and the actual second layout pass leaves this chest at unchanged XZ")
+	board._sync_views(.12)
+	await physics_frame; await physics_frame
+	board.release_queries.clear()
+	press(board,id)
+	check(is_equal_approx(board._mouse_drag.start.y,original_y),
+		"after second tween settles the third press retains ChestLogic's restored nonzero Y")
+	motion(board,Vector2(.013,0))
+	release(board)
+	check(board.session.cards[id].stored_coins == 2 and not board.release_queries.is_empty()
+		and not board.session.drag.active(),
+		"third release moves .013 XZ from restored .016 Y and must drag without a third withdrawal")
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = Callable()
+
+# At 60ms into the *second* landing the chest is still too high to
+# click even without lateral motion; 90ms is inside the source window.
+func chest_second_landing_click_window(board: WitnessBoard) -> void:
+	for sample in [[.06,.02944,false],[.09,.01684,true]]:
+		for id in board.session.cards.keys(): board.session._remove_card(id)
+		var id: int = board.session.spawn_card(board.catalog.find_by_name("Card_Chest_WoodenChest"),
+			Vector2.ZERO,-1,{"refuse_attach":true})
+		board.session.cards[id].stored_coins = 4
+		var coins := []
+		var puffs := []
+		board.session.spawn_target_selector = func(spawned: int, ignored: int) -> int:
+			coins.append(Vector3(board.session.cards[spawned].position.x,board.session.spawn_query_height,
+				board.session.cards[spawned].position.y))
+			return board._select_spawn_target(spawned,ignored)
+		board.session.spawn_layout_resolver = board._resolve_layout
+		var observe := func(name: String,payload: Dictionary) -> void:
+			if name == "puff_requested" and payload.card_id == id: puffs.append(payload.position)
+		board.session.event_occurred.connect(observe)
+		board.layout_key = board._layout_signature()
+		board._refresh()
+		board._sync_views(1.0)
+		await physics_frame; await physics_frame
+		press(board,id); release(board)
+		board._sync_views(.06)
+		await physics_frame; await physics_frame
+		press(board,id)
+		check(is_equal_approx(board._mouse_drag.start.y,.016),"first tween allows captured repeat")
+		release(board)
+		check(board.session.cards[id].stored_coins == 2 and board.session.card_target_position(id) == Vector2.ZERO
+			and puffs.size()==2 and coins.size()==2,"two actual debits with unchanged chest XZ")
+		board._sync_views(sample[0])
+		await physics_frame; await physics_frame
+		board.release_queries.clear()
+		press(board,id)
+		check(is_equal_approx(board._mouse_drag.start.y,sample[1]),
+			"second OutQuad samples %.5f at %.0fms" % [sample[1],1000*sample[0]])
+		release(board)
+		var spent := int(sample[2])
+		check(board.session.cards[id].stored_coins == 2-spent and board.release_queries.is_empty()==sample[2]
+			and not board.session.drag.active(),"third stationary pointer release selects click/drag by source Y")
+		check(puffs.size()==2+spent and puffs.all(func(p): return p.is_equal_approx(Vector3(0,.1,0)))
+			and coins.size()==2+spent and coins.all(func(p): return p.is_equal_approx(Vector3(board._card_footprint(id).x,0,0))),
+			"successful clicks puff from held height but all coin spawn queries stay flat")
+		board.session.event_occurred.disconnect(observe)
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = Callable()
+
+# Unity starts the settle tween at the still-held transform, not the
+# view from the previous Godot frame. A tiny slide fits inside click range.
+func chest_lateral_return(board: WitnessBoard) -> void:
+	for id in board.session.cards.keys(): board.session._remove_card(id)
+	board.session.spawn_target_selector = board._select_spawn_target
+	board.session.spawn_layout_resolver = board._resolve_layout
+	var chest_guid: String = board.catalog.find_by_name("Card_Chest_WoodenChest")
+	var chest: int = board.session.spawn_card(chest_guid,Vector2.ZERO,-1,{"refuse_attach":true})
+	board.session.cards[chest].stored_coins = 4
+	board.layout_key = board._layout_signature()
+	board._refresh()
+	board._sync_views(1.0)
+	await physics_frame; await physics_frame
+	press(board,chest)
+	motion(board,Vector2(.012,0))
+	check(is_equal_approx(board.session.card_target_position(chest).x,.012)
+		and is_zero_approx(board.views[chest].global_position.x),"one-frame underthreshold slide has a stale display when released")
+	release(board)
+	check(board.session.cards[chest].stored_coins == 3 and board.session.card_target_position(chest)==Vector2.ZERO,
+		"underthreshold release debits and restores press XZ")
+	check(is_equal_approx(board.views[chest].global_position.x,.012),"return starts at synchronous held X, not old view")
+	board._sync_views(.06)
+	await physics_frame; await physics_frame
+	check(is_equal_approx(board.views[chest].global_position.x,.00192),"OutQuad advances visible X from .012 to .00192")
+	press(board,chest)
+	check(board._mouse_drag.start.is_equal_approx(Vector3(.00192,.016,0)),
+		"repress samples one coherent XZ and Y from the source return")
+	release(board)
+	check(board.session.cards[chest].stored_coins==2 and board.session.card_target_position(chest).is_equal_approx(Vector2(.00192,0)),
+		"accepted second click restores laterally interpolated press target")
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = Callable()
+
+# Deliberately deny spawn attachment for the control: the second coin is
+# now its own overlap participant. Actual layout moves the chest and owns
+# the new grounded pose rather than carrying the earlier press height.
+func chest_layout_replaces_return(board: WitnessBoard) -> void:
+	for id in board.session.cards.keys(): board.session._remove_card(id)
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = board._resolve_layout
+	var chest: int = board.session.spawn_card(board.catalog.find_by_name("Card_Chest_WoodenChest"),
+		Vector2.ZERO,-1,{"refuse_attach":true})
+	board.session.cards[chest].stored_coins = 4
+	board.layout_key = board._layout_signature()
+	board._refresh()
+	board._sync_views(1.0)
+	await physics_frame; await physics_frame
+	press(board,chest); release(board)
+	board._sync_views(.06)
+	await physics_frame; await physics_frame
+	press(board,chest)
+	check(is_equal_approx(board._mouse_drag.start.y,.016),"control second press has nonzero captured Y")
+	release(board)
+	check(board.session.cards[chest].stored_coins==2
+		and not board.session.card_target_position(chest).is_equal_approx(Vector2.ZERO),
+		"source planarly translated chest still withdraws on the second click")
+	board._sync_views(.12)
+	await physics_frame; await physics_frame
+	press(board,chest)
+	check(is_zero_approx(board._mouse_drag.start.y),"layout translation replaces captured height with grounded pose")
+	motion(board,Vector2(.013,0))
+	release(board)
+	check(board.session.cards[chest].stored_coins==1 and not board.session.drag.active(),
+		"grounded XZ relocation permits third .013 click instead of carrying stale Y")
 	board.session.spawn_layout_resolver = Callable()
 
 func captured_click_puff(board: WitnessBoard) -> void:

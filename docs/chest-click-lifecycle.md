@@ -18,7 +18,7 @@ unchanged. A zero-size stack is not equivalent: it still clamps coordinates. Coi
 spawning now receives the raw offset position, including positions outside the
 board, so the normal factory performs attachment queries before resolving layout.
 
-`tests/godot/test_chest_click_lifecycle.gd` passes 19 source-data checks: successful
+`tests/godot/test_chest_click_lifecycle.gd` covers source-data cases: successful
 sub-threshold motion, output-query position before reset, raw boundary queries,
 originating-stack exclusion, failed/empty withdrawal, inspection convenience,
 repeated release and carried release across a day-phase boundary. A real mouse-picking regression also covers an interpolating singleton: whole-stack
@@ -28,9 +28,12 @@ click semantics. Without this update an unmoved release could fail the threshold
 because its model target was already far ahead of its visible pose. The existing
 cycle action suite separately covers stacked chests and menu/options locks.
 
-This correction concerns source call ordering and settled X/Z coordinates. It
-does not establish animated Unity transform, physics-query, rendered or physical
-pointer equivalence. No original source code or assets are included in these tests.
+The focused repeat-input cases in [Card drag input](card-drag-input.md) also
+exercise the captured three-dimensional press calculation and lateral return
+on a surviving singleton. An overlap translation clears the retained height.
+This does not establish animated Unity transforms, physics query timing,
+rendered or physical input, or cold persistence of a nonzero target. No
+original source code or assets are included in these tests.
 
 ## Deposit and withdrawal presentation order
 
