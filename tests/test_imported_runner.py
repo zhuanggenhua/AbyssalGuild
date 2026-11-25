@@ -131,6 +131,8 @@ MARKERS = {
     "test_visual_assets": "Visual source bindings: PASS",
     "test_combat_sprite_binding": "Private combat sprites: PASS (synthetic)",
     "test_combat_presentation": "Combat presentation checks: 1 passed",
+    "test_live_buyer_spawn": "Source live buyer spawn: 7/7",
+    "test_trade_mixer_board": "Trade mixer Board: 19/19 (synthetic runner marker)",
 }
 for name, prefix in (
     ("test_combat_feedback_ui", "Combat feedback UI"), ("test_ui_smoke", "UI"),

@@ -71,9 +71,18 @@ func update_caption(zone: Dictionary, tracker: String) -> void:
 		if labels.has("title"):
 			labels.title.text = str(zone.title) if zone.kind == "vendor" and zone.active else str(labels.title.get_meta("source_text", ""))
 		if labels.has("price"): labels.price.text = str(zone.price_text) if zone.active else str(labels.price.get_meta("source_text", ""))
-		if labels.has("tracker"):
-			labels.tracker.text = tracker if zone.active else str(labels.tracker.get_meta("source_text", ""))
-			labels.tracker.modulate = Color("FFD700") if zone.active and tracker == "COMPLETED" else labels.tracker.get_meta("source_color")
+	update_tracker(tracker)
+
+## PackVendor.OnCollectionDataChanged updates only the tracker. In particular
+## StatsChanged may occur during payment before the source price refresh.
+func update_tracker(tracker: String) -> void:
+	if zone_snapshot.is_empty(): return
+	var zone := zone_snapshot
+	if not source_nodes.is_empty():
+		var label = source_nodes.labels.get("tracker")
+		if is_instance_valid(label):
+			label.text = tracker if zone.active else str(label.get_meta("source_text", ""))
+			label.modulate = Color("FFD700") if zone.active and tracker == "COMPLETED" else label.get_meta("source_color")
 	if not zone.active:
 		caption.text = ""
 	elif zone.kind == "buyer":

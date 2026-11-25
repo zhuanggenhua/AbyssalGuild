@@ -10,7 +10,9 @@ Confirmed original call sites (under source Scripts/):
 
 - Card/Components/CardController.cs: CardPick on pickup, CardDrop on drop.
 - Card/CardInstance.cs: CardSwipe during the feeding move, Eat when food reaches the character.
-- Trading/PackVendor.cs: CashRegister on pack purchase.
+- Trading/PackVendor.cs: CashRegister after every accepted payment (including
+  partial installments) and the resulting price refresh. See the
+  [trade mixer check](source-trade-presentation.md#multi-coin-drop-and-actual-godot-mixer-output).
 - Trading/CardBuyer.cs: Coins on card sale.
 - Card/Behaviors/ChestLogic.cs: Coins when opening, Coin during coin output.
 - Crafting/Definitions/RecipeDefinition.cs: Pop for recipe completion.

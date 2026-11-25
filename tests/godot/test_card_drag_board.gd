@@ -2,7 +2,10 @@ extends SceneTree
 const Board = preload("res://scripts/ui/board.gd")
 const Drag = preload("res://scripts/ui/card_drag_input.gd")
 class SilentFeedback extends "res://scripts/ui/audio_feedback.gd":
-	func play_event(_kind: String) -> bool: return false
+	var events: Array[String] = []
+	func play_event(kind: String) -> bool:
+		events.append(kind)
+		return false
 	func play_music() -> bool: return false
 var checks := 0
 var failures := 0
@@ -22,6 +25,13 @@ func fixture(board) -> int:
 	board._refresh()
 	board._begin_card_press({"card_id":id,"panel_owner":-1},board.camera.unproject_position(board.views[id].position))
 	return id
+func press(board, id: int) -> void:
+	var event := InputEventMouseButton.new()
+	event.button_index = MOUSE_BUTTON_LEFT
+	event.pressed = true
+	event.position = board.camera.unproject_position(board.views[id].global_position)
+	board._unhandled_input(event)
+
 func motion(board, delta: Vector2) -> void:
 	var point: Vector2 = board.drag_origin + delta
 	board._update_drag_position(board.camera.unproject_position(Vector3(point.x,0,-point.y)))
@@ -88,15 +98,19 @@ func run() -> void:
 	var vendor: Dictionary = board.trade_zones[1]
 	var coin: int = board.session.spawn_card(board.session.world.currency_guid, Vector2.ZERO,-1,{"refuse_attach":true})
 	board._refresh()
-	board._begin_card_press({"card_id":coin,"panel_owner":-1},board.camera.unproject_position(board.views[coin].position))
+	await physics_frame; await physics_frame
+	press(board,coin)
+	check(board.dragging == coin and board.session.drag.active_for(coin), "actual board pointer hit captures a loose currency card")
 	var vendor_point := Vector2(vendor.center.x,vendor.center.z)
 	motion(board,vendor_point-board.drag_anchor)
 	var held: Vector2 = board.session.card_target_position(coin)
 	var placement: Vector2 = board._clamp_stack_position(coin,vendor_point)
 	check(held.y > placement.y+0.1,"held source pointer may enter top-margin trade region")
 	check(preload("res://scripts/model/trade_layout.gd").intersects(vendor,Vector3(held.x,0,held.y),0.25),"real held position intersects intended vendor collider")
+	board.feedback.events.clear()
 	release(board)
 	check(not board.session.cards.has(coin) and board.session.vendor_payments.get(str(vendor.pack_guid),0) == 1,"actual pointer release pays vendor installment rather than dropping below header")
+	check(board.feedback.events == ["CardDrop","Puff","CashRegister"], "real pointer settlement requests drop, zone puff and installment audio exactly once")
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
 	print("Card drag board: %d/%d passed" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)

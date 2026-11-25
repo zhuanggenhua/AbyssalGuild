@@ -2333,10 +2333,13 @@ func _refresh_collection_presentation() -> void:
 	collection_refresh_pending = false
 	if not running: return
 	_refresh_market_labels()
-	for zone in trade_zones:
-		if trade_views.has(int(zone.index)):
-			trade_views[int(zone.index)].update_caption(zone, _pack_tracker(str(zone.pack_guid)))
+	_refresh_vendor_trackers()
 	_refresh_ledger()
+
+func _refresh_vendor_trackers() -> void:
+	for zone in trade_zones:
+		if zone.kind == "vendor" and zone.active and trade_views.has(int(zone.index)):
+			trade_views[int(zone.index)].update_tracker(_pack_tracker(str(zone.pack_guid)))
 
 func _pack_tracker(guid: String) -> String:
 	if guid.is_empty(): return ""
@@ -2387,6 +2390,7 @@ func _buy(guid: String) -> void:
 	var id: int = session.buy_pack(guid)
 	notice.text = "Purchased " + _name(guid) if id >= 0 else "Pack unavailable: check currency and completed quests."
 	_refresh()
+	if id >= 0: feedback.play_event("CashRegister")
 
 func _sell_selected() -> void:
 	if not _allows_card_actions() or session.combat.membership.has(selected): return
@@ -2759,7 +2763,9 @@ func _engage_selected() -> void:
 func _on_session_event(kind: String, payload: Dictionary) -> void:
 	if kind == "combat_entered":
 		if drag_highlights.enter_combat(): card_drag_targets.clear()
-	if running: world_post_process.event(kind, payload)
+	if running:
+		if kind in ["recipe_discovered", "stats_changed"]: _refresh_vendor_trackers()
+		world_post_process.event(kind, payload)
 	if kind == "day_ended":
 		journal_slide.day_ended()
 		day_clock.hide()
@@ -2779,10 +2785,9 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 		_checkpoint("Arrived at " + session.scene_name)
 	elif kind == "travel_failed":
 		notice.text = "Travel failed: " + str(payload.get("error", ""))
-	if kind == "pack_purchased": feedback.play_event("CashRegister")
-	elif kind == "cards_sold": feedback.play_event("Coins")
+	if kind == "cards_sold": feedback.play_event("Coins")
 	elif kind == "recipe_pop_requested": feedback.play_event("Pop")
-	elif kind == "puff_requested": _spawn_puff(payload)
+	elif kind in ["puff_requested", "trade_puff_requested"]: _spawn_puff(payload)
 	elif kind == "combat_attack_started":
 		_capture_combat_motion(payload)
 		feedback.play_event(ImpactFeedback.attack_sound(int(payload.combat_type)))
@@ -3560,15 +3565,20 @@ func _try_trade_drop(card_id: int, destination: Vector2, carried_press: bool = f
 	if source.card_ids.front() != card_id: stack_id = session.split_stack(card_id, destination)
 	_set_board_card_position(card_id, destination)
 	var dropped = session.stacks[stack_id]
+	var trade_puff: Variant = TradeLayout.shared_puff_origin(catalog, session.scene_name, zone)
 	if zone.kind == "buyer":
-		outcome.accepted = session.sell_stack(stack_id)
+		outcome.accepted = session.sell_stack(stack_id, trade_puff)
 		outcome.terminal = outcome.accepted and dropped.card_ids.is_empty()
 		notice.text = "Stack sold." if outcome.accepted else "Buyer rejected this stack."
 	else:
-		var result: Dictionary = session.pay_vendor(str(zone.pack_guid), stack_id)
+		var result: Dictionary = session.pay_vendor(str(zone.pack_guid), stack_id, trade_puff)
 		outcome.accepted = result.accepted
 		outcome.terminal = result.get("terminal", false)
 		if result.accepted:
+			# PackVendor does this on all accepted payments, not only purchases:
+			# final stats/callbacks, updated price, then one register request.
+			_sync_trade_zones()
+			feedback.play_event("CashRegister")
 			notice.text = "Pack purchased." if int(result.pack_id) >= 0 else "Vendor payment saved: %d coins." % int(result.paid)
 		else:
 			notice.text = "Vendor rejected this payment."

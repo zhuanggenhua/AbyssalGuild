@@ -14,6 +14,7 @@ const CombatSystem = preload("res://scripts/model/combat_system.gd")
 const QuestTracker = preload("res://scripts/model/quest_tracker.gd")
 const CycleController = preload("res://scripts/model/cycle_controller.gd")
 const HeldStack = preload("res://scripts/model/held_stack_registry.gd")
+const SceneSpawn = preload("res://scripts/model/scene_spawn.gd")
 const CraftingOrder = preload("res://scripts/model/crafting_order.gd")
 signal changed
 signal stats_snapshot_changed(snapshot: Dictionary)
@@ -593,7 +594,7 @@ func sell_card(id: int) -> bool:
 	return _sell_cards([id])
 
 ## Validate and publish the entire transaction before deleting any sold card.
-func _sell_cards(ids: Array) -> bool:
+func _sell_cards(ids: Array, trade_puff_origin: Variant = null) -> bool:
 	if ids.is_empty():
 		return false
 	var coin: String = world.currency_guid
@@ -614,10 +615,11 @@ func _sell_cards(ids: Array) -> bool:
 			return false
 		base_guids.append(card.base_definition_guid)
 		total_price += int(fields.get("sellPrice", 1))
-	var resolved: Variant = preload("res://scripts/model/scene_spawn.gd").buyer_position(catalog, scene_name, board_bounds, board_top_margin)
+	var resolved: Variant = SceneSpawn.buyer_position(catalog, scene_name, board_bounds, board_top_margin)
 	if not resolved is Vector2 and not fixture_without_scenes:
 		return false
 	var position: Vector2 = resolved if resolved is Vector2 else cards[ids[0]].position
+	_request_trade_puff(trade_puff_origin)
 	event_occurred.emit("cards_sold", {"base_definition_guids": base_guids})
 	for id in ids:
 		var stack = stacks.get(cards[id].stack_id)
@@ -625,6 +627,11 @@ func _sell_cards(ids: Array) -> bool:
 		if stack != null:
 			_validate_craft(stack)
 	for i in range(total_price):
+		# CardBuyer reads TradeZone.spawnPosition per coin. A prior coin's
+		# stats publication can shrink the board and move the live buyer.
+		if not fixture_without_scenes:
+			var live_origin: Variant = SceneSpawn.buyer_position(catalog, scene_name, board_bounds, board_top_margin)
+			if live_origin is Vector2: position = live_origin
 		spawn_card(coin, position)
 	_notify_stats_changed()
 	changed.emit()
@@ -704,14 +711,20 @@ func start_day() -> bool:
 	changed.emit()
 	return true
 
-func sell_stack(stack_id: int) -> bool:
+# Only a physical zone supplies its optional presentation site. Convenience
+# APIs retain their domain-only behavior and do not pretend to hit a zone.
+func _request_trade_puff(origin: Variant) -> void:
+	if origin is Vector3 and origin.is_finite():
+		event_occurred.emit("trade_puff_requested", {"position": origin})
+
+func sell_stack(stack_id: int, trade_puff_origin: Variant = null) -> bool:
 	if not stacks.has(stack_id):
 		return false
-	return _sell_cards(stacks[stack_id].card_ids.duplicate())
+	return _sell_cards(stacks[stack_id].card_ids.duplicate(), trade_puff_origin)
 
 ## Source vendor supports installments. Validates the whole dropped stack first.
 ## Returns {accepted, paid, pack_id, terminal}; terminal means the dropped stack emptied.
-func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
+func pay_vendor(pack_guid: String, stack_id: int, trade_puff_origin: Variant = null) -> Dictionary:
 	var rejected := {"accepted": false, "paid": int(vendor_payments.get(pack_guid, 0)), "pack_id": -1, "terminal": false}
 	var definition: Dictionary = catalog.get_definition(pack_guid)
 	if not stacks.has(stack_id) or definition.get("script_class", "") != "PackDefinition":
@@ -725,6 +738,7 @@ func pay_vendor(pack_guid: String, stack_id: int) -> Dictionary:
 			return rejected
 		if int(catalog.fields(cards[id].definition_guid).get("category", 0)) != 7 and not (world._is_chest(id) and cards[id].stored_coins > 0):
 			return rejected
+	_request_trade_puff(trade_puff_origin)
 	var price: int = int(definition.fields.get("buyPrice", 3))
 	var paid: int = int(vendor_payments.get(pack_guid, 0))
 	var stats_changed := false

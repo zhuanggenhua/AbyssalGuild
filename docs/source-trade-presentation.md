@@ -43,3 +43,29 @@ Godot mesh/material/outline/label poses, inactive/active/completed transitions a
 hover descriptors. Actual private import metadata validates both Main and Island
 references. GPU draw, font parity and the unavailable built-in shader require
 separate evidence; headless checks are not visual acceptance.
+
+## Multi-coin drop and actual Godot mixer output
+
+With the pinned private asset import, run:
+
+```sh
+GODOT_RENDERING_METHOD=gl_compatibility bash tools/test_godot.sh res://tests/godot/test_trade_mixer_board.gd
+```
+
+This starts the real Board with original audio and particle bindings. It picks
+up a real two-coin chest through the Board input path and drops it on the
+unlocked original vendor. It checks one zone puff and two withdrawal puffs,
+then one register request after both balance and price update. All requests
+occur in one engine frame: the original 50 ms per-AudioId cooldown suppresses
+the two repeated Puff voices, not either corresponding particle. The register
+is a different AudioId and plays independently.
+
+The test disables background music only for this fixture and sends the two
+original voices through separate capture buses before continuing to Master.
+Each must contain real nonzero PCM. The rejected-item case must still travel
+through normal drop feedback but neither trade input may produce PCM. The test
+checks for nonempty capture buffers and no dropped capture frames. Public
+checkout without private media skips the mixer-specific assertions; missing
+clips in a present import fail. Headless Dummy output still runs Godot's mixer;
+this check does not verify sound at speakers, native hardware, clip playback
+against Unity, or rendered puff pixels.

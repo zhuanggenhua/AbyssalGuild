@@ -135,6 +135,8 @@ SUITES = (
     ("test_board_integration", r"Board integration checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_trade_drop_height", r"Trade drop height: 139/139 passed"),
     ("test_trade_collection_ui", r"Trade/collection UI checks: [1-9]\d* passed / [1-9]\d* total"),
+    ("test_live_buyer_spawn", r"Source live buyer spawn: [1-9]\d*/[1-9]\d*"),
+    ("test_trade_mixer_board", r"Trade mixer Board: [1-9]\d*/[1-9]\d*"),
     ("test_vendor_unlock_board", r"Vendor unlock board checks: [1-9]\d* passed / [1-9]\d* total"),
     ("test_menu_focus", r"Menu focus: [1-9]\d* checks, 0 failures"),
     ("test_title_overlay_cancel", r"(?m)^Title source pointer and overlay: PASS \(locked scene; [1-9]\d* checks\)$"),

@@ -45,7 +45,7 @@ static func zones(catalog, scene_name: String, board_bounds: Variant = null, top
 				var bounds: AABB = geometry.bounds
 				result.zones.append({"index": index, "kind": "buyer" if buyer else "vendor", "prefab_guid": prefab_guid,
 					"pack_guid": pack_guid, "pack_id": str(pack.get("id", "")), "currency_guid": catalog.ref_guid(fields.get("currencyCard", {})),
-					"center": world.origin, "transform": world, "local_bounds": bounds, "world_bounds": world * bounds,
+					"puff_reference": geometry.puff_reference, "center": world.origin, "transform": world, "local_bounds": bounds, "world_bounds": world * bounds,
 					"zone_scale": scale, "spawn_position": world.origin + offset, "collider_enabled": geometry.enabled,
 					"active": active, "min_quests": minimum, "total_price": price, "paid": paid, "remaining_price": price - paid,
 					"title": "Card Buyer" if buyer else (str(pack.get("displayName", "")) if active else ""),
@@ -67,9 +67,12 @@ static func _prefab_geometry(catalog, guid: String, script_class: String) -> Dic
 			continue
 		var documents: Array = prefab.get("documents", [])
 		var object_id := ""
+		var puff_reference: Dictionary = {}
 		for document in documents:
 			if document.get("script_class", "") == script_class:
-				object_id = str(document.get("fields", {}).get("m_GameObject", {}).get("fileID", ""))
+				var component: Dictionary = document.get("fields", {})
+				object_id = str(component.get("m_GameObject", {}).get("fileID", ""))
+				puff_reference = component.get("puffParticle", {})
 		if object_id.is_empty(): return {}
 		var rotation := Quaternion.IDENTITY
 		var bounds: Variant = null
@@ -85,8 +88,29 @@ static func _prefab_geometry(catalog, guid: String, script_class: String) -> Dic
 				var q: Dictionary = fields.get("m_LocalRotation", {})
 				rotation = Quaternion(float(q.get("x", 0)), float(q.get("y", 0)), float(q.get("z", 0)), float(q.get("w", 1)))
 		if bounds is AABB:
-			return {"bounds": bounds, "rotation": rotation, "enabled": enabled}
+			return {"bounds": bounds, "rotation": rotation, "enabled": enabled, "puff_reference": puff_reference}
 	return {}
+
+# Locked source Buyer/Vendor and the active CardSettings refer to the same
+# Puff component. Share that renderer/sound only for an exact reference match.
+static func shared_puff_origin(catalog, scene_name: String, zone: Dictionary) -> Variant:
+	var reference: Dictionary = zone.get("puff_reference", {})
+	var key: String = catalog.ref_guid(reference)
+	var component := str(reference.get("fileID", "0"))
+	if key.is_empty() or component in ["", "0"]: return null
+	for scene in catalog.data.get("scenes", []):
+		if scene.get("name", "") != scene_name: continue
+		for document in scene.get("documents", []):
+			if document.get("script_class", "") != "CardManager": continue
+			var settings_ref: Dictionary = document.get("fields", {}).get("cardSettings", {})
+			var settings: Dictionary = catalog.get_definition(catalog.ref_guid(settings_ref))
+			if settings.get("script_class", "") != "CardSettings" or str(settings.get("file_id", "")) != str(settings_ref.get("fileID", "0")):
+				return null
+			var puff: Dictionary = settings.get("fields", {}).get("puffParticle", {})
+			if catalog.ref_guid(puff) == key and str(puff.get("fileID", "")) == component:
+				return zone.get("center")
+			return null
+	return null
 
 static func _orthogonal(basis: Basis) -> bool:
 	if basis.x.length_squared() <= 0 or basis.y.length_squared() <= 0 or basis.z.length_squared() <= 0: return false
