@@ -196,6 +196,8 @@ func deposit_stack(chest_id: int, stack_id: int) -> Dictionary:
 			session.stacks[stack_id].cancel_craft()
 			session._remove_card(id) # Destroy, never Kill or loot.
 	if result.deposited > 0:
+		session.event_occurred.emit("chest_balance_changed", {"card_id": chest_id, "count": chest.stored_coins})
+		session.event_occurred.emit("chest_coin_sound_requested", {"multiple": true})
 		session._notify_stats_changed()
 		session.changed.emit()
 	return result
@@ -205,16 +207,25 @@ func can_click_chest(chest_id: int) -> bool:
 	var session = _session.get_ref()
 	return _is_chest(chest_id) and session.stacks.has(session.cards[chest_id].stack_id) and session.stacks[session.cards[chest_id].stack_id].card_ids.size() == 1
 
-## Caller supplies Board-enforced spawn position for click withdrawal.
-func withdraw_coin(chest_id: int, spawn_on_board: bool = false, spawn_position: Vector2 = Vector2.ZERO) -> bool:
+## Source's shared per-coin withdrawal, without spawning or notifying stats.
+## The vendor publishes stats once after the whole transaction.
+func take_chest_coin(chest_id: int) -> bool:
 	var session = _session.get_ref()
-	if not _is_chest(chest_id) or currency_guid.is_empty() or session.cards[chest_id].stored_coins <= 0:
+	if not _is_chest(chest_id) or session.catalog.get_definition(currency_guid).is_empty() or session.cards[chest_id].stored_coins <= 0:
 		return false
 	session.cards[chest_id].stored_coins -= 1
-	# TryWithdrawCoin puffs after decrement, before optional board spawning.
+	session.event_occurred.emit("chest_balance_changed", {"card_id": chest_id, "count": session.cards[chest_id].stored_coins})
 	session.request_puff(chest_id)
+	return true
+
+## Caller supplies Board-enforced spawn position for click withdrawal.
+func withdraw_coin(chest_id: int, spawn_on_board: bool = false, spawn_position: Vector2 = Vector2.ZERO) -> bool:
+	if not take_chest_coin(chest_id):
+		return false
+	var session = _session.get_ref()
 	if spawn_on_board:
 		session.spawn_card(currency_guid, spawn_position, -1, {"ignored_stack_id": session.cards[chest_id].stack_id})
+		session.event_occurred.emit("chest_coin_sound_requested", {"multiple": false})
 	session._notify_stats_changed()
 	session.changed.emit()
 	return true

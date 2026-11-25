@@ -755,17 +755,11 @@ func pay_vendor(pack_guid: String, stack_id: int, trade_puff_origin: Variant = n
 			paid += 1
 			stats_changed = true
 		else:
-			# ChestLogic.TryWithdrawCoin(false) refuses an unresolved currency.
-			if catalog.get_definition(world.currency_guid).is_empty():
-				break
-			var amount: int = mini(price - paid, card.stored_coins)
-			paid += amount
-			# Source invokes TryWithdrawCoin(false) once per paid coin. Do not
-			# insert WorldRules' native stats notification between these puffs.
-			for _coin in range(amount):
-				card.stored_coins -= 1
-				request_puff(id)
-			stats_changed = stats_changed or amount > 0
+			# ChestLogic.TryWithdrawCoin(false) updates the text before each Puff.
+			# Keep stats deferred and never spawn a board coin for this payment.
+			while paid < price and world.take_chest_coin(id):
+				paid += 1
+				stats_changed = true
 			# Chest remains BottomCard, so once empty it blocks earlier payment cards.
 			break
 	var pack_id: int = -1

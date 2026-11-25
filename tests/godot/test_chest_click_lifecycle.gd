@@ -1,7 +1,12 @@
 extends SceneTree
 const Board = preload("res://scripts/ui/board.gd")
 class SilentFeedback extends "res://scripts/ui/audio_feedback.gd":
-	func play_event(_event_name: String) -> bool: return false
+	var trace: Array = []
+	var observe: Callable
+	func play_event(event_name: String) -> bool:
+		if event_name in ["Puff", "Coin", "Coins"]:
+			trace.append([event_name, observe.call() if observe.is_valid() else []])
+		return false
 	func play_music() -> bool: return false
 var checks := 0
 var failures := 0
@@ -32,12 +37,30 @@ func fixture(board, position := Vector2.ZERO) -> int:
 	return chest
 func press(board, id: int) -> void:
 	board._begin_card_press({"card_id": id, "panel_owner": -1}, Vector2.ZERO)
+func drag_coin(board, id: int, chest: int, z_offset := 0.0) -> void:
+	var press_event := InputEventMouseButton.new()
+	press_event.button_index = MOUSE_BUTTON_LEFT
+	press_event.pressed = true
+	press_event.position = board.camera.unproject_position(board.views[id].global_position + Vector3(0, 0, z_offset))
+	board._unhandled_input(press_event)
+	check(board.drag_grant == id, "ordinary board picking captures currency card")
+	var at: Vector3 = board.views[chest].global_position
+	var move := InputEventMouseMotion.new()
+	move.position = board.camera.unproject_position(at + Vector3(0, 0, z_offset))
+	move.relative = move.position - press_event.position
+	board._input(move)
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.position = move.position
+	board._input(release)
+
 func _init() -> void: call_deferred("run")
 func run() -> void:
 	root.size = Vector2i(1440, 900)
 	var board = Board.new()
 	board.feedback.free()
-	board.feedback = SilentFeedback.new()
+	var audio := SilentFeedback.new()
+	board.feedback = audio
 	board.slot_root = "user://chest-lifecycle-%d" % Time.get_ticks_usec()
 	board.legacy_paths.clear()
 	root.add_child(board)
@@ -112,6 +135,46 @@ func run() -> void:
 	mouse.pressed = false
 	board._input(mouse)
 	check(board.session.cards[chest].stored_coins == 1, "unmoved interpolating singleton release is a click")
+	# An ordinary drop, not a buyer/vendor purchase and not a direct model
+	# call: partially fill a chest with one coin out of a two-coin tail.
+	chest = fixture(board)
+	var capacity: int = int(board.catalog.fields(board.session.cards[chest].base_definition_guid).capacity)
+	board.session.cards[chest].stored_coins = capacity - 1
+	var coin: int = board.session.spawn_card(board.session.world.currency_guid, Vector2(2, 0), -1, {"refuse_attach": true})
+	var coin_stack: int = board.session.cards[coin].stack_id
+	var remainder: int = board.session.spawn_card(board.session.world.currency_guid, Vector2(2, 0), coin_stack)
+	board._refresh()
+	# Freeze exact settled root and member poses while Board processing is off.
+	board.views[chest].global_position = Vector3.ZERO
+	board.views[coin].global_position = Vector3(2, 0, 0)
+	board.views[remainder].global_position = Vector3(2, board._stack_step().y, -board._stack_step().z)
+	await physics_frame
+	await physics_frame
+	var chest_view = board.views[chest]
+	var has_price: bool = chest_view.stat_labels.has("price")
+	check(has_price, "original chest prefab binds a price label")
+	audio.observe = func():
+		var text: String = str(chest_view.stat_labels.price.text) if has_price else ""
+		return [text, board.session.cards.has(coin), board.session.cards.has(remainder)]
+	audio.trace.clear()
+	drag_coin(board, coin, chest, -0.44)
+	check(board.session.cards[chest].stored_coins == capacity and not board.session.cards.has(coin) and board.session.cards.has(remainder), "capacity consumes only the first coin and retains its tail")
+	check(audio.trace == [["Puff", [str(capacity - 1), true, true]], ["Coins", [str(capacity), false, true]]], "puff sees previous label, one deposit cue sees updated label and removal")
+	# A real second drop on the now-full chest still puffs, but cannot play
+	# Coins or consume the remainder. Move it away before the second press.
+	board._set_board_card_position(remainder, Vector2(2, 0))
+	board._refresh()
+	if board.views.has(remainder): board.views[remainder].global_position = Vector3(2, 0, 0)
+	await physics_frame
+	await physics_frame
+	audio.trace.clear()
+	if board.views.has(remainder): drag_coin(board, remainder, chest)
+	check(board.session.cards[chest].stored_coins == capacity and board.session.cards.has(remainder), "full chest consumes nothing")
+	check(audio.trace == [["Puff", [str(capacity), false, true]]], "full chest puffs without a deposit cue")
+	audio.trace.clear()
+	check(board._withdraw_chest(chest), "board checkout withdraws a coin")
+	check(audio.trace == [["Puff", [str(capacity - 1), false, true]], ["Coin", [str(capacity - 1), false, true]]], "withdrawal updates text before puff and requests a single Coin")
+	audio.observe = Callable()
 	board.session.spawn_target_selector = Callable()
 	board.queue_free()
 	await process_frame

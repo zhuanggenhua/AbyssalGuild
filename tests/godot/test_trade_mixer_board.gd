@@ -129,6 +129,10 @@ func run() -> void:
 	var price: int = int(vendor.total_price)
 	check(vendor.active and price>=3, "original vendor admits a two-coin installment")
 	var offer: String = str(vendor.pack_guid)
+	var previously_paid := price - 3
+	board.session.vendor_payments[offer] = previously_paid
+	board._refresh()
+	vendor = board.trade_zones[1]
 	var id: int = board.session.spawn_card(board.catalog.find_by_name("Card_Chest_WoodenChest"),
 		Vector2.ZERO,-1,{"refuse_attach":true})
 	board.session.cards[id].stored_coins=2
@@ -138,8 +142,12 @@ func run() -> void:
 	await create_timer(.7).timeout
 	reset_meters()
 	audio.attempts.clear()
+	var chest_view = board.views[id]
+	check(chest_view.stat_labels.has("price"), "actual chest price label is bound")
+	var card_ids_before: Array = board.session.cards.keys()
 	audio.state=func():
 		return [board.session.cards[id].stored_coins if board.session.cards.has(id) else -1,
+			chest_view.stat_labels.price.text if chest_view.stat_labels.has("price") else "",
 			board.trade_views[1].zone_snapshot.price_text]
 	drag_to_zone(board,id,vendor)
 	var trace := trade_attempts(audio)
@@ -147,12 +155,14 @@ func run() -> void:
 		"zone, 2 withdrawals and register are distinct logical requests")
 	check(trace.map(func(row): return row.admitted)==[true,false,false,true],
 		"per-AudioId cooldown admits one Puff and one independent register")
-	check(trace.map(func(row): return row.state)==[[2,"Price: %d" % price],[1,"Price: %d" % price],
-		[0,"Price: %d" % price],[0,"Price: %d" % (price-2)]],
+	check(trace.map(func(row): return row.state)==[[2,"2","Price: 3"],[1,"1","Price: 3"],
+		[0,"0","Price: 3"],[0,"0","Price: 1"]],
 		"register starts after balance and visible price refresh")
 	check(trace.all(func(row): return row.frame==Engine.get_process_frames()), "all four requests in one process frame")
-	check(board.puffs.size()==3 and board.session.vendor_payments.get(offer,0)==2 and board.session.cards[id].stored_coins==0,
+	check(board.puffs.size()==3 and board.session.vendor_payments.get(offer,0)==previously_paid+2 and board.session.cards[id].stored_coins==0,
 		"three actual puff nodes and correct retained chest/payment")
+	check(board.session.cards.keys() == card_ids_before, "partial chest payment spawns neither a board coin nor a pack")
+	check(not audio.attempts.any(func(row): return row.name in ["Coin", "Coins"]), "vendor withdrawal has no standalone coin cue")
 	await create_timer(.28).timeout
 	var accepted := read_meters()
 	for cue in accepted:
@@ -167,7 +177,7 @@ func run() -> void:
 	await physics_frame; await physics_frame
 	drag_to_zone(board,id,vendor)
 	check(audio.attempts.any(func(row):return row.name=="CardDrop"), "rejected item still releases via ordinary drag feedback")
-	check(trade_attempts(audio).is_empty() and board.session.vendor_payments.get(offer,0)==2,
+	check(trade_attempts(audio).is_empty() and board.session.vendor_payments.get(offer,0)==previously_paid+2,
 		"rejected item cannot request either trade cue or change payment")
 	await create_timer(.2).timeout
 	var rejected := read_meters()

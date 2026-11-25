@@ -109,13 +109,17 @@ func update_state(state: Dictionary) -> void:
 	values.merge(state, true)
 	if stat_labels.has("price"):
 		var text: String = str(values.get("price_override")) if values.get("price_override") != null else str(values.get("sell_price", 0))
-		preload("res://scripts/ui/card_stat_labels.gd").set_value(stat_labels.price, text)
+		set_price_text(text)
 	for role in ["nutrition", "health"]:
 		if stat_labels.has(role):
 			preload("res://scripts/ui/card_stat_labels.gd").set_value(stat_labels[role], str(values.get(role, 0)))
 	if equipment_panel != null:
 		var slots: Variant = values.get("equipment_slots", [])
 		equipment_panel.set_slots(slots if slots is Array else [])
+
+func set_price_text(text: String) -> void:
+	if stat_labels.has("price"):
+		preload("res://scripts/ui/card_stat_labels.gd").set_value(stat_labels.price, text)
 
 func highlight(value: bool) -> void:
 	material.emission_enabled = value

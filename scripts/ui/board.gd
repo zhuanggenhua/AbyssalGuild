@@ -2817,6 +2817,12 @@ func _on_session_event(kind: String, payload: Dictionary) -> void:
 	elif kind == "travel_failed":
 		notice.text = "Travel failed: " + str(payload.get("error", ""))
 	if kind == "cards_sold": feedback.play_event("Coins")
+	elif kind == "chest_balance_changed":
+		var chest_view = views.get(int(payload.card_id))
+		if is_instance_valid(chest_view) and not chest_view.is_queued_for_deletion():
+			chest_view.set_price_text(str(payload.count))
+	elif kind == "chest_coin_sound_requested":
+		feedback.play_event("Coins" if payload.multiple else "Coin")
 	elif kind == "recipe_pop_requested": feedback.play_event("Pop")
 	elif kind in ["puff_requested", "trade_puff_requested"]: _spawn_puff(payload)
 	elif kind == "combat_attack_started":
@@ -2843,7 +2849,6 @@ func _withdraw_chest(id: int, carried_press: bool = false, click_origin: Variant
 	var withdrew: bool = session.world.withdraw_coin(id, true, position)
 	notice.text = "Withdrew a coin." if withdrew else "Chest is empty."
 	if withdrew:
-		feedback.play_event("Coin")
 		if click_origin is Vector2 and session.cards.has(id):
 			# Successful OnClick restores the press origin after coin creation,
 			# then resolves again. Inspection withdrawal has no pointer origin.

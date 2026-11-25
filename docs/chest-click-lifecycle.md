@@ -31,3 +31,19 @@ cycle action suite separately covers stacked chests and menu/options locks.
 This correction concerns source call ordering and settled X/Z coordinates. It
 does not establish animated Unity transform, physics-query, rendered or physical
 pointer equivalence. No original source code or assets are included in these tests.
+
+## Deposit and withdrawal presentation order
+
+Locked `ChestLogic.OnStack` puffs first, including a drop onto a full chest.
+Only a deposit that consumes at least one coin updates the chest's price label
+and requests `Coins`, once for the whole transfer rather than once per coin.
+`TryWithdrawCoin` decrements and updates that label before puffing; only the
+board-spawn branch requests the singular `Coin`, after creation. The board now
+handles those cues from the chest lifecycle itself rather than assuming a single
+click caller. This change does not alter global stats, admission geometry,
+placement, or mixer cooldown behavior.
+
+The locked-data chest lifecycle test drives ordinary board mouse input
+for the partial and full chest drops and observes the visible Label3D text
+and remaining card IDs at each sound request. It does not test speaker output,
+Unity frame timing, or the currently unresolved Unity collider admission edge.
