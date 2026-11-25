@@ -88,8 +88,9 @@ func restore_state(state: Dictionary) -> bool:
 	return true
 
 func board_card_count() -> int:
-	var session = _session.get_ref()
-	return session.cards.size() - session.equipment.owners.size()
+	# EncounterManager counts every entry in CardManager.AllCards, including
+	# packs and currency but excluding unregistered cards and equipped gear.
+	return _session.get_ref().source_card_ids().size()
 
 static func matches_day(fields: Dictionary, day: int) -> bool:
 	var value: int = int(fields.get("dayValue", 0))

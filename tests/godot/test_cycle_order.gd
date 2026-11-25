@@ -28,6 +28,7 @@ func make(limit: int = 100):
 		{"guid": "corpse", "script_class": "CardDefinition", "fields": {"id": "corpse", "category": 4}},
 		{"guid": "material", "script_class": "CardDefinition", "fields": {"id": "material", "category": 1, "sellPrice": 3}},
 		{"guid": "visitor", "script_class": "CardDefinition", "fields": {"id": "visitor", "category": 1}},
+		{"guid": "chest", "script_class": "ChestDefinition", "fields": {"id": "chest", "category": 6, "capacity": 10}},
 		{"guid": "coin", "script_class": "CardDefinition", "fields": {"id": "coin", "category": 7}},
 		{"guid": "gear", "script_class": "CardDefinition", "fields": {"id": "gear", "category": 5, "equipmentSlot": 0}},
 		{"guid": "boost", "script_class": "LimitBoosterDefinition", "fields": {"id": "boost", "category": 6, "boostAmount": 10}}
@@ -46,6 +47,7 @@ func make(limit: int = 100):
 func _init() -> void:
 	_test_snapshots()
 	_test_source_order()
+	_test_registered_stats()
 	_test_selling_events()
 	_test_pack_phases()
 	_test_source_data()
@@ -154,6 +156,45 @@ func _test_source_order() -> void:
 	second = s.spawn_card("food_b", Vector2(1, 0))
 	CycleDriver.finish(s)
 	check(s.cards.has(first) and not s.cards.has(second), "Nearest current settled pose still overrides candidate-list order")
+
+func _test_registered_stats() -> void:
+	var s = make()
+	var hero: int = s.spawn_card("hero")
+	var enemy: int = s.spawn_card("enemy", Vector2(2, 2))
+	var food: int = s.spawn_card("food_a")
+	var chest: int = s.spawn_card("chest")
+	var fake: int = s.spawn_card("material")
+	var coin: int = s.spawn_card("coin")
+	var gear: int = s.spawn_card("gear")
+	s.spawn_card("pack")
+	s.spawn_card("boost")
+	s.cards[chest].stored_coins = 3
+	s.cards[fake].stored_coins = 6 # Source has no ChestLogic on this definition.
+	s.catalog.definitions["material"].fields.boostAmount = 50 # Not a LimitBoosterDefinition.
+	check(s.equipment.equip(hero, gear), "Equip the fixture item before measuring AllCards")
+	var combat_id: int = s.combat.start_combat([hero], [enemy], true)
+	check(combat_id >= 0 and s.combat.membership.has(hero) and s.combat.membership.has(enemy),
+		"Combatants absent from stacks still belong to AllCards")
+	var snapshot: Dictionary = s.stats()
+	check(snapshot.characters == 1 and snapshot.nutrition_need == 2 and snapshot.nutrition == 4,
+		"Registered food and active combat characters feed the source snapshot")
+	check(snapshot.currency == 4 and snapshot.cards_owned == 6 and snapshot.total_boost == 10
+		and snapshot.card_limit == 110 and snapshot.excess == -104,
+		"Only real chest and booster types count, excluding pack/currency from the signed ownership delta")
+	check(s.world.board_card_count() == 8, "Encounter count includes pack and currency but excludes gear")
+	s.catalog.definitions["event"].fields.maxCardsOnBoardLimit = 8
+	check(s.world.select_encounter(5, false, func(): return 0.0).is_empty(),
+		"Exact source encounter capacity rejects at the threshold")
+	Equipment.detach(s, food)
+	Equipment.detach(s, coin)
+	check(s.cards.has(food) and s.cards.has(coin) and s.stats().nutrition == 0
+		and s.stats().currency == 3 and s.stats().cards_owned == 5 and s.world.board_card_count() == 6,
+		"Detached unregistered records immediately stop counting everywhere they use AllCards")
+	check(s.world.select_encounter(5, false, func(): return 0.0) == "event",
+		"Encounter is eligible once only registered entries remain below the source threshold")
+	Equipment.return_to_board(s, food)
+	Equipment.return_to_board(s, coin)
+	check(s.stats() == snapshot and s.world.board_card_count() == 8, "Re-registration restores counts without double-counting combatants")
 
 func _test_selling_events() -> void:
 	var s = make(2)

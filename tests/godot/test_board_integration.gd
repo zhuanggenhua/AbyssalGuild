@@ -141,12 +141,21 @@ func run() -> void:
 	check(not booster_guid.is_empty(), "source capacity booster available")
 	var booster: int = board.session.spawn_card(booster_guid)
 	a = board.session.spawn_card(wood_guid)
+	var boost: int = int(board.catalog.fields(booster_guid).boostAmount)
+	var base_limit: int = int(board.catalog.settings("CardSettings").baseCardLimit)
+	board._refresh()
+	check(board.stat_labels[2].text == "2/%d" % (base_limit + boost)
+		and board.session.stats().excess == 2 - base_limit - boost,
+		"real HUD uses registered ownership and authored booster capacity")
 	board._update_board_geometry()
 	var expanded: Rect2 = board.session.board_bounds
 	var edge_position: Vector2 = board._clamp_stack_position(a, expanded.end)
 	board.session.stacks[board.session.cards[a].stack_id].position = edge_position
 	board.session.cards[a].position = edge_position
 	board.session._remove_card(booster)
+	board._refresh()
+	check(board.stat_labels[2].text == "2/%d" % (base_limit + boost) and board.session.stats().total_boost == 0,
+		"silent booster removal changes model capacity but not HUD text")
 	board._update_board_geometry()
 	check(board.session.board_bounds.get_area() < expanded.get_area(), "removing booster shrinks source board bounds")
 	check(board.session.cards[a].position.is_equal_approx(board._clamp_stack_position(a, edge_position)), "shrink clamps card using source footprint and top margin")
@@ -154,7 +163,12 @@ func run() -> void:
 	var half: Vector2 = board._card_footprint(a) * 0.5
 	var clamped: Vector2 = board.session.cards[a].position
 	check(clamped.x >= shrunk.position.x + half.x - 0.0001 and clamped.x <= shrunk.end.x - half.x + 0.0001 and clamped.y >= shrunk.position.y + half.y - 0.0001 and clamped.y <= shrunk.end.y - half.y - board.session.board_top_margin + 0.0001, "shrunk card is inside legal placement area within float tolerance")
-	# With no overlapping cards left, purchase location remains the source vendor spawn.
+		# An actual source coin spawn publishes the new totals without adding an owned card.
+	var proof_coin: int = board.session.spawn_card(board.session.world.currency_guid, Vector2.ZERO,
+		-1, {"refuse_attach": true})
+	check(proof_coin >= 0 and board.stat_labels[2].text == "1/%d" % base_limit,
+		"next true stats publication drops the capacity boost in the real HUD")
+# With no overlapping cards left, purchase location remains the source vendor spawn.
 	clear_board(board)
 	var offer: String = board.vendor_guids[0]
 	var requirement: int = int(board.catalog.fields(offer).get("minQuests", 0))

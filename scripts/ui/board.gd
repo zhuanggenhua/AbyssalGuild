@@ -138,6 +138,7 @@ var pending_quit: String = ""
 var quit_dispatched: bool = false
 var friendly_choice: CheckBox
 var session = Session.new()
+var _stats_source: WeakRef
 var _tail_receipt: Dictionary = {}
 var camera: Camera3D
 var source_light: DirectionalLight3D
@@ -988,6 +989,7 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	selected = -1
 	title_panel.hide()
 	hud.show()
+	_bind_source_stats()
 	_refresh()
 	vendor_unlock.bind(self)
 	var focus: Dictionary = session.cycle.focus_state()
@@ -2098,6 +2100,27 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 	state.delta = Vector2.ZERO
 	_refresh()
 
+func _bind_source_stats() -> void:
+	_unbind_source_stats()
+	_stats_source = weakref(session)
+	session.stats_snapshot_changed.connect(_update_stats_text)
+	_update_stats_text(session.stats())
+
+
+func _unbind_source_stats() -> void:
+	var owner = _stats_source.get_ref() if _stats_source != null else null
+	if owner != null and owner.stats_snapshot_changed.is_connected(_update_stats_text):
+		owner.stats_snapshot_changed.disconnect(_update_stats_text)
+	_stats_source = null
+
+
+func _update_stats_text(stats: Dictionary) -> void:
+	if stat_labels.size() != 3: return
+	stat_labels[0].text = "%d/%d" % [stats.nutrition, stats.nutrition_need]
+	stat_labels[1].text = str(stats.currency)
+	stat_labels[2].text = "%d/%d" % [stats.cards_owned, stats.card_limit]
+
+
 func _refresh() -> void:
 	_update_board_geometry()
 	_sync_trade_zones()
@@ -2108,10 +2131,6 @@ func _refresh() -> void:
 	status.text = "Coins %d  ·  Food %d / %d  ·  Cards %d / %d\n%s" % [stats.currency, stats.nutrition, stats.nutrition_need, stats.cards_owned, stats.card_limit, "PAUSED" if session.paused else "%.0fx" % session.speed]
 	status.hide()
 	stats_box.visible = running and session.phase == "playing"
-	if stat_labels.size() == 3:
-		stat_labels[0].text = "%d/%d" % [stats.nutrition, stats.nutrition_need]
-		stat_labels[1].text = str(stats.currency)
-		stat_labels[2].text = "%d/%d" % [stats.cards_owned, stats.card_limit]
 	pause_button.text = "Resume [Space]" if session.paused else "Pause [Space]"
 	pause_button.disabled = not running or _ui_pause_active() or session.phase != "playing"
 	for button in speed_buttons.values(): button.disabled = pause_button.disabled
@@ -2574,6 +2593,7 @@ func _show_title() -> void:
 	right_pressed_panel = -1
 	pause_overlay.hide()
 	running = false
+	_unbind_source_stats()
 	_restore_title_world()
 	dragging = -1
 	hud.hide()

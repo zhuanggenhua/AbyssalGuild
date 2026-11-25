@@ -16,6 +16,7 @@ const CycleController = preload("res://scripts/model/cycle_controller.gd")
 const HeldStack = preload("res://scripts/model/held_stack_registry.gd")
 const CraftingOrder = preload("res://scripts/model/crafting_order.gd")
 signal changed
+signal stats_snapshot_changed(snapshot: Dictionary)
 signal event_occurred(kind: String, payload: Dictionary)
 var catalog
 var collection = Collection.new()
@@ -558,13 +559,12 @@ func _complete_recipe(stack) -> void:
 ## Source AllCards is registered board stacks plus combatants, never attached gear.
 func world_cards() -> Array:
 	var result: Array = []
-	for card in cards.values():
-		if not equipment.owners.has(card.id):
-			result.append(card)
+	for id in source_card_ids():
+		result.append(cards[id])
 	return result
 
 func stats() -> Dictionary:
-	var result := {"currency": 0, "nutrition": 0, "characters": 0, "cards_owned": 0, "card_limit": int(catalog.settings("CardSettings").get("baseCardLimit", 24))}
+	var result := {"currency": 0, "nutrition": 0, "characters": 0, "cards_owned": 0, "total_boost": 0}
 	for card in world_cards():
 		var definition: Dictionary = catalog.get_definition(card.definition_guid)
 		var fields: Dictionary = definition.fields
@@ -573,14 +573,20 @@ func stats() -> Dictionary:
 			result.currency += 1
 		elif definition.get("script_class", "") != "PackDefinition":
 			result.cards_owned += 1
-		result.currency += card.stored_coins
+		if world._is_chest(card.id):
+			result.currency += card.stored_coins
 		if category == 3:
 			result.nutrition += card.nutrition
 		if category == 2:
 			result.characters += 1
-		result.card_limit += int(fields.get("boostAmount", 0))
-	result["nutrition_need"] = result.characters * int(catalog.settings("CardSettings").get("hungerPerCharacter", 2))
-	result["excess"] = maxi(0, result.cards_owned - result.card_limit)
+		if definition.get("script_class", "") == "LimitBoosterDefinition":
+			result.total_boost += int(fields.get("boostAmount", 0))
+	var settings: Dictionary = catalog.settings("CardSettings")
+	result["card_limit"] = int(settings.get("baseCardLimit", 24)) + result.total_boost
+	result["nutrition_need"] = result.characters * int(settings.get("hungerPerCharacter", 2))
+	# StatsSnapshot.ExcessCards is signed; only the selling condition treats
+	# values below or equal to zero as no outstanding sales.
+	result["excess"] = result.cards_owned - result.card_limit
 	return result
 
 func sell_card(id: int) -> bool:
@@ -799,6 +805,9 @@ func _check_selling_condition() -> void:
 	cycle.check_selling()
 
 func _notify_stats_changed() -> void:
+	# CardStatsUI subscribes at scene start, before the selling phase installs
+	# a callback that can cause nested spawns. Apply each snapshot in that order.
+	stats_snapshot_changed.emit(stats())
 	event_occurred.emit("stats_changed", {})
 
 func _discover_recipe(recipe_id: String) -> void:
