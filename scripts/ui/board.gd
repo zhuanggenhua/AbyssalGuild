@@ -163,6 +163,7 @@ class BoardDrag extends RefCounted:
 	var moved: bool = false
 	var start: Vector3 = Vector3.ZERO
 	var deferred_gear_pose: bool = false
+	var held_position_sampled: bool = false
 var _mouse_drag := BoardDrag.new()
 var _touch_drags: Dictionary = {}
 var _touch_panel_presses: Dictionary = {}
@@ -1516,6 +1517,7 @@ func _begin_card_drag(state: BoardDrag, id: int, pointer: Vector2) -> void:
 	state.grant = -1
 	state.combat.clear()
 	state.deferred_gear_pose = false
+	state.held_position_sampled = false
 	var detached_pose: Variant = null
 	var is_gear: bool = session.cards.has(id) and int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5
 	if is_gear and session.equipment.owners.has(id) and _allows_card_actions():
@@ -1736,9 +1738,14 @@ func _unhandled_input(event: InputEvent) -> void:
 				# touch-emulated mouse on the existing panel/blank path.
 				if event.device != InputEvent.DEVICE_ID_EMULATION or int(hit.card_id) < 0:
 					var already_held := _mouse_drag.id >= 0
+					var id: int = hit.card_id
+					var ordinary: bool = session.cards.has(id) and not session.combat.membership.has(id) and not session.equipment.owners.has(id)
 					_begin_card_press(hit, event.position, _source_equipment_outside!=null)
 					if not already_held and _mouse_drag.id >= 0 and event.device != InputEvent.DEVICE_ID_EMULATION:
 						_mouse_drag.receiver = weakref(views[_mouse_drag.id])
+						# Unity's ordinary PointerDown samples immediately; the special
+						# equipment and combat branches return before that step.
+						if ordinary: _update_card_drag(_mouse_drag,event.position)
 			else:
 				if event.device != InputEvent.DEVICE_ID_EMULATION or pressed_panel >= 0:
 					_finish_drag(event.position)
@@ -1988,6 +1995,7 @@ func _update_card_drag(state: BoardDrag, screen: Vector2) -> void:
 		# observe the real held position. Combat keeps its separate drag offset.
 		_set_board_card_position(state.id, _clamp_stack_position(state.id, state.anchor + state.delta, false))
 		state.delta = Vector2.ZERO
+		state.held_position_sampled = true
 	state.moved = not CardDragInput.is_click(state.start, session.card_target_position(state.id) + state.delta, CardDragInput.source_settings(catalog, session.scene_name))
 
 func _finish_drag(screen: Vector2) -> void:
@@ -1997,10 +2005,28 @@ func _finish_drag(screen: Vector2) -> void:
 		return
 	_finish_card_drag(_mouse_drag)
 
+func _ordinary_held_attach_origin(state: BoardDrag) -> Variant:
+	var id: int = state.id
+	if id < 0 or state.grant != id or not running or state.receiver == null or not _held_receiver_current(state): return null
+	if not state.held_position_sampled or state.deferred_gear_pose or global_transform != Transform3D.IDENTITY: return null
+	if catalog.data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT or session.scene_name not in ["Main","Island"]: return null
+	if session.combat.membership.has(id) or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id", -1)) == id: return null
+	var card = session.cards[id]
+	if int(catalog.fields(card.definition_guid).get("category", 0)) == 5: return null
+	var stack = session.stacks.get(session.drag.held_stack_id_for(id))
+	if stack == null or card.stack_id != stack.id or stack.card_ids.is_empty() or stack.card_ids.front() != id: return null
+	if views[id].get_parent() != self or state.delta != Vector2.ZERO: return null
+	# The leading held position is updated synchronously; its view may still
+	# contain the preceding input sample. Queries use original source X/Z.
+	var settings := CardDragInput.source_settings(catalog, session.scene_name)
+	var origin := Vector3(stack.position.x, float(settings.get("dragHeight", 0.1)), stack.position.y)
+	return origin if origin.is_finite() else null
+
 func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 	var id: int = state.id
 	var held_root := id
 	var deferred_gear := state.deferred_gear_pose
+	var ordinary_attach_origin: Variant = _ordinary_held_attach_origin(state) if outbound_pose == null else null
 	state.deferred_gear_pose = false
 	# Pointer-up's event position is not a new UpdateDragPosition sample.
 	var held_pose: Variant = views[id].global_position if _source_combat_hold_current(id,state) else null
@@ -2093,7 +2119,12 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 				else:
 					destination = _clamp_stack_position(id, destination)
 					_set_board_card_position(id, destination)
-					var target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, false, held_root)
+					# Unity schedules placement, then queries the not-yet-animated
+					# held transform. Successful trade can mutate the held stack.
+					var query_origin := Vector3(destination.x, 0, destination.y)
+					var ordinary_held: bool = id == held_root and not trade.accepted and ordinary_attach_origin is Vector3
+					if ordinary_held: query_origin = ordinary_attach_origin
+					var target: int = _nearby_stack(id, query_origin, float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, false, held_root, ordinary_held)
 					var attached := -1
 					if target >= 0:
 						var target_card: int = session.stacks[target].card_ids.back()
@@ -3124,9 +3155,11 @@ func _ensure_layout() -> void:
 	if session.catalog != null and _layout_signature() != layout_key:
 		_resolve_layout()
 
-func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -1, equipment_drop: bool = false, held_root: int = -1) -> int:
+func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -1, equipment_drop: bool = false, held_root: int = -1, ordinary_live_rank: bool = false) -> int:
 	if not session.cards.has(card_id): return -1
 	var candidates: Array = []
+	var live_candidates: Array = []
+	var live_rank_ready: bool = ordinary_live_rank and not equipment_drop and global_transform == Transform3D.IDENTITY
 	for stack in session.stacks.values():
 		if stack.id == session.cards[card_id].stack_id or stack.id == ignored: continue
 		var positions: Array[Vector3] = []
@@ -3143,7 +3176,35 @@ func _nearby_stack(card_id: int, point: Vector3, radius: float, ignored: int = -
 			var receiver: Dictionary = catalog.fields(session.cards[stack.card_ids.back()].definition_guid)
 			if equipment_drop and int(incoming.get("category", 0)) == 5 and int(receiver.get("category", 0)) == 2: eligible = true
 			candidates.append({"id": stack.id, "eligible": eligible, "card_positions": positions})
-	return BoardLayout.choose_attach_candidate(point, candidates, session.cards[card_id].stack_id, ignored)
+			# Admission stays separate. The source measures ALL members of
+			# each admitted eligible stack, not only members that supplied hits.
+			if live_rank_ready and eligible:
+				var live_positions := _ordinary_receiver_live_positions(stack.id, stack.card_ids, positions)
+				if live_positions.is_empty(): live_rank_ready = false
+				else: live_candidates.append({"id":stack.id,"eligible":true,"card_positions":live_positions})
+	var ranked := live_candidates if live_rank_ready else candidates
+	return BoardLayout.choose_attach_candidate(point, ranked, session.cards[card_id].stack_id, ignored)
+
+func _ordinary_receiver_live_positions(stack_id: int, ids: Array, centers: Array[Vector3]) -> Array[Vector3]:
+	if session.drag.owns_stack(stack_id) or _drag_locks_stack(stack_id) or layout_locks.has(stack_id): return []
+	var cycle_id: int = int(session.cycle.presentation_state().get("card_id", -1))
+	var positions: Array[Vector3] = []
+	for index in range(ids.size()):
+		var id: int = ids[index]
+		if id == cycle_id or _terminal_landings.has(id) or _combat_slot_returns.has(id) or combat_presentation.sample_actor(id) != null: return []
+		var pose: Variant = _sample_ai_actor_pose(id)
+		if not pose is Vector3 or not pose.is_finite(): return []
+		var card = session.cards[id]
+		var view: Node3D = views[id]
+		if view.get_parent() != self or not view.visible or view.global_transform.basis != Basis.IDENTITY: return []
+		if view.get_meta("definition_guid", "") != card.definition_guid: return []
+		var motion: Dictionary = card_motion.states[id]
+		if motion.get("identity", "") != "%d:%s" % [card.get_instance_id(), card.definition_guid]: return []
+		var center := centers[index]
+		var expected := Vector3(center.x, 0.06, -center.z) + Vector3(0, center.y, 0)
+		if motion.target != expected or motion.position != view.global_position: return []
+		positions.append(pose)
+	return positions
 
 func _select_spawn_target(card_id: int, ignored: int = -1) -> int:
 	if not session.cards.has(card_id): return -1

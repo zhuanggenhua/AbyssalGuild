@@ -33,6 +33,23 @@ return-to-origin, duplicate release, edge-clamp return, camera-only movement,
 menu-held release, active-scene thresholds and real pointer vendor payment. A previous integration expectation
 that rejected return-to-origin clicks was corrected to the locked source behavior.
 
-This remains a settled-pose input adapter. Drag height, trailing-card sway and
-animated current-pose physics queries are separate presentation work. Headless
-input injection is not physical mouse, rendered or cross-engine physics acceptance.
+Unity ordinary PointerDown samples the held leader immediately. Native mouse
+now joins the existing touch press path, so a press/release within one frame
+does not skip the source sample. Ordinary attachment queries the lifted
+leader's final held X/Z and authored height, not the separate grounded placement
+destination; successful trade and special release routes retain their logic.
+
+Collider admission and compatibility checks are unchanged. Only ordinary
+captured release can then rank admitted compatible stacks by all members'
+current positions, when each eligible stack has a complete, identity-checked
+ordinary horizontal pose mapping. If a receiver is unsettled vertically or
+has another presentation owner, the entire query retains the prior settled
+ranking. Spawn and equipment still use their unchanged settled ranking.
+The receiver collider-sync model, hit-order ties, original animated press
+height and same-frame Unity rendering remain unaccepted.
+
+Board regression covers no-motion mouse/touch, rejected vendor and grounded
+placement, two already-admitted stacks where only an animated nonfirst member
+is nearest, incompatible receiver, and complete fallback for a transformed
+receiver. Headless input injection is not physical mouse, rendered or
+cross-engine physics acceptance.
