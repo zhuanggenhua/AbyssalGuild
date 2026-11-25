@@ -198,11 +198,14 @@ func spawn_card(guid: String, position: Vector2 = Vector2.ZERO, target_stack: in
 
 ## Presentation-only request at a source PlayPuffParticle call site. Capture the
 ## individual source-coordinate pose while the card exists, without drawing RNG.
-func request_puff(id: int, sampled_position: Variant = null) -> void:
+func request_puff(id: int, sampled_position: Variant = null, held_sample := false) -> void:
 	if not cards.has(id):
 		return
-	var position: Vector3 = sampled_position if sampled_position is Vector3 and sampled_position.is_finite() else cycle.pose(id)
-	event_occurred.emit("puff_requested", {"card_id": id, "position": position})
+	var sampled: bool = sampled_position is Vector3 and sampled_position.is_finite()
+	var position: Vector3 = sampled_position if sampled else cycle.pose(id)
+	var payload := {"card_id": id, "position": position}
+	if sampled and held_sample: payload["held_sample"] = true
+	event_occurred.emit("puff_requested", payload)
 
 func _remove_card(id: int) -> void:
 	if not cards.has(id):
@@ -218,7 +221,7 @@ func _remove_card(id: int) -> void:
 
 ## Kill differs from sale/crafting destruction; fully consumed food and packs also Kill.
 ## Source Kill draws one loot entry only for Character/Mob categories.
-func kill_card(id: int, sampled_position: Variant = null) -> bool:
+func kill_card(id: int, sampled_position: Variant = null, held_puff := false) -> bool:
 	if not cards.has(id):
 		return false
 	var card = cards[id]
@@ -235,7 +238,7 @@ func kill_card(id: int, sampled_position: Variant = null) -> bool:
 	if category == 2 or category == 9:
 		spawn_card(_roll_loot(fields.get("loot", [])), death_position)
 	var stack = stacks.get(card.stack_id)
-	request_puff(id, death_pose)
+	request_puff(id, death_pose, held_puff and sampled_position is Vector3)
 	_remove_card(id)
 	if stack != null:
 		_validate_craft(stack)
@@ -280,7 +283,7 @@ func _weighted(entries: Array, minimum_one: bool) -> String:
 			return guid
 	return ""
 
-func open_pack(id: int, carried_press: bool = false, lifted_target: Variant = null) -> int:
+func open_pack(id: int, carried_press: bool = false, lifted_target: Variant = null, held_puff := false) -> int:
 	if (phase not in ["playing", "selling"] and not carried_press) or not cards.has(id):
 		return -1
 	var card = cards[id]
@@ -324,7 +327,7 @@ func open_pack(id: int, carried_press: bool = false, lifted_target: Variant = nu
 	var spawned: int = spawn_card(output, draw_position, -1, {"height": draw_height})
 	card.uses_left -= 1
 	if card.uses_left <= 0:
-		kill_card(id,lifted_target if lifted else null)
+		kill_card(id,lifted_target if lifted else null,held_puff)
 	event_occurred.emit("pack_opened", {"card_id": spawned, "slot": index})
 	changed.emit()
 	return spawned

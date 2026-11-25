@@ -87,3 +87,28 @@ The pointer fixture confirms a second press after 60 ms with 0.013 world
 movement does not spend another coin or pack slot, while the 120 ms settled
 control does. Non-grounded or moved-target chest restoration and timed Unity
 Play Mode comparison are outside this bounded probe.
+
+Final ordinary pack and successful ordinary chest clicks now pass the sampled
+held Transform to the actual Puff node, even before the card view has caught
+up with the input frame. The chest label is already decremented at Puff; its
+coin still queries from held XZ plus card width at Y=0 before the chest returns
+to the press origin. The pack's draw query is independently lifted to Y=0.2.
+Other Puff calls retain their current-view priority and model fallback. A
+headless probe instantiates the authored Puff node and checks its world origin,
+not its final appearance or same-engine screenshots.
+
+### Standard drop: equipment and combat
+
+In the locked Unity `CardController.HandleStandardDrop`, trade precedes
+equipment, combat-rectangle join, new combat, and ordinary placement.
+Equipment and new combat use an overlap sphere at the still-held transform.
+For a supported captured `Main` / `Island` hold, the Godot adapter keeps that
+source lift for loose equipment and new combat, including motion and release
+in the same frame before the view updates. Combat ranks individual overlapping
+cards before testing the winning stack's faction; ordinary attachment still
+uses its separate stack ranking. A combat-rectangle join remains an X/Z test.
+
+This covers the captured release and grounded target fixtures, not native
+PhysX overlap order, moving target synchronization, or every collider edge.
+The existing deferred equipped-card, trade-mutated stack, and uncaptured
+adapter paths retain their prior fallbacks.

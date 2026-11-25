@@ -209,18 +209,18 @@ func can_click_chest(chest_id: int) -> bool:
 
 ## Source's shared per-coin withdrawal, without spawning or notifying stats.
 ## The vendor publishes stats once after the whole transaction.
-func take_chest_coin(chest_id: int) -> bool:
+func take_chest_coin(chest_id: int, held_puff: Variant = null) -> bool:
 	var session = _session.get_ref()
 	if not _is_chest(chest_id) or session.catalog.get_definition(currency_guid).is_empty() or session.cards[chest_id].stored_coins <= 0:
 		return false
 	session.cards[chest_id].stored_coins -= 1
 	session.event_occurred.emit("chest_balance_changed", {"card_id": chest_id, "count": session.cards[chest_id].stored_coins})
-	session.request_puff(chest_id)
+	session.request_puff(chest_id,held_puff,held_puff is Vector3)
 	return true
 
 ## Caller supplies Board-enforced spawn position for click withdrawal.
-func withdraw_coin(chest_id: int, spawn_on_board: bool = false, spawn_position: Vector2 = Vector2.ZERO) -> bool:
-	if not take_chest_coin(chest_id):
+func withdraw_coin(chest_id: int, spawn_on_board: bool = false, spawn_position: Vector2 = Vector2.ZERO, held_puff: Variant = null) -> bool:
+	if not take_chest_coin(chest_id,held_puff):
 		return false
 	var session = _session.get_ref()
 	if spawn_on_board:

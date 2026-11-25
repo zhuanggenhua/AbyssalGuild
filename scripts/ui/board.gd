@@ -2013,14 +2013,13 @@ func _finish_drag(screen: Vector2) -> void:
 		return
 	_finish_card_drag(_mouse_drag)
 
-func _ordinary_held_attach_origin(state: BoardDrag) -> Variant:
+func _source_standard_held_pose(state: BoardDrag) -> Variant:
 	var id: int = state.id
 	if id < 0 or state.grant != id or not running or state.receiver == null or not _held_receiver_current(state): return null
 	if not state.held_position_sampled or state.deferred_gear_pose or global_transform != Transform3D.IDENTITY: return null
 	if catalog.data.get("provenance", {}).get("source_commit") != SourceColdCrafting.SOURCE_COMMIT or session.scene_name not in ["Main","Island"]: return null
 	if session.combat.membership.has(id) or session.equipment.owners.has(id) or int(session.cycle.presentation_state().get("card_id", -1)) == id: return null
 	var card = session.cards[id]
-	if int(catalog.fields(card.definition_guid).get("category", 0)) == 5: return null
 	var stack = session.stacks.get(session.drag.held_stack_id_for(id))
 	if stack == null or card.stack_id != stack.id or stack.card_ids.is_empty() or stack.card_ids.front() != id: return null
 	if views[id].get_parent() != self or state.delta != Vector2.ZERO: return null
@@ -2034,7 +2033,11 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 	var id: int = state.id
 	var held_root := id
 	var deferred_gear := state.deferred_gear_pose
-	var ordinary_attach_origin: Variant = _ordinary_held_attach_origin(state) if outbound_pose == null else null
+	var standard_held_pose: Variant = _source_standard_held_pose(state) if outbound_pose == null else null
+	var ordinary_attach_origin: Variant = standard_held_pose
+	if standard_held_pose is Vector3 and int(catalog.fields(session.cards[id].definition_guid).get("category",0)) == 5:
+		# Loose gear shares terminal queries, not the ordinary placement/attach path.
+		ordinary_attach_origin = null
 	state.deferred_gear_pose = false
 	# Pointer-up's event position is not a new UpdateDragPosition sample.
 	var held_pose: Variant = views[id].global_position if _source_combat_hold_current(id,state) else null
@@ -2106,7 +2109,7 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 			var pack_stack: int = session.cards[id].stack_id
 			click_landing = _grounded_click_landing_receipt(id,ordinary_attach_origin,held_target,"uses_left")
 			layout_locks[pack_stack] = true
-			session.open_pack(id, carried_press, pack_target)
+			session.open_pack(id, carried_press, pack_target, ordinary_attach_origin is Vector3)
 			layout_locks.erase(pack_stack)
 			click_handled = true
 		elif session.world._is_chest(id):
@@ -2115,7 +2118,7 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 			# Validate only the unchanged-XZ grounded subset.
 			if carried_press and state.chest_grounded_at_press and state.start.y == 0.0:
 				click_landing = _grounded_click_landing_receipt(id,ordinary_attach_origin,chest_press,"stored_coins")
-			click_handled = _withdraw_chest(id, carried_press, chest_press)
+			click_handled = _withdraw_chest(id, carried_press, chest_press, ordinary_attach_origin)
 	if click_handled:
 		# Native safety cleanup for source HandleClick's early-return pause leak.
 		session.drag.finish_standard_for(held_root)
@@ -2132,10 +2135,13 @@ func _finish_card_drag(state: BoardDrag, outbound_pose: Variant = null) -> void:
 				session.drag.finish_standard_for(held_root)
 			else:
 				var equipment_target: int = _nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)), -1, true, held_root)
-				if _try_equip_drop(id, destination):
+				# Trade can replace or mutate the held stack. Keep its existing
+				# fallback, as well as the programmatic and deferred-gear paths.
+				var terminal_origin: Variant = standard_held_pose if id == held_root and not trade.accepted else null
+				if _try_equip_drop(id, destination, terminal_origin):
 					if session.equipment.owners.has(id): session.drag.finish_terminal_for(held_root)
 					else: session.drag.finish_standard_for(held_root) # Existing native equipment-tail guard.
-				elif _try_combat_drop(id, destination, equipment_target):
+				elif _try_combat_drop(id, destination, equipment_target, terminal_origin):
 					session.drag.finish_terminal_for(held_root)
 				else:
 					destination = _clamp_stack_position(id, destination)
@@ -2861,14 +2867,14 @@ func _withdraw_selected() -> void:
 	_withdraw_chest(selected)
 	_refresh()
 
-func _withdraw_chest(id: int, carried_press: bool = false, click_origin: Variant = null) -> bool:
+func _withdraw_chest(id: int, carried_press: bool = false, click_origin: Variant = null, held_puff: Variant = null) -> bool:
 	if (not _allows_card_actions() and not carried_press) or not session.world.can_click_chest(id):
 		notice.text = "Select an unstacked chest to withdraw a coin."
 		return false
 	var position: Vector2 = session.card_target_position(id) + Vector2(_card_footprint(id).x, 0)
 	# Source EnforcePlacementRules(spawnPos, null) returns unchanged, even
 	# outside board bounds. The factory queries attachment before placement.
-	var withdrew: bool = session.world.withdraw_coin(id, true, position)
+	var withdrew: bool = session.world.withdraw_coin(id, true, position, held_puff)
 	notice.text = "Withdrew a coin." if withdrew else "Chest is empty."
 	if withdrew:
 		if click_origin is Vector2 and session.cards.has(id):
@@ -3381,7 +3387,7 @@ func _combatants(ids: Array) -> Array:
 		if int(fields.get("category", 0)) in [2, 9] and int(fields.get("faction", 0)) in [1, 2]: result.append(id)
 	return result
 
-func _try_combat_drop(id: int, destination: Vector2, equipment_target: int) -> bool:
+func _try_combat_drop(id: int, destination: Vector2, equipment_target: int, held_pose: Variant = null) -> bool:
 	var incoming: Dictionary = catalog.fields(session.cards[id].definition_guid)
 	# Equipment remains a terminal action before join/start, as in the source.
 	if int(incoming.get("category", 0)) == 5 and equipment_target >= 0:
@@ -3401,7 +3407,10 @@ func _try_combat_drop(id: int, destination: Vector2, equipment_target: int) -> b
 		if session.stacks.has(source.id) and not session.stacks[source.id].card_ids.is_empty():
 			_set_board_card_position(session.stacks[source.id].card_ids[0], original_join)
 		return joined
-	var target: int = _raw_nearby_stack(id, Vector3(destination.x, 0, destination.y), float(catalog.settings("CardSettings").get("attachRadius", 0.25)))
+	# CombatRect is a horizontal test; the next source action instead searches
+	# overlapping CardInstances around the still-lifted transform.
+	var point: Vector3 = held_pose if held_pose is Vector3 else Vector3(destination.x,0,destination.y)
+	var target: int = _raw_nearby_stack(id, point, _terminal_query_radius(held_pose))
 	if target < 0: return false
 	var target_stack = session.stacks[target]
 	var other_faction: int = int(catalog.fields(session.cards[target_stack.card_ids[0]].definition_guid).get("faction", 0))
@@ -3419,24 +3428,30 @@ func _try_combat_drop(id: int, destination: Vector2, equipment_target: int) -> b
 		if not remaining.card_ids.is_empty(): _set_board_card_position(remaining.card_ids[0], original)
 	return started >= 0
 
+func _terminal_query_radius(held_pose: Variant) -> float:
+	var settings: Dictionary = CardDragInput.source_settings(catalog,session.scene_name) if held_pose is Vector3 else catalog.settings("CardSettings")
+	return float(settings.get("attachRadius",0.25))
+
 func _raw_nearby_stack(id: int, point: Vector3, radius: float) -> int:
-	var candidates: Array = []
+	var nearest := -1
+	var best_distance := INF
 	for stack in session.stacks.values():
 		if stack.id == session.cards[id].stack_id: continue
-		var positions: Array[Vector3] = []
-		var hit: bool = false
-		for index in range(stack.card_ids.size()):
-			var center := Vector3(stack.position.x, 0, stack.position.y) + _stack_step() * index
-			positions.append(center)
-			var raw: Vector3 = _card_collider_size(stack.card_ids[index])
-			hit = hit or BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - raw * 0.5, raw))
-		if hit: candidates.append({"id": stack.id, "eligible": true, "card_positions": positions})
-	return BoardLayout.choose_attach_candidate(point, candidates, session.cards[id].stack_id)
+		for member in stack.card_ids:
+			var center: Vector3 = session.card_target_position_3d(member)
+			var size: Vector3 = _card_collider_size(member)
+			if not BoardLayout.sphere_intersects_aabb(point, radius, AABB(center - size * 0.5,size)): continue
+			# Unlike ordinary attach, each hit contributes only its own distance.
+			var distance := center.distance_squared_to(point)
+			if distance < best_distance:
+				best_distance = distance
+				nearest = stack.id
+	return nearest
 
-func _try_equip_drop(id: int, destination: Vector2) -> bool:
+func _try_equip_drop(id: int, destination: Vector2, held_pose: Variant = null) -> bool:
 	if int(catalog.fields(session.cards[id].definition_guid).get("category", 0)) != 5: return false
-	var point := Vector3(destination.x, 0, destination.y)
-	var radius: float = float(catalog.settings("CardSettings").get("attachRadius", 0.25))
+	var point: Vector3 = held_pose if held_pose is Vector3 else Vector3(destination.x,0,destination.y)
+	var radius := _terminal_query_radius(held_pose)
 	var best: int = -1
 	var distance: float = INF
 	for card in session.cards.values():
@@ -3959,11 +3974,16 @@ func _sample_cycle_pose(id: int) -> Vector3:
 func _spawn_puff(payload: Dictionary) -> void:
 	feedback.play_event("Puff") # Sound is independent of optional private visuals.
 	var id: int = int(payload.get("card_id", -1))
+	var source: Variant = payload.get("position")
+	var valid_source: bool = source is Vector3 and source.is_finite()
 	var origin: Vector3
-	if views.has(id) and is_instance_valid(views[id]) and not views[id].is_queued_for_deletion():
+	# A verified synchronous held sample is current even when the presented
+	# card has not caught up yet. Other cue payloads remain fallbacks.
+	if payload.get("held_sample",false) == true and valid_source:
+		origin = Vector3(source.x, source.y, -source.z)
+	elif views.has(id) and is_instance_valid(views[id]) and not views[id].is_queued_for_deletion():
 		origin = views[id].global_position
-	elif payload.get("position") is Vector3:
-		var source: Vector3 = payload.position
+	elif valid_source:
 		origin = Vector3(source.x, source.y, -source.z)
 	else:
 		return

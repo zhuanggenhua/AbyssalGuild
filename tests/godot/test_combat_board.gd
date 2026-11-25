@@ -2,6 +2,15 @@ extends SceneTree
 const Board = preload("res://scripts/ui/board.gd")
 const CombatLayout = preload("res://scripts/model/combat_layout.gd")
 const BoardLayout = preload("res://scripts/model/board_layout.gd")
+const CardDragInput = preload("res://scripts/ui/card_drag_input.gd")
+class ColliderProbeBoard extends "res://scripts/ui/board.gd":
+	var collider_sizes: Dictionary = {}
+	var combat_queries: Array[Vector3] = []
+	func _card_collider_size(id: int) -> Vector3:
+		return collider_sizes[id] if collider_sizes.has(id) else super._card_collider_size(id)
+	func _raw_nearby_stack(id: int, point: Vector3, radius: float) -> int:
+		combat_queries.append(point)
+		return super._raw_nearby_stack(id, point, radius)
 var checks: int = 0
 var failures: int = 0
 func check(value: bool, label: String) -> void:
@@ -15,8 +24,108 @@ func drop(board, id: int, destination: Vector2) -> void:
 	board.drag_moved = true
 	board.drag_delta = destination - board.session.cards[id].position
 	board._finish_drag(board.camera.unproject_position(Vector3(destination.x, 0, -destination.y)))
+func check_combat_hit_ranking(board, villager_guid: String, enemy_guid: String) -> void:
+	# Deliberately different collider widths isolate per-hit ranking from
+	# ordinary attach, which ranks all members of an admitted stack.
+	var attacker: int = board.session.spawn_card(villager_guid, Vector2(-4, 0), -1, {"refuse_attach": true})
+	var decoy: int = board.session.spawn_card(villager_guid, Vector2(4, 0), -1, {"refuse_attach": true})
+	var decoy_stack: int = board.session.cards[decoy].stack_id
+	var tail: int = board.session.spawn_card(villager_guid, Vector2(4, 0), decoy_stack)
+	var opponent: int = board.session.spawn_card(enemy_guid, Vector2(0, 4), -1, {"refuse_attach": true})
+	board._set_board_card_position(decoy, Vector2(0.30, 0))
+	board._set_board_card_position(opponent, Vector2(-0.32, 0))
+	var narrow := Vector3(0.04, 0.10, 0.10)
+	var wide := Vector3(0.40, 0.10, 0.20)
+	board.collider_sizes = {decoy: narrow, tail: wide, opponent: wide}
+	var point := Vector3.ZERO
+	var root_center := Vector3(0.30, 0, 0)
+	var tail_center: Vector3 = root_center + board._stack_step()
+	var opponent_center := Vector3(-0.32, 0, 0)
+	var radius := 0.25
+	check(not BoardLayout.sphere_intersects_aabb(point, radius, AABB(root_center - narrow * 0.5, narrow))
+		and BoardLayout.sphere_intersects_aabb(point, radius, AABB(tail_center - wide * 0.5, wide))
+		and BoardLayout.sphere_intersects_aabb(point, radius, AABB(opponent_center - wide * 0.5, wide))
+		and root_center.length_squared() < opponent_center.length_squared()
+		and opponent_center.length_squared() < tail_center.length_squared(), "combat probe distinguishes an admitted member from a non-hit stack root")
+	check(board._raw_nearby_stack(attacker, point, radius) == board.session.cards[opponent].stack_id,
+		"combat initiation ranks individual collider hits, not non-hit members of admitted stacks")
+	for id in [attacker, decoy, tail, opponent]: board.session._remove_card(id)
+	board.collider_sizes.clear()
+	board._refresh()
+func check_native_lifted_combat_query(board, villager_guid: String, enemy_guid: String, depth: float, should_fight: bool) -> void:
+	for id in board.session.cards.keys(): board.session._remove_card(id)
+	var attacker: int = board.session.spawn_card(villager_guid, Vector2(-2, 0), -1, {"refuse_attach": true})
+	var enemy: int = board.session.spawn_card(enemy_guid, Vector2(3, 0), -1, {"refuse_attach": true})
+	board._set_board_card_position(enemy, Vector2(0, depth))
+	board._refresh()
+	await physics_frame
+	await physics_frame
+	var settings: Dictionary = CardDragInput.source_settings(board.catalog, board.session.scene_name)
+	var height: float = settings.dragHeight
+	var radius: float = settings.attachRadius
+	var size: Vector3 = board._card_collider_size(enemy)
+	var center := Vector3(0, 0, depth)
+	var aabb := AABB(center - size * 0.5, size)
+	check(BoardLayout.sphere_intersects_aabb(Vector3.ZERO, radius, aabb)
+		and BoardLayout.sphere_intersects_aabb(Vector3(0, height, 0), radius, aabb)==should_fight,
+		"authored enemy collider distinguishes both sides of the lifted-query boundary")
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = board.camera.unproject_position(board.views[attacker].global_position)
+	board._unhandled_input(press)
+	check(board.dragging == attacker and board.session.drag.active_for(attacker), "native mouse press captures ordinary source combatant")
+	var pointer: Vector2 = board.drag_origin - board.drag_anchor
+	board._update_drag_position(board.camera.unproject_position(Vector3(pointer.x, 0, -pointer.y)))
+	var held: Vector2 = board.session.card_target_position(attacker)
+	check(held.length() < 0.0001, "native captured drag reaches exact XZ query fixture")
+	board.combat_queries.clear()
+	var release := InputEventMouseButton.new()
+	release.button_index = MOUSE_BUTTON_LEFT
+	release.pressed = false
+	release.position = board._card_pointer
+	board._input(release)
+	check(board.combat_queries.size() == 1 and board.combat_queries[0].is_equal_approx(Vector3(held.x, height, held.y)),
+		"ordinary combat query uses synchronously lifted source hold before grounding")
+	check(board.session.combat.membership.has(attacker)==should_fight and board.session.combat.membership.has(enemy)==should_fight,
+		"actual captured combatants enter combat only from a valid lifted hit")
+	check(not board.session.drag.active_for(attacker),"combat or placement clears held transaction")
+	if should_fight:
+		check(board.session.combat.membership.get(attacker,-1)==board.session.combat.membership.get(enemy,-2),
+			"both grounded stacks enter the same combat task")
+func check_native_lifted_equip_query(board, villager_guid: String, depth: float, should_equip: bool) -> void:
+	for id in board.session.cards.keys(): board.session._remove_card(id)
+	var gear: int = board.session.spawn_card(board.catalog.find_by_name("Sword"), Vector2(-2, 0), -1, {"refuse_attach": true})
+	var wearer: int = board.session.spawn_card(villager_guid, Vector2(3, 0), -1, {"refuse_attach": true})
+	board._set_board_card_position(wearer,Vector2(0,depth))
+	board._refresh()
+	await physics_frame
+	await physics_frame
+	var settings: Dictionary = CardDragInput.source_settings(board.catalog,board.session.scene_name)
+	var box: Vector3 = board._card_collider_size(wearer)
+	var aabb := AABB(Vector3(0,0,depth)-box*.5,box)
+	check(BoardLayout.sphere_intersects_aabb(Vector3.ZERO,settings.attachRadius,aabb)
+		and BoardLayout.sphere_intersects_aabb(Vector3(0,settings.dragHeight,0),settings.attachRadius,aabb)==should_equip,
+		"authored character collider distinguishes grounded and lifted sword query")
+	var event := InputEventMouseButton.new()
+	event.button_index=MOUSE_BUTTON_LEFT
+	event.pressed=true
+	event.position=board.camera.unproject_position(board.views[gear].global_position)
+	board._unhandled_input(event)
+	check(board.dragging==gear and board.session.drag.active_for(gear),"captured loose Sword starts normal hold")
+	var point: Vector2 = board.drag_origin - board.drag_anchor
+	board._update_drag_position(board.camera.unproject_position(Vector3(point.x,0,-point.y)))
+	check(board.session.card_target_position(gear).length() < .0001,"held Sword reached the fixture XZ")
+	event=InputEventMouseButton.new()
+	event.button_index=MOUSE_BUTTON_LEFT
+	event.pressed=false
+	event.position=board._card_pointer
+	board._input(event)
+	check((board.session.equipment.owners.get(gear,-1)==wearer)==should_equip,
+		"actual captured Sword %s at lifted overlap boundary"%("equips" if should_equip else "does not equip"))
+	check(not board.session.drag.active_for(gear),"release clears held transaction")
 func run() -> void:
-	var board = Board.new()
+	var board = ColliderProbeBoard.new()
 	board.slot_root = "user://ui-test-slots-%d-%d" % [Time.get_unix_time_from_system(), Time.get_ticks_usec()]
 	board.legacy_paths.clear()
 	root.add_child(board)
@@ -35,6 +144,7 @@ func run() -> void:
 		if int(entry.fields.get("category", 0)) == 9 and int(entry.fields.get("faction", 0)) == 2:
 			enemy_guid = entry.guid
 			break
+	check_combat_hit_ranking(board, villager_guid, enemy_guid)
 	var player: int = board.session.spawn_card(villager_guid, Vector2(-3, -1), -1, {"refuse_attach": true})
 	var enemy: int = board.session.spawn_card(enemy_guid, Vector2(1, -1), -1, {"refuse_attach": true})
 	var expected_rng := RandomNumberGenerator.new()
@@ -168,6 +278,10 @@ func run() -> void:
 	board._refresh()
 	check(board.session.combat.tasks.size() == 1 and not board.session.combat.tasks.has(left) and not board.session.combat.tasks.has(right), "resized rectangle overlap merges separate tasks")
 	check(board.combat_rectangles.size() == 1 and board.combat_layouts.size() == 1, "resize merge removes stale rectangles")
+	await check_native_lifted_combat_query(board, villager_guid, enemy_guid,.74,false)
+	await check_native_lifted_combat_query(board, villager_guid, enemy_guid,.72,true)
+	await check_native_lifted_equip_query(board,villager_guid,.74,false)
+	await check_native_lifted_equip_query(board,villager_guid,.72,true)
 	print("Combat board checks: %d passed / %d total" % [checks - failures, checks])
 	board.queue_free()
 	await process_frame

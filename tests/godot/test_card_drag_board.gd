@@ -123,6 +123,7 @@ func run() -> void:
 	await ordinary_pointer_rank(board,vendor_point)
 	await final_slot_receiver(board)
 	await grounded_repeat(board)
+	await captured_click_puff(board)
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
 	print("Card drag board: %d/%d passed" % [checks-failures,checks])
 	quit(0 if failures == 0 else 1)
@@ -333,3 +334,56 @@ func grounded_repeat(board: WitnessBoard) -> void:
 					"settled repeat just .013 away clicks successfully: "+counter)
 			board.session.event_occurred.disconnect(observe)
 	board.session.spawn_layout_resolver = Callable()
+
+func captured_click_puff(board: WitnessBoard) -> void:
+	var chest_guid: String = board.catalog.find_by_name("Card_Chest_WoodenChest")
+	for guid in [chest_guid,board.OUTBOUND_STARTER_PACK]:
+		var chest: bool = guid == chest_guid
+		for id in board.session.cards.keys(): board.session._remove_card(id)
+		board._clear_puffs()
+		board.session.spawn_target_selector = Callable()
+		var at := Vector2(-1.3,-1.7)
+		var id: int = board.session.spawn_card(guid,at,-1,{"refuse_attach":true})
+		if chest: board.session.cards[id].stored_coins = 2
+		else: board.session.cards[id].uses_left = 1
+		board.layout_key = board._layout_signature()
+		board._refresh()
+		board._sync_views(1.0)
+		await physics_frame; await physics_frame
+		var former: Vector3 = board.views[id].global_position
+		var observed: Array = []
+		var label_at_effect: Array = []
+		var created_renderer: Array[bool] = []
+		board.puff_factory = func(scene_name: String, seed_no: int) -> Node3D:
+			if chest: label_at_effect.append(board.views[id].stat_labels.price.text)
+			var node: Node3D = board.visual_assets.create_puff(scene_name,seed_no)
+			created_renderer.append(node != null)
+			return node if node != null else Node3D.new()
+		board.session.spawn_target_selector = func(spawned: int, _ignored: int) -> int:
+			observed.append([board.session.cards[spawned].position,board.session.spawn_query_height])
+			return -1
+		press(board,id)
+		motion(board,Vector2(.012,0))
+		var held: Vector2 = board.session.card_target_position(id)
+		var start_y: float = Drag.source_settings(board.catalog,board.session.scene_name).dragHeight
+		var effect_at := Vector3(held.x,start_y,-held.y)
+		check(not board.drag_moved and not former.is_equal_approx(effect_at)
+			and board.views[id].global_position.is_equal_approx(former), "same-frame held model differs from live prior view")
+		release(board)
+		check(board.puffs.size()==1 and board.puffs[0].global_position.is_equal_approx(effect_at),
+			"spawned captured click Puff uses held sample, not the live prior view: "+("chest" if chest else "pack"))
+		if not board.visual_assets.puff_configuration(board.session.scene_name).is_empty():
+			check(created_renderer==[true],"configured source particle node (not test dummy) was attached")
+		else:
+			print("SKIP captured click native Puff renderer; licensed visual manifest unavailable")
+		if chest:
+			check(label_at_effect==["1"] and board.session.cards[id].stored_coins==1
+				and board.session.card_target_position(id).is_equal_approx(at),
+				"chest label is updated before effect, then restores press origin")
+			check(observed.size()==1 and observed[0][0].is_equal_approx(held+Vector2(board._card_footprint(id).x,0))
+				and is_zero_approx(observed[0][1]), "attached coin query stays flat and at held point plus width")
+		else:
+			check(not board.session.cards.has(id) and observed.size()==1 and observed[0][0].is_equal_approx(held)
+				and is_equal_approx(observed[0][1],.2), "last slot draw and pack removal intact")
+		board.session.spawn_target_selector = Callable()
+		board.puff_factory = Callable()
