@@ -64,7 +64,9 @@ var source_background: Node3D
 var world_environment: Environment
 var flat_board_lighting
 var source_flat_environment_bound: bool = false
+signal source_board_bounds_updated(bounds: Rect2)
 var geometry_key: String = ""
+var _board_boost := 0
 var layout_key: String = ""
 ## Explicit actual cold scene entry only, not Codec staging or travel admission.
 var source_restore_entry: String = ""
@@ -885,6 +887,7 @@ func start_new() -> void:
 	notice.text = "Created slot %d. Existing saves were kept." % active_slot
 
 func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {}) -> void:
+	_unbind_source_stats()
 	_source_equipment_outside = SourceEquipmentOutsidePress.new() if (
 		session.scene_name in ["Main","Island"]
 		and catalog.data.get("provenance",{}).get("source_commit")==SourceColdCrafting.SOURCE_COMMIT) else null
@@ -960,7 +963,11 @@ func _enter_game(travel_layout: Dictionary = {}, cold_crafting: Dictionary = {})
 	_replace_scene_background(session.scene_name)
 	# Original mesh is optional; validated source vertex bounds remain the fallback.
 	geometry_key = ""
+	# The restored session already exists before this scene's admission/layout.
+	# Keep the existing cold/travel initialization order; resize transactions below are live only.
+	_board_boost = mini(int(session.stats().total_boost), 100)
 	_update_board_geometry()
+	_clamp_camera()
 	session.world.actor_pose_sampler = _sample_ai_actor_pose
 	session.ai.point_validator = _ai_point_valid
 	session.ai.combat_geometry = _combat_geometry
@@ -2104,13 +2111,17 @@ func _bind_source_stats() -> void:
 	_unbind_source_stats()
 	_stats_source = weakref(session)
 	session.stats_snapshot_changed.connect(_update_stats_text)
+	session.stats_snapshot_changed.connect(_on_board_stats_snapshot)
 	_update_stats_text(session.stats())
 
 
 func _unbind_source_stats() -> void:
 	var owner = _stats_source.get_ref() if _stats_source != null else null
-	if owner != null and owner.stats_snapshot_changed.is_connected(_update_stats_text):
-		owner.stats_snapshot_changed.disconnect(_update_stats_text)
+	if owner != null:
+		if owner.stats_snapshot_changed.is_connected(_update_stats_text):
+			owner.stats_snapshot_changed.disconnect(_update_stats_text)
+		if owner.stats_snapshot_changed.is_connected(_on_board_stats_snapshot):
+			owner.stats_snapshot_changed.disconnect(_on_board_stats_snapshot)
 	_stats_source = null
 
 
@@ -2122,7 +2133,6 @@ func _update_stats_text(stats: Dictionary) -> void:
 
 
 func _refresh() -> void:
-	_update_board_geometry()
 	_sync_trade_zones()
 	_sync_views()
 	var stats: Dictionary = session.stats()
@@ -2850,10 +2860,32 @@ func _replace_scene_background(scene_name: String) -> void:
 	if source_background != null:
 		add_child(source_background)
 
+# Board.HandleStatsChanged compares raw TotalBoost against the stored capped
+# blend weight, not against the previous raw value or previous mesh footprint.
+func _on_board_stats_snapshot(snapshot: Dictionary) -> void:
+	if not running: return
+	var raw := int(snapshot.total_boost)
+	if raw == _board_boost: return
+	var shrinking := raw < _board_boost
+	_board_boost = mini(raw, 100)
+	_update_board_geometry()
+	_clamp_camera()
+	# Unity re-clamps the current target even when a >100 event bakes the same bounds.
+	camera_motion.clamp_target()
+	_sync_trade_zones()
+	source_board_bounds_updated.emit(session.board_bounds)
+	if not shrinking: return
+	var clamped := BoardLayout.clamp_board_limits(_layout_states(), session.board_bounds, session.board_top_margin)
+	if clamped.moved:
+		# Ordinary CardMotion uses the same animated retarget as normal placement.
+		_apply_layout(clamped)
+		_resolve_layout()
+
+
+# Rebuild only the current weight (also used by the isolated material lifetime probe).
 func _update_board_geometry() -> void:
 	if session.catalog == null: return
-	var base_limit: int = int(catalog.settings("CardSettings").get("baseCardLimit", 24))
-	var boost: float = clampf((session.stats().card_limit - base_limit) / 100.0, 0.0, 1.0)
+	var boost: float = float(_board_boost) / 100.0
 	var key: String = session.scene_name + ":" + str(boost)
 	if key == geometry_key: return
 	geometry_key = key
@@ -2861,7 +2893,6 @@ func _update_board_geometry() -> void:
 	if not bounds.has_area():
 		# Verified original Board.fbx vertices: 12x8 base, 24x16 Scale target.
 		bounds = Rect2(Vector2(-6, -4) * (1.0 + boost), Vector2(12, 8) * (1.0 + boost))
-	var old_bounds: Variant = session.board_bounds
 	session.board_bounds = bounds
 	if is_instance_valid(flat_board_lighting): flat_board_lighting.clear()
 	if original_board != null:
@@ -2878,9 +2909,6 @@ func _update_board_geometry() -> void:
 		board_mesh.show()
 		board_mesh.mesh.size = Vector3(bounds.size.x, 0.2, bounds.size.y)
 		visual_assets.apply_scene(camera, board_mesh, session.scene_name)
-	if old_bounds is Rect2 and bounds.get_area() < old_bounds.get_area():
-		_apply_layout(BoardLayout.enforce_board_limits(_layout_states(), [], bounds, session.board_top_margin, int(catalog.settings("CardSettings").get("maxIterations", 8))))
-	_clamp_camera()
 
 func _clamp_stack_position(card_id: int, point: Vector2, placement_rules: bool = true) -> Vector2:
 	if not session.board_bounds is Rect2 or not session.cards.has(card_id): return point
@@ -3026,7 +3054,6 @@ func _camera_left_blocked() -> bool:
 	return int(hit.get("card_id",-1))>=0 or int(hit.get("panel_owner",-1))>=0 or int(hit.get("trade_zone_index",-1))>=0
 
 func _update_camera_motion(delta: float) -> void:
-	_clamp_camera()
 	var enabled: bool = _camera_input_enabled()
 	var outbound: bool = _source_outbound_camera_allowed()
 	var edges: Dictionary = camera_pointer.take_pan_edges()
@@ -4078,6 +4105,7 @@ func _commit_travel(owner, candidate, provenance: Dictionary = {}) -> void:
 		_checkpoint("Arrived at " + session.scene_name)
 
 func _exit_tree() -> void:
+	_unbind_source_stats()
 	_title_overlay_open_owner.clear()
 	_title_options_open_owner.clear()
 	_source_options_open_owner.clear()

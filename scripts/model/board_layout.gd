@@ -117,7 +117,7 @@ static func resolve_overlaps(stacks: Array, combat_rects: Array, board: Rect2, t
 				any_overlap = true
 	return {"stacks": result, "iterations": iterations, "separated_last_pass": any_overlap}
 
-static func enforce_board_limits(stacks: Array, combat_rects: Array, board: Rect2, top_margin: float = 1.5, max_iterations: int = DEFAULT_ITERATIONS) -> Dictionary:
+static func clamp_board_limits(stacks: Array, board: Rect2, top_margin: float = 1.5) -> Dictionary:
 	var result: Array = stacks.duplicate(true)
 	var moved := false
 	for stack in result:
@@ -127,9 +127,13 @@ static func enforce_board_limits(stacks: Array, combat_rects: Array, board: Rect
 		if stack.position.distance_squared_to(valid) > 0.001:
 			stack.position = valid
 			moved = true
-	if moved:
-		return resolve_overlaps(result, combat_rects, board, top_margin, max_iterations)
-	return {"stacks": result, "iterations": 0, "separated_last_pass": false}
+	return {"stacks": result, "moved": moved}
+
+static func enforce_board_limits(stacks: Array, combat_rects: Array, board: Rect2, top_margin: float = 1.5, max_iterations: int = DEFAULT_ITERATIONS) -> Dictionary:
+	var clamped := clamp_board_limits(stacks, board, top_margin)
+	if clamped.moved:
+		return resolve_overlaps(clamped.stacks, combat_rects, board, top_margin, max_iterations)
+	return {"stacks": clamped.stacks, "iterations": 0, "separated_last_pass": false}
 
 static func sphere_intersects_aabb(center: Vector3, radius: float, bounds: AABB) -> bool:
 	# Optional broad phase for unrotated colliders. Do NOT use margin-expanded Size.

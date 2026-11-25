@@ -138,3 +138,25 @@ policies before creation events; see `spawn-factory.md`. The combat helper suppl
 live rectangle bounds to the solver. Fighter geometry is retained across saves.
 Smooth movement, original drag-splitting timing and physics-engine hit ordering
 remain unverified. See the source-backed board and combat integration tests.
+
+### Live StatsSnapshot ownership
+
+In the running gameplay scene, source `Board.HandleStatsChanged` owns
+expansion and shrink, not the periodic HUD repaint. The board retains the
+capped blend weight (`min(TotalBoost,100)`), but compares it to the incoming
+raw total. Thus repeated >100 snapshots notify bounds even for the same
+footprint; a return from >100 to exactly 100 does not notify. The scene
+adapter does not recreate a Godot mesh when the equivalent blend is unchanged.
+On a notification the camera target and the trade header use the new bounds
+before shrink enforcement. Only a real shrink and an unlocked target
+correction exceeding squared `0.001` triggers retargeting followed by the
+normal combat-rectangle and stack overlap pass. Existing settled cards move
+through the ordinary animation path, not an instant snap.
+
+Sources: `Core/Board.cs`, `Core/CameraController.cs`,
+`Trading/TradeManager.cs`, `Card/CardManager.cs` and `Card/CardStack.cs`.
+The licensed `test_source_live_board_bounds.gd` verifies real booster and
+ordinary currency emissions, a silent mutation, receiver order, locks,
+threshold, interpolation, upper-cap behavior and lifespan. This is live
+Godot behavior only. The existing cold/travel layout admission order is
+unchanged; this does not claim Unity/Godot same-state visual parity.
