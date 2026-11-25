@@ -3245,7 +3245,9 @@ func _layout_states() -> Array:
 	for stack in session.stacks.values():
 		if stack.card_ids.is_empty(): continue
 		var locked: bool = layout_locks.has(stack.id) or _drag_locks_stack(stack.id)
-		result.append(BoardLayout.stack_state(stack.id, stack.position, _card_footprint(stack.card_ids[0]), stack.card_ids.size(), locked, _stack_step()))
+		var root_id: int = stack.card_ids[0]
+		result.append(BoardLayout.stack_state(stack.id, stack.position, _card_footprint(root_id),
+			stack.card_ids.size(), locked, _stack_step(), _layout_source_target_height(root_id)))
 	return result
 
 func _layout_signature() -> String:
@@ -3254,12 +3256,30 @@ func _layout_signature() -> String:
 	for id in combat_layouts: entries.append([id, combat_layouts[id].bounds])
 	return str(entries)
 
+# Only the receipt from a known source-held singleton owns a nonzero Y in
+# this admission. Rendering clearance and saved 2D coordinates never do.
+func _layout_source_target_height(id: int) -> float:
+	return float(_ordinary_click_landings[id].target_y) if _ordinary_click_landing_current(id) else 0.0
+
 func _apply_layout(result: Dictionary) -> void:
 	for state in result.stacks:
 		if not session.stacks.has(state.id): continue
 		var stack = session.stacks[state.id]
-		if stack.position != state.position:
+		var root_id: int = stack.card_ids[0]
+		var new_height: float = state.get("target_height", 0.0)
+		var old_height := _layout_source_target_height(root_id)
+		if stack.position != state.position or old_height != new_height:
+			var previous: Dictionary = _ordinary_click_landings.get(root_id, {})
+			var rebase: bool = old_height != 0.0 or bool(previous.get("placement_rebased", false))
+			var source_pose: Variant = _ordinary_click_press_position(root_id) if rebase else null
 			for id in stack.card_ids: _ordinary_click_landings.erase(id)
+			if source_pose is Vector3:
+				# SetTargetAnimated retargets from the still-visible source pose.
+				# Keep raw Y in the receipt, while CardMotion handles visual XZ.
+				_ordinary_click_landings[root_id] = previous.duplicate()
+				_ordinary_click_landings[root_id].merge({"point": state.position,
+					"from": Vector2(source_pose.x, source_pose.z), "height": source_pose.y,
+					"target_y": new_height, "elapsed": 0.0, "placement_rebased": true}, true)
 		stack.position = state.position
 		for id in stack.card_ids: session.cards[id].position = stack.position
 	layout_key = _layout_signature()

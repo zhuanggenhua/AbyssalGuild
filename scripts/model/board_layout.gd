@@ -18,8 +18,8 @@ static func prefab_card_size(prefab: Dictionary, margin: Vector2 = DEFAULT_MARGI
 			return card_size(Vector3(float(size.get("x", 0)), float(size.get("y", 0)), float(size.get("z", 0))), margin)
 	return Vector2.ZERO # Missing source collider must not silently invent a size.
 
-static func stack_state(id: int, position: Vector2, top_size: Vector2, count: int, locked: bool = false, step: Vector3 = DEFAULT_STEP) -> Dictionary:
-	return {"id": id, "position": position, "size": top_size, "count": count, "locked": locked, "step": step}
+static func stack_state(id: int, position: Vector2, top_size: Vector2, count: int, locked: bool = false, step: Vector3 = DEFAULT_STEP, target_height: float = 0.0) -> Dictionary:
+	return {"id": id, "position": position, "size": top_size, "count": count, "locked": locked, "step": step, "target_height": target_height}
 
 static func full_depth(stack: Dictionary) -> float:
 	if int(stack.count) <= 0:
@@ -81,6 +81,8 @@ static func separation(a: Rect2, b: Rect2) -> Vector2:
 
 static func _translate(stack: Dictionary, offset: Vector2, board: Rect2, top_margin: float) -> void:
 	stack.position = enforce_placement(stack.position + offset, stack, board, top_margin)
+	# ApplyTranslation calls EnforcePlacementRules even if XZ clamps back unchanged.
+	stack.target_height = 0.0
 
 static func resolve_overlaps(stacks: Array, combat_rects: Array, board: Rect2, top_margin: float = 1.5, max_iterations: int = DEFAULT_ITERATIONS) -> Dictionary:
 	# Copy input; preserve registration order. Rects are already world-space XZ.
@@ -124,8 +126,11 @@ static func clamp_board_limits(stacks: Array, board: Rect2, top_margin: float = 
 		if stack.locked or int(stack.count) <= 0:
 			continue
 		var valid := enforce_placement(stack.position, stack, board, top_margin)
-		if stack.position.distance_squared_to(valid) > 0.001:
+		var target_height := float(stack.get("target_height", 0.0))
+		# Source CardManager compares full Vector3 against Board.Flatten().
+		if stack.position.distance_squared_to(valid) + target_height * target_height > 0.001:
 			stack.position = valid
+			stack.target_height = 0.0
 			moved = true
 	return {"stacks": result, "moved": moved}
 

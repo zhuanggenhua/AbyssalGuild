@@ -160,3 +160,9 @@ ordinary currency emissions, a silent mutation, receiver order, locks,
 threshold, interpolation, upper-cap behavior and lifespan. This is live
 Godot behavior only. The existing cold/travel layout admission order is
 unchanged; this does not claim Unity/Godot same-state visual parity.
+
+### Source target height on live board shrink
+
+The solver still uses planar bounds. The original `CardManager.EnforceBoardLimits` compares full 3D `TargetPosition` against `Board.EnforcePlacementRules` (whose result is flattened), using squared displacement strictly greater than .001. An actual overlap translation also calls placement, so a moved stack flattens even when the board edge clamps its XZ back to its previous XZ. Unmoved or locked stacks retain their target.
+
+Godot admits nonzero target Y here only from a valid live singleton chest click-return receipt; the visible clearance is never counted. For an admitted retarget, source-world click height follows the known previous pose to the new flat target while existing CardMotion moves visual XZ. The live regression expands the original board via its +10 capacity card, withdraws twice 60ms apart to obtain Y=.016, then shrinks. A .030 X correction crosses the .001 squared threshold only with the additional source Y. At 50ms the chest has .004 source Y and .0075 X remaining; after settling, a .013 lateral click withdraws correctly. This is not proof of original Unity native pointer/physics timing or of cold-save height; the storage format is unchanged.

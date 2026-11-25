@@ -127,6 +127,7 @@ func run() -> void:
 	await chest_second_landing_click_window(board)
 	await chest_lateral_return(board)
 	await chest_layout_replaces_return(board)
+	await chest_height_affects_board_shrink(board)
 	await captured_click_puff(board)
 	board.queue_free(); await process_frame; await create_timer(0.3).timeout
 	print("Card drag board: %d/%d passed" % [checks-failures,checks])
@@ -495,6 +496,60 @@ func chest_layout_replaces_return(board: WitnessBoard) -> void:
 	check(board.session.cards[chest].stored_coins==1 and not board.session.drag.active(),
 		"grounded XZ relocation permits third .013 click instead of carrying stale Y")
 	board.session.spawn_layout_resolver = Callable()
+
+# Locked CardManager compares full TargetPosition against the flattened result.
+# Only the chest's known source height, not the Godot card clearance, crosses it.
+func chest_height_affects_board_shrink(board: WitnessBoard) -> void:
+	for id in board.session.cards.keys(): board.session._remove_card(id)
+	var neutral: Rect2 = board.session.board_bounds
+	var boost_guid := ""
+	for guid in board.catalog.definitions:
+		if int(board.catalog.fields(guid).get("boostAmount",0)) == 10:
+			boost_guid = guid
+			break
+	check(not boost_guid.is_empty(),"source 10-point Board booster")
+	if boost_guid.is_empty(): return
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = Callable()
+	var booster: int = board.session.spawn_card(boost_guid,Vector2(2,0),-1,{"refuse_attach":true})
+	check(board.session.board_bounds.size.is_equal_approx(neutral.size*1.1),"actual authored stats expand Board")
+	var chest: int = board.session.spawn_card(board.catalog.find_by_name("Card_Chest_WoodenChest"),Vector2(-2,0),-1,{"refuse_attach":true})
+	board.session.cards[chest].stored_coins = 4
+	var edge := neutral.position.x + board._card_footprint(chest).x*0.5
+	var initial := Vector2(edge-.03,0)
+	board._set_board_card_position(chest,initial)
+	board.session.spawn_target_selector = board._select_spawn_target
+	board.session.spawn_layout_resolver = board._resolve_layout
+	board.layout_key = board._layout_signature()
+	board._refresh()
+	board._sync_views(1)
+	await physics_frame; await physics_frame
+	press(board,chest); release(board)
+	board._sync_views(.06)
+	await physics_frame; await physics_frame
+	press(board,chest)
+	check(is_equal_approx(board._mouse_drag.start.y,.016),"repress captures authentic .016 target height")
+	release(board)
+	board._sync_views(.12)
+	check(board.session.cards[chest].stored_coins==2 and board.session.card_target_position(chest).is_equal_approx(initial),
+		"two real withdrawals create an elevated in-bounds target before shrink")
+	board.session._remove_card(booster)
+	board.session.spawn_target_selector = Callable()
+	board.session.spawn_layout_resolver = Callable()
+	board.session.spawn_card(board.session.world.currency_guid,Vector2(2,-2),-1,{"refuse_attach":true})
+	check(board.session.board_bounds==neutral and board.session.card_target_position(chest).is_equal_approx(Vector2(edge,0)),
+		"source sqr threshold clamps .03 X plus .016 Y, unlike planar .03")
+	board._sync_views(.05)
+	var halfway: Variant = board._ordinary_click_press_position(chest)
+	check(halfway is Vector3 and halfway.is_equal_approx(Vector3(edge-.0075,.004,0)),
+		"shrink animates from previous raw source pose to flat target using OutQuad")
+	board._sync_views(.06)
+	await physics_frame; await physics_frame
+	press(board,chest)
+	check(is_zero_approx(board._mouse_drag.start.y),"settled clamp no longer carries elevated press")
+	motion(board,Vector2(.013,0))
+	release(board)
+	check(board.session.cards[chest].stored_coins==1,"settled corrected chest supports .013 click")
 
 func captured_click_puff(board: WitnessBoard) -> void:
 	var chest_guid: String = board.catalog.find_by_name("Card_Chest_WoodenChest")
