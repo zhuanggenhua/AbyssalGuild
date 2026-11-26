@@ -28,8 +28,13 @@ mapped, but Godot and Unity lighting/BRDF output is not identical by assertion.
 Each zone now exposes a physical picking collider from its source bounds and a
 `trade_zone_index`, plus the source `GetInfo` descriptor. Buyer: Card Buyer / Sell
 your cards here. Active vendor: Pack Vendor / You can buy [name] card pack here.
-Inactive vendor: no request. Board owns hover priority and cleanup via InfoPanel;
-the view disables its collider when hidden. Trade transaction geometry continues
+In the pinned source, an inactive vendor publishes an empty request on enter; the
+collider can still be hit. A stationary pointer does not republish when activation,
+payment or quest progress changes the text. A real exit/re-entry or a replacement
+zone enters again and reads current state. Exit and disable release the request.
+Board owns hover priority and cleanup via InfoPanel; the view disables its
+collider when hidden. Without source provenance the native fallback keeps its
+existing refresh behavior. Trade transaction geometry continues
 to use the original pure TradeLayout, not rendered geometry.
 
 The source TMP font is absent. Native fallback labels preserve separate fields,

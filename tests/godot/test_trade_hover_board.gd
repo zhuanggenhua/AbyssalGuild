@@ -22,17 +22,39 @@ func run() -> void:
 	board.hit.trade_zone_index = 0
 	board._sync_card_hover(null)
 	check(board.info_requests.current() == {"header":"Card Buyer", "body":"Sell your cards here."}, "buyer source hover info")
+	var buyer_serial: int = board.info_requests.requests.get("trade",{}).get("serial",-1)
+	board.info_requests.submit("test-equal", 0, {"header":"Later Hover"})
+	board._sync_card_hover(null)
+	check(board.info_requests.current().get("header") == "Later Hover"
+		and board.info_requests.requests.get("trade",{}).get("serial",-1) == buyer_serial,
+		"stationary source buyer does not overtake a later equally ranked request")
+	board.info_requests.submit("test-equal", 0, {})
 	board.trade_views[0].hide()
 	board._sync_card_hover(null)
 	check(board.info_requests.current().is_empty(), "disable clears owned hover")
 	board.trade_views[0].show()
 	board.hit.trade_zone_index = 1
 	board._sync_card_hover(null)
-	check(board.info_requests.current().is_empty(), "inactive vendor has no source info")
+	check(board.info_requests.current().is_empty() and board.info_requests.requests.has("trade")
+		and board.trade_views[1].pick_body.collision_layer != 0, "hittable inactive vendor publishes a blank tuple")
+	var inactive_serial: int = board.info_requests.requests.get("trade",{}).get("serial",-1)
 	for id in board.session.quest_tracker.definitions: board.session.quest_tracker.completed_ids[id] = true
 	board._refresh()
 	board._sync_card_hover(null)
-	check(board.info_requests.current().get("header") == "Pack Vendor", "active vendor source hover")
+	check(board.trade_views[1].get_info().get("header") == "Pack Vendor"
+		and board.info_requests.current().is_empty()
+		and board.info_requests.requests.get("trade",{}).get("serial",-1) == inactive_serial,
+		"same collider activation updates vendor state but does not republish hover")
+	board.hit.trade_zone_index = -1
+	board._sync_card_hover(null)
+	board.hit.trade_zone_index = 1
+	board._sync_card_hover(null)
+	check(board.info_requests.current().get("header") == "Pack Vendor", "reentry samples active vendor info")
+	var active_serial: int = board.info_requests.requests.get("trade",{}).get("serial",-1)
+	board.trade_views[1].update_tracker("5/7")
+	board._sync_card_hover(null)
+	check(board.info_requests.requests.get("trade",{}).get("serial",-1) == active_serial,
+		"tracker updates do not republish source hover")
 	board.hit.trade_zone_index = -1
 	board._sync_card_hover(null)
 	check(board.info_requests.current().is_empty(), "pointer exit clears hover")
@@ -42,6 +64,15 @@ func run() -> void:
 	board._sync_card_hover(null)
 	check(board.info_requests.current().header == "Modal", "source modal outranks trade hover")
 	board.info_requests.submit("test-modal", 2, {})
+	var previous: Node3D = board.trade_views[0]
+	var previous_serial: int = board.info_requests.requests["trade"].serial
+	board.trade_views.erase(0)
+	previous.hide()
+	previous.queue_free()
+	board._sync_trade_zones()
+	board._sync_card_hover(null)
+	check(board.trade_views[0] != previous and board.info_requests.current().get("header") == "Card Buyer"
+		and board.info_requests.requests["trade"].serial > previous_serial, "same index with replacement collider enters afresh")
 	board._clear_card_feedback()
 	check(board.info_requests.current().is_empty(), "scene teardown clears trade request")
 	board._return_title()

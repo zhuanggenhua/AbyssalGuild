@@ -252,6 +252,7 @@ var active_tab: String = "quests"
 var card_hover
 var craft_progress
 var hovered_trade_index: int = -1
+var _hover_trade_instance: int = 0
 var hovered_card_id: int = -1
 var hovered_panel_owner: int = -1
 var card_drag_targets: Dictionary = {}
@@ -1366,6 +1367,7 @@ func _record_card_pointer(screen: Vector2) -> void:
 
 func _clear_card_hover() -> void:
 	hovered_trade_index = -1
+	_hover_trade_instance = 0
 	info_requests.submit("trade", 0, {})
 	hovered_card_id = -1
 	hovered_panel_owner = -1
@@ -1415,13 +1417,28 @@ func _sync_card_hover(gui: Control) -> void:
 	var trade_index: int = hovered_trade_index if _own_hover_control(gui) else int(_pick_target(_card_pointer).get("trade_zone_index", -1))
 	if trade_index >= 0:
 		var view = trade_views.get(trade_index)
-		var info: Dictionary = view.get_info() if is_instance_valid(view) and view.is_visible_in_tree() and not view.is_queued_for_deletion() and view.pick_body.collision_layer != 0 else {}
+		if not is_instance_valid(view) or not view.is_visible_in_tree() or view.is_queued_for_deletion() or view.pick_body.collision_layer == 0:
+			_clear_card_hover()
+			return
+		var source_trade: bool = session.catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT
+		var instance: int = view.get_instance_id()
+		if source_trade and hovered_trade_index == trade_index and _hover_trade_instance == instance:
+			# TradeZone publishes on pointer enter, never on same-target polls.
+			_sync_source_info()
+			return
+		var info: Dictionary = view.get_info()
 		_clear_card_hover()
-		hovered_trade_index = trade_index if not info.is_empty() else -1
-		info_requests.submit("trade", 0, info)
+		if source_trade or not info.is_empty():
+			hovered_trade_index = trade_index
+			_hover_trade_instance = instance
+		if source_trade and info.is_empty():
+			info_requests.submit_blank("trade", 0)
+		else:
+			info_requests.submit("trade", 0, info)
 		_sync_source_info()
 		return
 	hovered_trade_index = -1
+	_hover_trade_instance = 0
 	info_requests.submit("trade", 0, {})
 	var id: int = hovered_panel_owner if hovered_panel_owner >= 0 else hovered_card_id
 	var panel: bool = hovered_panel_owner >= 0
