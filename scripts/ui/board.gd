@@ -1437,10 +1437,21 @@ func _sync_card_hover(gui: Control) -> void:
 		if not _hover_source_visible(id, panel):
 			_clear_card_hover()
 			return
-		hovered_panel_owner = id if panel else -1
-		hovered_card_id = -1 if panel else id
-		_hover_view_instance = views[id].get_instance_id()
-		_hover_definition = session.cards[id].definition_guid
+	var view_instance: int = views[id].get_instance_id()
+	var card = session.cards[id]
+	var same_card: bool = not panel and hovered_card_id == id and _hover_view_instance == view_instance and _hover_definition == card.definition_guid
+	hovered_panel_owner = id if panel else -1
+	hovered_card_id = -1 if panel else id
+	_hover_view_instance = view_instance
+	_hover_definition = card.definition_guid
+	# CardInstance publishes at PointerEnter; Update republishes only while
+	# the hovered stack is crafting. An idle poll must not rewrite health
+	# or replace the last countdown. Preserve native invalidation/fallback.
+	if same_card and info_requests.requests.has("card") and session.catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT:
+		var stack = session.stacks.get(card.stack_id)
+		if stack != null and stack.card_ids.has(id) and stack.recipe_guid.is_empty():
+			_sync_source_info()
+			return
 	var info: Dictionary = CardInteraction.equipment_panel_info(session, id) if panel else CardInteraction.hover_info(session, id)
 	if info.is_empty(): _clear_card_hover()
 	else:

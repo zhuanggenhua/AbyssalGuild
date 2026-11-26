@@ -83,8 +83,17 @@ func run() -> void:
 	point(board, fighter)
 	check(board.card_hover.body.text.contains("Crit. Multiplier") and board.selected == -1, "hover shows effective combat fields without selecting card")
 	check(board.notice.text == "SAVE FAILED: preserved notice" and board.day_button.text == action_text, "hover never overwrites existing notice or cycle action")
+	var initial_body: String = board.card_hover.body.text
+	var initial_request: int = board.info_requests.requests["card"].serial
 	board.session.cards[fighter].health = 6; board._sync_views()
-	check(board.card_hover.body.text.contains("Health (6/"), "stationary pointer refreshes live health")
+	check(board.card_hover.body.text == initial_body and board.info_requests.requests["card"].serial == initial_request,
+		"ordinary stationary card neither rewrites health nor renews the source hover request")
+	board.info_requests.submit("test_competing_hover", 0, {"header": "Newer hover", "body": "Equal source priority"})
+	board._sync_card_hover(null)
+	check(board.card_hover.descriptor.header == "Newer hover", "newer equal-priority requester wins over unchanged card")
+	board.info_requests.submit("test_competing_hover", 0, {})
+	point(board, -1); point(board, fighter)
+	check(board.card_hover.body.text.contains("Health (6/"), "actual exit and reentry samples latest health")
 	var old_view = board.views[fighter]
 	board.session.cards[fighter].definition_guid = board.catalog.find_by_name("Mage")
 	board._sync_views()
@@ -94,7 +103,7 @@ func run() -> void:
 	var fields: Dictionary = board.catalog.fields(board.session.cards[fighter].definition_guid)
 	var original_description: String = fields.description
 	fields.description = "Readable long description. ".repeat(100)
-	board._sync_views(); await process_frame
+	point(board, -1); point(board, fighter); await process_frame
 	board.card_hover.body.get_v_scroll_bar().value = 60
 	var scroll: float = board.card_hover.body.get_v_scroll_bar().value
 	board.hit.card_id = wood
@@ -269,6 +278,17 @@ func test_craft_and_lifecycle(board) -> void:
 	var meter: Node3D = board.craft_progress.bars[stack.id].root
 	var anchor: Vector3 = meter.position
 	var body: String = board.card_hover.body.text
+	var craft_request: int = board.info_requests.requests["card"].serial
+	stack.progress = 3.25
+	board._sync_card_hover(null)
+	check(board.card_hover.body.text != body and board.info_requests.requests["card"].serial > craft_request,
+		"stationary active crafting refreshes text and renews its request")
+	stack.progress = 3.0
+	board._sync_card_hover(null)
+	var same_text_request: int = board.info_requests.requests["card"].serial
+	board._sync_card_hover(null)
+	check(board.card_hover.body.text == body and board.info_requests.requests["card"].serial > same_text_request,
+		"craft update renews even identical text without forcing a text rewrite")
 	press(board, ids[1]); point(board, ids[0])
 	check(stack.paused and stack.card_ids == [ids[0]] and not board.session.matches_recipe(stack, board.catalog.fields(stack.recipe_guid)), "actual partial-tail pickup leaves paused incomplete original")
 	check(board.card_hover.body.text == body and board.craft_progress.bars[stack.id].root == meter and meter.get_meta("paused"), "paused incomplete original retains countdown and exact existing meter")
@@ -281,6 +301,10 @@ func test_craft_and_lifecycle(board) -> void:
 	board._set_board_card_position(ids[1], Vector2(3, -1)); board.drag_moved = true
 	board._finish_drag(Vector2.ZERO)
 	check(stack.recipe_guid.is_empty() and board.craft_progress.bars.is_empty(), "nonreturn release cancels model task and removes meter")
+	check(board.card_hover.descriptor.kind == "craft" and board.card_hover.body.text == body,
+		"same card keeps its last published request when a task stops")
+	point(board, -1); point(board, ids[0])
+	check(board.card_hover.descriptor.kind == "card", "reentry reads singleton after craft cancellation")
 	ids = fruit(board); stack = ids[2]; board.session.paused = true; point(board, ids[0])
 	check(board.card_hover.visible and board.craft_progress.bars[stack.id].root.get_meta("paused"), "manual time pause keeps card information and frozen meters")
 	board.notice.text = "SAVE FAILED: independent notice"

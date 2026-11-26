@@ -22,8 +22,16 @@ scripts, prefabs, fonts, shaders, or media were copied into this change.
   `Scripts/Card/UI/EquipmentPanel.cs` has a DIFFERENT hover method: header
   `Equipments`, with equipped display names as bullet lines in attachment order.
   That panel route does not show the per-card description or combat-stat block.
-- Hover refreshes during a craft and clears on exit/disable. The native adapter
-  reads fresh snapshots, so it also reflects health/class/equipment changes.
+- The locked CardInstance publishes its tooltip on pointer enter, republishes
+  in Update only while the hovered stack is crafting, and unregisters on exit
+  or disable. A stationary ordinary card does not update stale health or renew
+  its request priority. When a craft stops under the same surviving card, the
+  last published countdown remains until exit; reentry reads the new state.
+  A crafting update still renews an identical request even when rendered text
+  does not change. This correction is scoped to the pinned Board's CardInstance
+  route; pickup routing, native stackless/instance/scene invalidation, equipment
+  and trade panel behavior, and fallback catalogs are unchanged. See
+  `test_card_feedback_board.gd` with `GODOT_PROJECT_SETTINGS=production`.
 - `Scripts/UI/InfoPanel.cs`: Hover has lower priority than Sequence and Modal.
   Hover must never replace feeding/selling/encounter instructions or their action
   controls. The helper does not own the existing board's modal requests.
