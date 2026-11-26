@@ -1300,6 +1300,10 @@ func _configure_source_hud() -> void:
 	source_fonts.bind_control(card_hover.header, info_text_record)
 	source_fonts.bind_control(card_hover.body, info_text_record)
 	card_hover.configure_source_text_color(info_text_record)
+	card_hover.configure_pointer_passthrough(hud_layout.source_backed \
+		and catalog.data.get("provenance", {}).get("source_commit") == SourceColdCrafting.SOURCE_COMMIT \
+		and hud_layout.graphic_ignores_pointer("InfoPanel") \
+		and hud_layout.graphic_ignores_pointer("InfoPanel/InfoText"))
 	# Rebind restores prior overrides before recapturing a replacement theme.
 	info_action_appearance.reset(info_action)
 	info_action_source_record = hud_layout.text_record("InfoPanel/ActionButton")

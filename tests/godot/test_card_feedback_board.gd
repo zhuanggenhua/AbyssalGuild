@@ -100,6 +100,52 @@ func run() -> void:
 	check(board.views[fighter] != old_view and board.card_hover.descriptor.header == "Mage", "class-change rebuild replaces stale view and tooltip")
 	check(not board.day_button.is_visible_in_tree(), "source hover has no simultaneous modal action")
 	check(not board.notice.is_visible_in_tree(), "ordinary play does not render the market diagnostic despite retaining its text")
+	check(board.card_hover.mouse_filter == Control.MOUSE_FILTER_IGNORE and not board.card_hover.body.scroll_active,
+		"exact locked panel and InfoText graphics admit pointer passthrough")
+	point(board, -1); point(board, fighter)
+	var source_point: Vector2 = board.card_hover.body.get_global_rect().get_center()
+	var previous_wood_position: Vector3 = board.views[wood].global_position
+	var depth: float = -board.camera.to_local(previous_wood_position).z
+	board.views[wood].global_position = board.camera.project_position(source_point, depth)
+	await physics_frame; await physics_frame
+	board.real_pick = true
+	check(board._pick_target(source_point).card_id == wood, "real second card projects under InfoText")
+	var source_motion := InputEventMouseMotion.new(); source_motion.position = source_point
+	root.push_input(source_motion, true); await process_frame
+	check(not board._own_hover_control(root.gui_get_hovered_control()) and not board._hud_blocks_panel_click(board.hud, source_point),
+		"native GUI and touch release both ignore the source decoration")
+	board._sync_card_feedback()
+	check(board.hovered_card_id == wood, "viewport pointer transfers hover to the actual card behind InfoText")
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT; click.pressed = true; click.position = source_point
+	root.push_input(click, true); await process_frame
+	check(board.selected == wood, "actual click below source InfoText reaches the card")
+	click.pressed = false; root.push_input(click, true)
+	board.real_pick = false
+	point(board, -1); point(board, fighter)
+	var backdrop: Vector2 = board.card_hover.get_global_transform_with_canvas() * Vector2(8,8)
+	check(board.card_hover.get_global_rect().has_point(backdrop)
+		and not board.card_hover.body.get_global_rect().has_point(backdrop)
+		and not board.card_hover.header.get_global_rect().has_point(backdrop), "separate source backdrop witness is outside both text nodes")
+	board.views[wood].global_position = board.camera.project_position(backdrop, depth)
+	await physics_frame; await physics_frame
+	board.real_pick = true
+	source_motion.position = backdrop
+	root.push_input(source_motion,true); await process_frame
+	check(board._pick_target(backdrop).card_id == wood and not board._own_hover_control(root.gui_get_hovered_control())
+		and not board._hud_blocks_panel_click(board.hud,backdrop), "backdrop only neither consumes actual GUI hit nor blocks release")
+	board._sync_card_feedback()
+	check(board.hovered_card_id == wood, "viewport motion through backdrop reaches real card")
+	board.real_pick = false
+	board.views[wood].global_position = previous_wood_position
+	board.selected = -1
+	# Exercise the existing bounded, scrollable behavior when the source
+	# Graphic contract is missing. Reconfiguration may not keep stale state.
+	var pinned_commit: String = board.catalog.data.provenance.source_commit
+	board.catalog.data.provenance.source_commit = ""
+	board._configure_source_hud()
+	check(board.card_hover.body.scroll_active and board.card_hover.mouse_filter == Control.MOUSE_FILTER_STOP,
+		"unlocked catalog falls back even if similarly shaped prefab records are present")
 	var fields: Dictionary = board.catalog.fields(board.session.cards[fighter].definition_guid)
 	var original_description: String = fields.description
 	fields.description = "Readable long description. ".repeat(100)
@@ -152,6 +198,7 @@ func run() -> void:
 	check(root.size == initial_client and root.get_visible_rect().size == Vector2(576, 360),
 		"expand derives 576x360 logical canvas from real 1280x800 client")
 	check(visible_in_viewport(board), "visible tooltip fits expanded logical canvas")
+	board.card_hover.configure_pointer_passthrough(false)
 	var final_transform := root.get_final_transform()
 	var over_body: Vector2 = board.card_hover.body.get_global_rect().get_center()
 	var physical := final_transform * over_body
@@ -167,6 +214,10 @@ func run() -> void:
 		"physical window coordinate maps once, retaining tooltip over competing card")
 	root.content_scale_size = previous_scale
 	await settle_client(initial_client, board)
+	board.catalog.data.provenance.source_commit = pinned_commit
+	board._configure_source_hud()
+	check(not board.card_hover.body.scroll_active and board.card_hover.mouse_filter == Control.MOUSE_FILTER_IGNORE,
+		"restoring the exact source records restores passthrough after fallback")
 	point(board, fighter)
 	board._notification(Node.NOTIFICATION_WM_MOUSE_EXIT); board._sync_views()
 	check(not board.card_hover.visible and not board._card_pointer_known, "window exit clears and prevents stale automatic hover")
@@ -178,6 +229,25 @@ func run() -> void:
 	point(board, wood); board.session.kill_card(wood); board._sync_views()
 	check(not board.card_hover.visible and not board.views.has(wood), "death clears card view and hover together")
 
+	# Actual GUI action route stays independent of the non-raycast decoration.
+	var day_before_action: int = board.session.day
+	board.session.phase = "ready"
+	board._refresh()
+	await process_frame
+	var action_point: Vector2 = board.info_action.get_global_rect().get_center()
+	var action_motion := InputEventMouseMotion.new(); action_motion.position = action_point
+	root.push_input(action_motion, true); await process_frame
+	check(board.info_action.is_visible_in_tree() and root.gui_get_hovered_control() == board.info_action
+		and board._hud_blocks_panel_click(board.hud, action_point), "visible independent action owns its GUI and touch hit")
+	var activations := [0]
+	board.info_action.pressed.connect(func(): activations[0] += 1)
+	board.selected = -1; board.hit.card_id = fighter
+	click.position = action_point; click.pressed = true; root.push_input(click, true)
+	click.pressed = false; root.push_input(click, true)
+	await process_frame
+	check(activations[0] == 1 and board.selected == -1, "viewport action click emits once, without board press")
+	board.session.day = day_before_action
+	clear_cards(board)
 	test_equipment_hover(board)
 	test_drag_targets(board)
 	await test_craft_and_lifecycle(board)

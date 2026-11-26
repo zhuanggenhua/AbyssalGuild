@@ -39,6 +39,13 @@ func _init() -> void:
 	resized.connect(_layout_content)
 	set_descriptor({})
 
+func configure_pointer_passthrough(enabled: bool) -> void:
+	# The source Graphics are decorative. Stop only in the unadmitted
+	# fallback, where the native scrollbar deliberately remains usable.
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if enabled else Control.MOUSE_FILTER_STOP
+	body.mouse_filter = Control.MOUSE_FILTER_IGNORE if enabled else Control.MOUSE_FILTER_PASS
+	body.scroll_active = not enabled
+
 func configure_source_text_color(record: Dictionary) -> bool:
 	# Both native text nodes represent the one source InfoPanel.infoText TMP.
 	# Apply its vertex color, not container modulation (which would tint the

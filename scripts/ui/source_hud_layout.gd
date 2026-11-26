@@ -42,6 +42,11 @@ func color(object_name: String, fallback: Color) -> Color:
 	return Color(float(value.get("r", fallback.r)), float(value.get("g", fallback.g)), float(value.get("b", fallback.b)), float(value.get("a", fallback.a)))
 
 func text_record(path: String) -> Dictionary:
+	for fields in components_at_path(path):
+		if fields.has("m_fontAsset") and fields.has("m_text"): return fields
+	return {}
+
+func components_at_path(path: String) -> Array[Dictionary]:
 	# Resolve exact UICanvas-relative hierarchy. Repeated "Label" names are not aliases.
 	var objects: Dictionary = {}
 	var transforms: Dictionary = {}
@@ -51,9 +56,9 @@ func text_record(path: String) -> Dictionary:
 		if doc.get("object_type") in ["RectTransform", "Transform"]:
 			transforms[str(doc.file_id)] = doc.fields
 			owner_transforms[str(doc.fields.get("m_GameObject", {}).get("fileID", ""))] = str(doc.file_id)
+	var result: Array[Dictionary] = []
 	for doc in documents:
 		var fields: Dictionary = doc.get("fields", {})
-		if not fields.has("m_fontAsset") or not fields.has("m_text"): continue
 		var current: String = str(owner_transforms.get(str(fields.get("m_GameObject", {}).get("fileID", "")), ""))
 		var names: Array[String] = []
 		var seen: Dictionary = {}
@@ -63,11 +68,20 @@ func text_record(path: String) -> Dictionary:
 			var object_name: String = str(objects.get(str(transform.get("m_GameObject", {}).get("fileID", "")), ""))
 			if object_name == "UICanvas":
 				names.reverse()
-				if "/".join(names) == path: return fields
+				if "/".join(names) == path: result.append(fields)
 				break
 			names.append(object_name)
 			current = str(transform.get("m_Father", {}).get("fileID", ""))
-	return {}
+	return result
+
+func graphic_ignores_pointer(path: String) -> bool:
+	var graphics := 0
+	for component in components_at_path(path):
+		if not component.has("m_RaycastTarget"): continue
+		graphics += 1
+		var target: Variant = component.m_RaycastTarget
+		if not (target is bool and not target or (target is int or target is float) and target == 0 or target is String and target == "0"): return false
+	return graphics == 1
 
 static func apply_text_color(label: Label, record: Dictionary) -> bool:
 	# TMP vertex tint belongs to its text, not its parent CanvasGroup/background.
